@@ -1,0 +1,505 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background-color: #0d1117;
+  color: #c9d1d9;
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 40px;
+  padding: 20px;
+  border-bottom: 1px solid #30363d;
+}
+
+header h1 {
+  font-size: 2.5rem;
+  color: #58a6ff;
+  margin-bottom: 5px;
+}
+
+.subtitle {
+  color: #8b949e;
+  font-size: 1.1rem;
+}
+
+/* Views */
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
+.view-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.view-header h2 {
+  color: #f0f6fc;
+  font-size: 1.5rem;
+}
+
+/* Buttons */
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background-color: #238636;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background-color: #2ea043;
+}
+
+.btn-secondary {
+  background-color: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+}
+
+.btn-secondary:hover {
+  background-color: #30363d;
+}
+
+.btn-danger {
+  background-color: #da3633;
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background-color: #f85149;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.btn-close:hover {
+  color: #c9d1d9;
+}
+
+/* Projects Grid */
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.project-card {
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.project-card:hover {
+  border-color: #58a6ff;
+  transform: translateY(-2px);
+}
+
+.project-card h3 {
+  color: #58a6ff;
+  margin-bottom: 10px;
+  font-size: 1.2rem;
+}
+
+.project-card .path {
+  color: #8b949e;
+  font-size: 0.85rem;
+  word-break: break-all;
+  margin-bottom: 15px;
+}
+
+.project-card .status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-indicator.ready {
+  background-color: #238636;
+}
+
+.status-indicator.pending {
+  background-color: #d29922;
+}
+
+.project-card .delete-btn {
+  margin-top: 15px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #8b949e;
+}
+
+.empty-state p {
+  margin-bottom: 20px;
+}
+
+/* Project Detail */
+.project-info {
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.project-info p {
+  margin-bottom: 10px;
+}
+
+.dockerfile-status {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #30363d;
+}
+
+.dockerfile-status .status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Task Form */
+.task-form {
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.task-form h3 {
+  margin-bottom: 15px;
+  color: #f0f6fc;
+}
+
+.task-form textarea {
+  width: 100%;
+  background-color: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px;
+  color: #c9d1d9;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  margin-bottom: 15px;
+}
+
+.task-form textarea:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+
+/* Tasks Section */
+.tasks-section h3 {
+  margin-bottom: 15px;
+  color: #f0f6fc;
+}
+
+.task-item {
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.task-item:hover {
+  border-color: #58a6ff;
+}
+
+.task-item .task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.task-item .task-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.task-item .task-prompt {
+  color: #8b949e;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-item .task-time {
+  color: #6e7681;
+  font-size: 0.8rem;
+  margin-top: 8px;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #30363d;
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Modal */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal.active {
+  display: flex;
+}
+
+.modal-content {
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content.modal-large {
+  max-width: 900px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #30363d;
+}
+
+.modal-header h3 {
+  color: #f0f6fc;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  padding: 15px 20px;
+  border-top: 1px solid #30363d;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Directory Browser */
+.current-path {
+  background-color: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px 15px;
+  margin-bottom: 15px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.directory-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.directory-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.directory-item:hover {
+  background-color: #21262d;
+}
+
+.directory-item.parent {
+  color: #58a6ff;
+  border-bottom: 1px solid #30363d;
+  margin-bottom: 10px;
+}
+
+.directory-item .icon {
+  font-size: 1.2rem;
+}
+
+/* Logs */
+.logs-content {
+  background-color: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 15px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  min-height: 300px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* Task Status Badge */
+.task-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: 10px;
+}
+
+.task-status-badge.running {
+  background-color: rgba(56, 139, 253, 0.15);
+  color: #58a6ff;
+}
+
+.task-status-badge.completed {
+  background-color: rgba(35, 134, 54, 0.15);
+  color: #3fb950;
+}
+
+.task-status-badge.failed {
+  background-color: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+
+.task-status-badge.pending {
+  background-color: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+}
+
+.task-status-badge .spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 2px;
+}
+
+/* Task Input */
+.input-container {
+  display: flex;
+  gap: 10px;
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #30363d;
+}
+
+.task-input {
+  flex: 1;
+  background-color: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px 15px;
+  color: #c9d1d9;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.task-input:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+
+.task-input::placeholder {
+  color: #6e7681;
+}
+
+/* Utility */
+.text-success { color: #238636; }
+.text-warning { color: #d29922; }
+.text-danger { color: #da3633; }
+.text-muted { color: #8b949e; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .container {
+    padding: 10px;
+  }
+
+  header h1 {
+    font-size: 2rem;
+  }
+
+  .view-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .projects-grid {
+    grid-template-columns: 1fr;
+  }
+}

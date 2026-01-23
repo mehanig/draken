@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Draken - Claude Code Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Draken</h1>
+      <p class="subtitle">Claude Code Dashboard</p>
+    </header>
+
+    <main id="app">
+      <!-- Project List View -->
+      <section id="project-list-view" class="view active">
+        <div class="view-header">
+          <h2>Projects</h2>
+          <button id="add-project-btn" class="btn btn-primary">+ Add Project</button>
+        </div>
+        <div id="projects-container" class="projects-grid">
+          <!-- Projects will be rendered here -->
+        </div>
+      </section>
+
+      <!-- Project Detail View -->
+      <section id="project-detail-view" class="view">
+        <div class="view-header">
+          <button id="back-btn" class="btn btn-secondary">&larr; Back</button>
+          <h2 id="project-name">Project Name</h2>
+        </div>
+
+        <div class="project-info">
+          <p><strong>Path:</strong> <span id="project-path"></span></p>
+          <div id="dockerfile-status" class="dockerfile-status">
+            <!-- Dockerfile status will be rendered here -->
+          </div>
+        </div>
+
+        <div class="task-form">
+          <h3>Submit Task</h3>
+          <textarea id="task-prompt" placeholder="Enter your prompt for Claude Code..." rows="4"></textarea>
+          <button id="submit-task-btn" class="btn btn-primary">Submit Task</button>
+        </div>
+
+        <div class="tasks-section">
+          <h3>Task History</h3>
+          <div id="tasks-container">
+            <!-- Tasks will be rendered here -->
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Directory Browser Modal -->
+    <div id="browse-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Select Project Folder</h3>
+          <button id="close-modal-btn" class="btn-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="current-path">
+            <span id="current-path-label"></span>
+          </div>
+          <div id="directory-list" class="directory-list">
+            <!-- Directories will be rendered here -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="select-folder-btn" class="btn btn-primary">Select This Folder</button>
+          <button id="cancel-modal-btn" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Task Logs Modal -->
+    <div id="logs-modal" class="modal">
+      <div class="modal-content modal-large">
+        <div class="modal-header">
+          <h3>Task Logs <span id="task-status-indicator" class="task-status-badge"></span></h3>
+          <button id="close-logs-btn" class="btn-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <pre id="logs-content" class="logs-content"></pre>
+          <div id="input-container" class="input-container" style="display: none;">
+            <input type="text" id="task-input" class="task-input" placeholder="Type your response to Claude..." />
+            <button id="send-input-btn" class="btn btn-primary">Send</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="stop-task-btn" class="btn btn-danger" style="display: none;">Stop Task</button>
+          <button id="close-logs-footer-btn" class="btn btn-secondary">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
