@@ -34,3 +34,24 @@ export interface DockerfileStatus {
   exists: boolean;
   path?: string;
 }
+
+export interface GitFileChange {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+  staged: boolean;
+}
+
+export interface GitStatus {
+  isRepo: boolean;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  changes: GitFileChange[];
+  hasUncommittedChanges: boolean;
+  hasUntrackedFiles: boolean;
+}
+
+export interface GitDiff {
+  staged: string;
+  unstaged: string;
+}

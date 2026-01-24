@@ -1,0 +1,250 @@
+import simpleGit, { SimpleGit, StatusResult } from 'simple-git';
+import path from 'path';
+import fs from 'fs';
+
+export interface GitFileChange {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+  staged: boolean;
+}
+
+export interface GitStatus {
+  isRepo: boolean;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  changes: GitFileChange[];
+  hasUncommittedChanges: boolean;
+  hasUntrackedFiles: boolean;
+}
+
+export interface GitDiff {
+  staged: string;
+  unstaged: string;
+}
+
+export function isGitRepo(projectPath: string): boolean {
+  const gitDir = path.join(projectPath, '.git');
+  return fs.existsSync(gitDir);
+}
+
+function createGit(projectPath: string): SimpleGit {
+  return simpleGit(projectPath, { binary: 'git', maxConcurrentProcesses: 6 });
+}
+
+export async function getGitStatus(projectPath: string): Promise<GitStatus> {
+  if (!isGitRepo(projectPath)) {
+    return {
+      isRepo: false,
+      branch: null,
+      ahead: 0,
+      behind: 0,
+      changes: [],
+      hasUncommittedChanges: false,
+      hasUntrackedFiles: false,
+    };
+  }
+
+  try {
+    const git = createGit(projectPath);
+    const status: StatusResult = await git.status();
+
+    const changes: GitFileChange[] = [];
+
+    // Staged files
+    for (const file of status.staged) {
+      changes.push({
+        path: file,
+        status: 'added',
+        staged: true,
+      });
+    }
+
+    // Modified and staged
+    for (const file of status.modified) {
+      // Check if it's staged or not by looking at other arrays
+      const isStaged = !status.files.some(f => f.path === file && f.working_dir !== ' ');
+      if (isStaged) {
+        changes.push({
+          path: file,
+          status: 'modified',
+          staged: true,
+        });
+      }
+    }
+
+    // Use the files array for accurate staged/unstaged detection
+    for (const file of status.files) {
+      // Index status (staged)
+      if (file.index && file.index !== ' ' && file.index !== '?') {
+        // Check if not already added
+        const exists = changes.some(c => c.path === file.path && c.staged);
+        if (!exists) {
+          changes.push({
+            path: file.path,
+            status: mapStatusChar(file.index),
+            staged: true,
+          });
+        }
+      }
+
+      // Working directory status (unstaged)
+      if (file.working_dir && file.working_dir !== ' ') {
+        if (file.working_dir === '?') {
+          changes.push({
+            path: file.path,
+            status: 'untracked',
+            staged: false,
+          });
+        } else {
+          changes.push({
+            path: file.path,
+            status: mapStatusChar(file.working_dir),
+            staged: false,
+          });
+        }
+      }
+    }
+
+    // Deduplicate changes (in case of overlap)
+    const uniqueChanges = changes.filter((change, index, self) =>
+      index === self.findIndex(c => c.path === change.path && c.staged === change.staged)
+    );
+
+    const hasUncommittedChanges = uniqueChanges.some(c => c.status !== 'untracked');
+    const hasUntrackedFiles = uniqueChanges.some(c => c.status === 'untracked');
+
+    return {
+      isRepo: true,
+      branch: status.current,
+      ahead: status.ahead,
+      behind: status.behind,
+      changes: uniqueChanges,
+      hasUncommittedChanges,
+      hasUntrackedFiles,
+    };
+  } catch (err) {
+    console.error('Error getting git status:', err);
+    return {
+      isRepo: false,
+      branch: null,
+      ahead: 0,
+      behind: 0,
+      changes: [],
+      hasUncommittedChanges: false,
+      hasUntrackedFiles: false,
+    };
+  }
+}
+
+export async function getGitDiff(projectPath: string, staged: boolean = false): Promise<string> {
+  if (!isGitRepo(projectPath)) {
+    return '';
+  }
+
+  try {
+    const git = createGit(projectPath);
+    const options = staged ? ['--cached'] : [];
+    return await git.diff(options);
+  } catch (err) {
+    console.error('Error getting git diff:', err);
+    return '';
+  }
+}
+
+export async function getGitDiffs(projectPath: string): Promise<GitDiff> {
+  const [staged, unstaged] = await Promise.all([
+    getGitDiff(projectPath, true),
+    getGitDiff(projectPath, false),
+  ]);
+
+  return { staged, unstaged };
+}
+
+function mapStatusChar(char: string): GitFileChange['status'] {
+  switch (char) {
+    case 'M': return 'modified';
+    case 'A': return 'added';
+    case 'D': return 'deleted';
+    case 'R': return 'renamed';
+    case '?': return 'untracked';
+    default: return 'modified';
+  }
+}
+
+export interface FileDiffContent {
+  oldContent: string;
+  newContent: string;
+  oldFileName: string;
+  newFileName: string;
+}
+
+/**
+ * Get old and new content for a file to display a diff
+ * @param projectPath - Path to the git repository
+ * @param filePath - Path to the file relative to repo root
+ * @param staged - Whether the file is staged or unstaged
+ */
+export async function getFileDiffContent(
+  projectPath: string,
+  filePath: string,
+  staged: boolean
+): Promise<FileDiffContent> {
+  const git = createGit(projectPath);
+  const fullPath = path.join(projectPath, filePath);
+
+  let oldContent = '';
+  let newContent = '';
+
+  try {
+    if (staged) {
+      // Staged changes: compare HEAD to staged (index)
+      // Old = committed version (HEAD)
+      // New = staged version (index)
+      try {
+        oldContent = await git.show([`HEAD:${filePath}`]);
+      } catch {
+        // File might be newly added (no HEAD version)
+        oldContent = '';
+      }
+
+      try {
+        newContent = await git.show([`:${filePath}`]);
+      } catch {
+        // Fallback to reading from disk
+        if (fs.existsSync(fullPath)) {
+          newContent = fs.readFileSync(fullPath, 'utf-8');
+        }
+      }
+    } else {
+      // Unstaged changes: compare index/HEAD to working directory
+      // Old = staged version (index) or committed version (HEAD)
+      // New = current file on disk
+      try {
+        // Try to get from index first (staged version)
+        oldContent = await git.show([`:${filePath}`]);
+      } catch {
+        try {
+          // Fall back to HEAD
+          oldContent = await git.show([`HEAD:${filePath}`]);
+        } catch {
+          oldContent = '';
+        }
+      }
+
+      // New content is the current file on disk
+      if (fs.existsSync(fullPath)) {
+        newContent = fs.readFileSync(fullPath, 'utf-8');
+      }
+    }
+  } catch (err) {
+    console.error('Error getting file diff content:', err);
+  }
+
+  return {
+    oldContent,
+    newContent,
+    oldFileName: filePath,
+    newFileName: filePath,
+  };
+}

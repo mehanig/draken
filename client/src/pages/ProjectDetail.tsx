@@ -18,6 +18,7 @@ import {
 import { StatusDot } from '../components/StatusBadge';
 import { TaskLogsModal } from '../components/TaskLogsModal';
 import { SessionThread, groupTasksBySession } from '../components/SessionThread';
+import { GitStatusPanel } from '../components/GitStatusPanel';
 import type { Project, Task, DockerfileStatus } from '../types';
 
 export function ProjectDetail() {
@@ -155,6 +156,9 @@ export function ProjectDetail() {
           )}
         </div>
       </div>
+
+      {/* Git Status */}
+      <GitStatusPanel projectId={projectId} />
 
       {/* Task Form */}
       <div className="card task-form-card">

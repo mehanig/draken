@@ -6,6 +6,7 @@ import authRouter from './routes/auth';
 import projectsRouter from './routes/projects';
 import tasksRouter from './routes/tasks';
 import browseRouter from './routes/browse';
+import gitRouter from './routes/git';
 
 const PORT = 40333;
 const app = express();
@@ -21,6 +22,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/projects', authMiddleware, projectsRouter);
 app.use('/api/tasks', authMiddleware, tasksRouter);
 app.use('/api/browse', authMiddleware, browseRouter);
+app.use('/api/git', authMiddleware, gitRouter);
 
 // Client-side routing - serve index.html for all non-API routes
 app.get('*', (req, res) => {

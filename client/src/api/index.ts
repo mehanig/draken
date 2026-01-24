@@ -1,4 +1,4 @@
-import type { Project, Task, BrowseResponse, DockerfileStatus } from '../types';
+import type { Project, Task, BrowseResponse, DockerfileStatus, GitStatus, GitDiff } from '../types';
 
 const API_BASE = '/api';
 
@@ -127,4 +127,63 @@ export async function browsePath(path?: string): Promise<BrowseResponse> {
 // Export helper for SSE connections that need auth
 export function getAuthToken(): string | null {
   return localStorage.getItem('draken_token');
+}
+
+// Git API
+export async function getGitStatus(projectId: number): Promise<GitStatus> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/status`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<GitStatus>(response);
+}
+
+export async function getGitDiff(projectId: number, staged: boolean = false): Promise<string> {
+  const url = `${API_BASE}/git/${projectId}/diff${staged ? '?staged=true' : ''}`;
+  const response = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+  const data = await handleResponse<{ diff: string }>(response);
+  return data.diff;
+}
+
+export async function getGitDiffs(projectId: number): Promise<GitDiff> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/diffs`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<GitDiff>(response);
+}
+
+export interface FileContentResponse {
+  content: string | null;
+  isDirectory?: boolean;
+  isBinary?: boolean;
+  tooLarge?: boolean;
+  size?: number;
+}
+
+export async function getFileContent(projectId: number, filePath: string): Promise<FileContentResponse> {
+  const url = `${API_BASE}/git/${projectId}/file?path=${encodeURIComponent(filePath)}`;
+  const response = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<FileContentResponse>(response);
+}
+
+export interface FileDiffContentResponse {
+  oldContent: string;
+  newContent: string;
+  oldFileName: string;
+  newFileName: string;
+}
+
+export async function getFileDiffContent(
+  projectId: number,
+  filePath: string,
+  staged: boolean
+): Promise<FileDiffContentResponse> {
+  const url = `${API_BASE}/git/${projectId}/file-diff?path=${encodeURIComponent(filePath)}&staged=${staged}`;
+  const response = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<FileDiffContentResponse>(response);
 }
