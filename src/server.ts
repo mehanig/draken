@@ -1,6 +1,8 @@
 import express from 'express';
 import path from 'path';
 import { getDb, closeDb } from './db/schema';
+import { authMiddleware, isAuthEnabled } from './auth/middleware';
+import authRouter from './routes/auth';
 import projectsRouter from './routes/projects';
 import tasksRouter from './routes/tasks';
 import browseRouter from './routes/browse';
@@ -12,10 +14,13 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
-// API Routes
-app.use('/api/projects', projectsRouter);
-app.use('/api/tasks', tasksRouter);
-app.use('/api/browse', browseRouter);
+// Auth routes (public - no auth required)
+app.use('/api/auth', authRouter);
+
+// Protected API Routes (auth required if configured)
+app.use('/api/projects', authMiddleware, projectsRouter);
+app.use('/api/tasks', authMiddleware, tasksRouter);
+app.use('/api/browse', authMiddleware, browseRouter);
 
 // Client-side routing - serve index.html for all non-API routes
 app.get('*', (req, res) => {
@@ -44,5 +49,11 @@ app.listen(PORT, () => {
 
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn('Warning: ANTHROPIC_API_KEY environment variable is not set');
+  }
+
+  if (isAuthEnabled()) {
+    console.log('Authentication: ENABLED');
+  } else {
+    console.warn('Warning: Authentication is DISABLED. Set DRAKEN_USERNAME and DRAKEN_PASSWORD to enable.');
   }
 });

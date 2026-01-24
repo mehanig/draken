@@ -2,8 +2,15 @@ import { useState, useEffect, useRef } from 'react';
 import { Square, Send } from 'lucide-react';
 import { Modal } from './Modal';
 import { StatusBadge } from './StatusBadge';
-import { stopTask, createFollowupTask } from '../api';
+import { stopTask, createFollowupTask, getAuthToken } from '../api';
 import type { Task } from '../types';
+
+// Build SSE URL with auth token (EventSource doesn't support headers)
+function buildSSEUrl(taskId: number): string {
+  const token = getAuthToken();
+  const url = `/api/tasks/${taskId}/logs`;
+  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+}
 
 interface TaskLogsModalProps {
   task: Task | null;
@@ -29,8 +36,8 @@ export function TaskLogsModal({ task, onClose, onTaskUpdate }: TaskLogsModalProp
     setSessionId(task.session_id);
     setFollowupText('');
 
-    // Connect to SSE for live logs
-    const eventSource = new EventSource(`/api/tasks/${task.id}/logs`);
+    // Connect to SSE for live logs (pass token via query param)
+    const eventSource = new EventSource(buildSSEUrl(task.id));
     eventSourceRef.current = eventSource;
 
     eventSource.onmessage = (event) => {
@@ -95,7 +102,7 @@ export function TaskLogsModal({ task, onClose, onTaskUpdate }: TaskLogsModalProp
 
       // Close old event source and connect to new one
       eventSourceRef.current?.close();
-      const eventSource = new EventSource(`/api/tasks/${newTask.id}/logs`);
+      const eventSource = new EventSource(buildSSEUrl(newTask.id));
       eventSourceRef.current = eventSource;
 
       eventSource.onmessage = (event) => {

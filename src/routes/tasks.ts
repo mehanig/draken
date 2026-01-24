@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import {
   getTasksByProjectId,
   getTaskById,
@@ -7,12 +8,12 @@ import {
   updateTaskCompleted,
   appendTaskLogs,
   updateTaskSessionId,
-  getLatestTaskWithSession,
 } from '../db/queries';
 import { getProjectById } from '../db/queries';
 import { runTask, stopContainer, sendInputToTask, isTaskRunning } from '../docker/manager';
 import { dockerfileExists } from '../docker/dockerfile';
 import { CreateTaskRequest } from '../types';
+import { getAuthConfig } from '../auth/middleware';
 
 interface CreateFollowupRequest {
   prompt: string;
@@ -248,7 +249,23 @@ router.post('/:id/followup', async (req: Request, res: Response) => {
 });
 
 // SSE endpoint for real-time logs
+// Note: SSE doesn't support Authorization header, so we accept token via query param
 router.get('/:id/logs', (req: Request, res: Response) => {
+  const config = getAuthConfig();
+
+  // If auth is enabled, verify token from query param
+  if (config) {
+    const token = req.query.token as string;
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    try {
+      jwt.verify(token, config.jwtSecret);
+    } catch {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+  }
+
   const id = parseInt(req.params.id as string, 10);
   const task = getTaskById(id);
 
