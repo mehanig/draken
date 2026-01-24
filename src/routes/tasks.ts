@@ -6,11 +6,18 @@ import {
   updateTaskStatus,
   updateTaskCompleted,
   appendTaskLogs,
+  updateTaskSessionId,
+  getLatestTaskWithSession,
 } from '../db/queries';
 import { getProjectById } from '../db/queries';
 import { runTask, stopContainer, sendInputToTask, isTaskRunning } from '../docker/manager';
 import { dockerfileExists } from '../docker/dockerfile';
 import { CreateTaskRequest } from '../types';
+
+interface CreateFollowupRequest {
+  prompt: string;
+  parentTaskId: number;
+}
 
 const router = Router();
 
@@ -93,6 +100,17 @@ router.post('/project/:projectId', async (req: Request, res: Response) => {
           });
         });
 
+        logEmitter.on('session', (sessionId: string) => {
+          // Save session ID for follow-up conversations
+          updateTaskSessionId(task.id, sessionId);
+
+          // Notify subscribers of session ID
+          const subscribers = logSubscribers.get(task.id) || [];
+          subscribers.forEach(subscriber => {
+            subscriber.write(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`);
+          });
+        });
+
         logEmitter.on('end', (exitCode: number) => {
           const status = exitCode === 0 ? 'completed' : 'failed';
           updateTaskCompleted(task.id, status);
@@ -131,6 +149,101 @@ router.post('/project/:projectId', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error creating task:', err);
     res.status(500).json({ error: 'Failed to create task' });
+  }
+});
+
+// Create follow-up task (continues a previous conversation)
+router.post('/:id/followup', async (req: Request, res: Response) => {
+  try {
+    const parentTaskId = parseInt(req.params.id as string, 10);
+    const { prompt } = req.body as CreateTaskRequest;
+
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    const parentTask = getTaskById(parentTaskId);
+    if (!parentTask) {
+      return res.status(404).json({ error: 'Parent task not found' });
+    }
+
+    if (!parentTask.session_id) {
+      return res.status(400).json({ error: 'Parent task has no session ID. Cannot follow up.' });
+    }
+
+    const project = getProjectById(parentTask.project_id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Create follow-up task
+    const task = createTask(parentTask.project_id, prompt.trim(), parentTaskId);
+
+    // Start container with --resume
+    setImmediate(async () => {
+      try {
+        updateTaskStatus(task.id, 'running');
+
+        const { containerId, logEmitter } = await runTask(
+          project.path,
+          project.id,
+          prompt.trim(),
+          task.id,
+          parentTask.session_id!  // Resume the conversation
+        );
+
+        updateTaskStatus(task.id, 'running', containerId);
+
+        logEmitter.on('log', (data: string) => {
+          appendTaskLogs(task.id, data);
+          const subscribers = logSubscribers.get(task.id) || [];
+          subscribers.forEach(subscriber => {
+            subscriber.write(`data: ${JSON.stringify({ type: 'log', data })}\n\n`);
+          });
+        });
+
+        logEmitter.on('session', (sessionId: string) => {
+          updateTaskSessionId(task.id, sessionId);
+          const subscribers = logSubscribers.get(task.id) || [];
+          subscribers.forEach(subscriber => {
+            subscriber.write(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`);
+          });
+        });
+
+        logEmitter.on('end', (exitCode: number) => {
+          const status = exitCode === 0 ? 'completed' : 'failed';
+          updateTaskCompleted(task.id, status);
+          const subscribers = logSubscribers.get(task.id) || [];
+          subscribers.forEach(subscriber => {
+            subscriber.write(`data: ${JSON.stringify({ type: 'end', status, exitCode })}\n\n`);
+            subscriber.end();
+          });
+          logSubscribers.delete(task.id);
+        });
+
+        logEmitter.on('error', (err: Error) => {
+          console.error('Container error:', err);
+          appendTaskLogs(task.id, `\nError: ${err.message}\n`);
+          updateTaskCompleted(task.id, 'failed');
+          const subscribers = logSubscribers.get(task.id) || [];
+          subscribers.forEach(subscriber => {
+            subscriber.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
+            subscriber.end();
+          });
+          logSubscribers.delete(task.id);
+        });
+      } catch (err) {
+        console.error('Error running follow-up task:', err);
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        appendTaskLogs(task.id, `\nError: ${message}\n`);
+        updateTaskCompleted(task.id, 'failed');
+      }
+    });
+
+    res.status(201).json(task);
+  } catch (err) {
+    console.error('Error creating follow-up task:', err);
+    res.status(500).json({ error: 'Failed to create follow-up task' });
   }
 });
 

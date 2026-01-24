@@ -13,6 +13,8 @@ export interface Task {
   status: 'pending' | 'running' | 'completed' | 'failed';
   container_id: string | null;
   logs: string | null;
+  session_id: string | null;
+  parent_task_id: number | null;
   created_at: string;
   completed_at: string | null;
 }

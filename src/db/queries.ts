@@ -40,10 +40,25 @@ export function getTaskById(id: number): Task | undefined {
   return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task | undefined;
 }
 
-export function createTask(projectId: number, prompt: string): Task {
+export function createTask(projectId: number, prompt: string, parentTaskId?: number): Task {
   const db = getDb();
-  const result = db.prepare('INSERT INTO tasks (project_id, prompt, status) VALUES (?, ?, ?)').run(projectId, prompt, 'pending');
+  const result = db.prepare('INSERT INTO tasks (project_id, prompt, status, parent_task_id) VALUES (?, ?, ?, ?)').run(projectId, prompt, 'pending', parentTaskId || null);
   return getTaskById(result.lastInsertRowid as number)!;
+}
+
+export function updateTaskSessionId(id: number, sessionId: string): void {
+  const db = getDb();
+  db.prepare('UPDATE tasks SET session_id = ? WHERE id = ?').run(sessionId, id);
+}
+
+export function getLatestTaskWithSession(projectId: number): Task | undefined {
+  const db = getDb();
+  return db.prepare(`
+    SELECT * FROM tasks
+    WHERE project_id = ? AND session_id IS NOT NULL
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(projectId) as Task | undefined;
 }
 
 export function updateTaskStatus(id: number, status: Task['status'], containerId?: string): void {

@@ -28,11 +28,14 @@ const directoryList = document.getElementById('directory-list');
 const logsModal = document.getElementById('logs-modal');
 const closeLogsBtn = document.getElementById('close-logs-btn');
 const closeLogsFooterBtn = document.getElementById('close-logs-footer-btn');
-const inputContainer = document.getElementById('input-container');
-const taskInputEl = document.getElementById('task-input');
-const sendInputBtn = document.getElementById('send-input-btn');
+const followupContainer = document.getElementById('followup-container');
+const followupInputEl = document.getElementById('followup-input');
+const sendFollowupBtn = document.getElementById('send-followup-btn');
 const logsContent = document.getElementById('logs-content');
 const stopTaskBtn = document.getElementById('stop-task-btn');
+
+// Track current task's session ID for follow-ups
+let currentSessionId = null;
 
 // API Functions
 async function fetchProjects() {
@@ -89,6 +92,15 @@ async function sendTaskInput(taskId, input) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ input }),
+  });
+  return response.json();
+}
+
+async function createFollowupTask(parentTaskId, prompt) {
+  const response = await fetch(`/api/tasks/${parentTaskId}/followup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
   });
   return response.json();
 }
@@ -328,15 +340,19 @@ function updateStatusBadge(status) {
 
 function showTaskLogs(task) {
   currentTaskId = task.id;
+  currentSessionId = task.session_id || null;
   logsModal.classList.add('active');
   logsContent.textContent = '';
-  taskInputEl.value = '';
+  followupInputEl.value = '';
 
-  // Show status badge, stop button, and input container based on status
+  // Show status badge and stop button based on status
   const isRunning = task.status === 'running';
+  const isCompleted = task.status === 'completed';
   updateStatusBadge(task.status);
   stopTaskBtn.style.display = isRunning ? 'block' : 'none';
-  inputContainer.style.display = isRunning ? 'flex' : 'none';
+
+  // Show followup input if task completed and has session_id
+  followupContainer.style.display = (isCompleted && currentSessionId) ? 'flex' : 'none';
 
   // Close existing event source
   if (currentLogEventSource) {
@@ -352,16 +368,20 @@ function showTaskLogs(task) {
     if (data.type === 'log') {
       logsContent.textContent += data.data;
       logsContent.scrollTop = logsContent.scrollHeight;
+    } else if (data.type === 'session') {
+      // Capture session ID for follow-ups
+      currentSessionId = data.sessionId;
     } else if (data.type === 'end') {
       updateStatusBadge(data.status || 'completed');
       stopTaskBtn.style.display = 'none';
-      inputContainer.style.display = 'none';
+      // Show followup input if we have a session ID
+      followupContainer.style.display = currentSessionId ? 'flex' : 'none';
       loadTasks();
       currentLogEventSource.close();
     } else if (data.type === 'error') {
       logsContent.textContent += `\nError: ${data.message}\n`;
       updateStatusBadge('failed');
-      inputContainer.style.display = 'none';
+      followupContainer.style.display = 'none';
       stopTaskBtn.style.display = 'none';
       loadTasks();
       currentLogEventSource.close();
@@ -376,6 +396,7 @@ function showTaskLogs(task) {
 function hideLogsModal() {
   logsModal.classList.remove('active');
   currentTaskId = null;
+  currentSessionId = null;
   if (currentLogEventSource) {
     currentLogEventSource.close();
     currentLogEventSource = null;
@@ -458,25 +479,30 @@ function getStatusIcon(status) {
   }
 }
 
-// Send input handler
-async function handleSendInput() {
+// Send followup handler
+async function handleSendFollowup() {
   if (!currentTaskId) return;
 
-  const input = taskInputEl.value;
-  if (!input && input !== '') return;
+  const prompt = followupInputEl.value.trim();
+  if (!prompt) return;
 
-  sendInputBtn.disabled = true;
-  taskInputEl.disabled = true;
+  sendFollowupBtn.disabled = true;
+  followupInputEl.disabled = true;
+  sendFollowupBtn.textContent = 'Sending...';
 
   try {
-    await sendTaskInput(currentTaskId, input);
-    taskInputEl.value = '';
+    const newTask = await createFollowupTask(currentTaskId, prompt);
+    followupInputEl.value = '';
+    loadTasks();
+    // Show the new task's logs
+    showTaskLogs(newTask);
   } catch (err) {
-    console.error('Failed to send input:', err);
+    console.error('Failed to send followup:', err);
+    alert('Failed to send follow-up: ' + (err.message || 'Unknown error'));
   } finally {
-    sendInputBtn.disabled = false;
-    taskInputEl.disabled = false;
-    taskInputEl.focus();
+    sendFollowupBtn.disabled = false;
+    followupInputEl.disabled = false;
+    sendFollowupBtn.textContent = 'Follow Up';
   }
 }
 
@@ -490,9 +516,9 @@ submitTaskBtn.addEventListener('click', handleSubmitTask);
 closeLogsBtn.addEventListener('click', hideLogsModal);
 closeLogsFooterBtn.addEventListener('click', hideLogsModal);
 stopTaskBtn.addEventListener('click', handleStopTask);
-sendInputBtn.addEventListener('click', handleSendInput);
-taskInputEl.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') handleSendInput();
+sendFollowupBtn.addEventListener('click', handleSendFollowup);
+followupInputEl.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') handleSendFollowup();
 });
 
 // Close modals on outside click

@@ -449,8 +449,9 @@ header h1 {
   border-width: 2px;
 }
 
-/* Task Input */
-.input-container {
+/* Task Input / Follow-up */
+.input-container,
+.followup-container {
   display: flex;
   gap: 10px;
   margin-top: 15px;

@@ -22,6 +22,7 @@ export function getDb(): Database.Database {
 }
 
 function initSchema(db: Database.Database): void {
+  // Create tables
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +47,19 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
   `);
+
+  // Migration: Add session_id column if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN session_id TEXT`);
+  } catch { /* Column already exists */ }
+
+  // Migration: Add parent_task_id column if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL`);
+  } catch { /* Column already exists */ }
+
+  // Create index on session_id (after migration ensures column exists)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id)`);
 }
 
 export function closeDb(): void {

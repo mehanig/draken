@@ -39,6 +39,7 @@ export interface ContainerLogEmitter extends EventEmitter {
   on(event: 'log', listener: (data: string) => void): this;
   on(event: 'end', listener: (exitCode: number) => void): this;
   on(event: 'error', listener: (err: Error) => void): this;
+  on(event: 'session', listener: (sessionId: string) => void): this;
 }
 
 export async function buildProjectImage(projectPath: string, projectId: number): Promise<string> {
@@ -65,7 +66,8 @@ export async function runTask(
   projectPath: string,
   projectId: number,
   prompt: string,
-  taskId: number
+  taskId: number,
+  resumeSessionId?: string  // Optional session ID to resume a conversation
 ): Promise<{ containerId: string; logEmitter: ContainerLogEmitter }> {
   const imageName = `${IMAGE_PREFIX}${projectId}`;
 
@@ -83,20 +85,36 @@ export async function runTask(
 
   const logEmitter = new EventEmitter() as ContainerLogEmitter;
 
-  // Use docker run in non-interactive mode with streaming JSON output
-  // Flags: -p "prompt" --verbose --output-format stream-json --allowedTools ...
-  const dockerProcess = spawn('docker', [
+  // Create a persistent sessions directory for this project
+  const sessionsDir = path.join(projectPath, '.draken-sessions');
+  if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+  }
+
+  // Build command args
+  const dockerArgs = [
     'run',
     '--rm',
     '-v', `${projectPath}:/workspace`,
+    '-v', `${sessionsDir}:/home/claude/.claude`,  // Persist Claude sessions
     '-e', `ANTHROPIC_API_KEY=${apiKey}`,
     '--log-driver', 'json-file',
     imageName,
     '-p', prompt,
-    '--verbose',  // Required for stream-json
+    '--verbose',
     '--output-format', 'stream-json',
     '--allowedTools', 'Read,Edit,Write,Bash,Glob,Grep',
-  ], {
+  ];
+
+  // Add --resume if continuing a conversation
+  if (resumeSessionId) {
+    dockerArgs.push('--resume', resumeSessionId);
+    console.log('[runTask] Resuming session:', resumeSessionId);
+  }
+
+  console.log('[runTask] Docker args:', dockerArgs.join(' '));
+
+  const dockerProcess = spawn('docker', dockerArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
@@ -118,6 +136,15 @@ export async function runTask(
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line);
+
+        // Debug: log all event types to understand the stream format
+        console.log('[stream-json event]', event.type, event.session_id ? `session=${event.session_id}` : '');
+
+        // Capture session_id from any event that has it
+        if (event.session_id) {
+          logEmitter.emit('session', event.session_id);
+        }
+
         // Extract text content from stream-json events
         if (event.type === 'assistant' && event.message?.content) {
           for (const block of event.message.content) {
@@ -143,7 +170,9 @@ export async function runTask(
   });
 
   dockerProcess.stderr.on('data', (chunk: Buffer) => {
-    logEmitter.emit('log', chunk.toString('utf-8'));
+    const text = chunk.toString('utf-8');
+    console.log('[stderr]', text);
+    logEmitter.emit('log', text);
   });
 
   dockerProcess.on('close', (code: number | null) => {
