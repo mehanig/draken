@@ -1,4 +1,12 @@
-# Draken
+<p align="center">
+  <img src="site/img/logo.png" width="140" alt="Draken">
+</p>
+
+<h1 align="center">Draken</h1>
+
+<p align="center">
+  <img src="site/img/scene1-web.jpg" width="600" alt="Draken - Async Claude Code Dashboard">
+</p>
 
 ### What is this???
 
