@@ -25,6 +25,11 @@
   --info: #3b82f6;
   --info-bg: rgba(59, 130, 246, 0.1);
 
+  /* Typography */
+  --font-primary: 'Alegreya Sans', 'Alegreya', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-heading: 'Alegreya', Georgia, serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, 'Liberation Mono', monospace;
+
   /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -50,6 +55,9 @@
   --transition-fast: 150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow: 300ms ease;
+
+  /* Touch targets for mobile */
+  --touch-target-min: 44px;
 }
 
 * {
@@ -59,23 +67,33 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-primary);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.6;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Prevent horizontal scroll on mobile */
+  overflow-x: hidden;
 }
 
 /* Typography */
 h1, h2, h3, h4 {
+  font-family: var(--font-heading);
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 
 h1 { font-size: 2rem; }
 h2 { font-size: 1.5rem; }
 h3 { font-size: 1.25rem; }
 h4 { font-size: 1rem; }
+
+/* Ensure proper text rendering */
+p, span, a, li, label {
+  font-family: var(--font-primary);
+}
 
 /* Layout */
 .app-container {
@@ -148,6 +166,7 @@ h4 { font-size: 1rem; }
   padding: var(--spacing-sm) var(--spacing-md);
   border: none;
   border-radius: var(--radius-md);
+  font-family: var(--font-primary);
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
@@ -444,7 +463,7 @@ h4 { font-size: 1rem; }
   font-size: 0.8125rem;
   color: var(--text-muted);
   word-break: break-all;
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   margin-bottom: var(--spacing-md);
 }
 
@@ -496,7 +515,7 @@ h4 { font-size: 1rem; }
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.875rem;
   color: var(--text-secondary);
   background: var(--bg-primary);
@@ -576,7 +595,7 @@ h4 { font-size: 1rem; }
 
 /* Directory Browser */
 .current-path {
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.875rem;
   background: var(--bg-primary);
   padding: var(--spacing-md);
@@ -617,7 +636,7 @@ h4 { font-size: 1rem; }
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
   line-height: 1.7;
   white-space: pre-wrap;
@@ -804,7 +823,7 @@ h4 { font-size: 1rem; }
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   color: var(--accent-primary);
 }
@@ -883,7 +902,7 @@ h4 { font-size: 1rem; }
   gap: var(--spacing-sm);
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
   background: none;
   border: none;
@@ -928,7 +947,7 @@ h4 { font-size: 1rem; }
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.875rem;
 }
 
@@ -981,11 +1000,11 @@ h4 { font-size: 1rem; }
   --diff-del-line-number-bg-color: rgba(248, 81, 73, 0.2) !important;
   --diff-del-line-highlight-bg-color: rgba(248, 81, 73, 0.4) !important;
   --diff-expand-content-bg-color: var(--bg-secondary) !important;
-  font-family: 'SF Mono', Monaco, Consolas, monospace !important;
+  font-family: var(--font-mono) !important;
 }
 
 .diff-viewer-container [data-component="diff-root"] code {
-  font-family: 'SF Mono', Monaco, Consolas, monospace !important;
+  font-family: var(--font-mono) !important;
 }
 
 /* Make sure the container scrolls properly */
@@ -1128,15 +1147,62 @@ h4 { font-size: 1rem; }
 .text-danger { color: var(--danger); }
 .text-muted { color: var(--text-muted); }
 
-/* Responsive */
+/* Responsive - Tablet */
+@media (max-width: 1024px) {
+  .projects-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+
+  .modal-large {
+    max-width: 95vw;
+  }
+}
+
+/* Responsive - Mobile */
 @media (max-width: 768px) {
+  :root {
+    /* Adjust spacing for mobile */
+    --spacing-lg: 20px;
+    --spacing-xl: 24px;
+    --spacing-2xl: 32px;
+  }
+
+  body {
+    font-size: 16px; /* Prevent zoom on input focus in iOS */
+  }
+
   .main-content {
     padding: var(--spacing-md);
+    padding-bottom: calc(var(--spacing-xl) + env(safe-area-inset-bottom, 0));
+  }
+
+  .header {
+    padding: var(--spacing-md);
+    position: sticky;
+    top: 0;
   }
 
   .header-content {
-    flex-direction: column;
-    gap: var(--spacing-md);
+    flex-direction: row;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+  }
+
+  .logo {
+    gap: var(--spacing-sm);
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .logo-text {
+    font-size: 1.25rem;
+  }
+
+  .logo-subtitle {
+    display: none;
   }
 
   .page-header {
@@ -1145,12 +1211,349 @@ h4 { font-size: 1rem; }
     align-items: stretch;
   }
 
+  .page-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .page-header .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
   .projects-grid {
     grid-template-columns: 1fr;
+    gap: var(--spacing-md);
+  }
+
+  /* Cards */
+  .card {
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+  }
+
+  /* Buttons - touch-friendly sizing */
+  .btn {
+    min-height: var(--touch-target-min);
+    padding: var(--spacing-md);
+    font-size: 1rem;
+  }
+
+  .btn-sm {
+    min-height: 36px;
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 0.875rem;
+  }
+
+  .btn-icon {
+    width: var(--touch-target-min);
+    height: var(--touch-target-min);
+  }
+
+  /* Forms */
+  .input, .textarea {
+    min-height: var(--touch-target-min);
+    font-size: 16px; /* Prevent iOS zoom */
+    padding: var(--spacing-md);
+  }
+
+  .textarea {
+    min-height: 100px;
+  }
+
+  /* Modal - Full screen on mobile */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
   }
 
   .modal {
+    margin: 0;
+    max-height: 95vh;
+    max-height: 95dvh; /* Dynamic viewport height for mobile browsers */
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    animation: slideUpMobile var(--transition-normal);
+  }
+
+  .modal-large {
+    max-width: 100%;
+  }
+
+  .modal-header {
+    padding: var(--spacing-md);
+    /* Add safe area for notch */
+    padding-top: calc(var(--spacing-md) + env(safe-area-inset-top, 0));
+  }
+
+  .modal-header h3 {
+    font-size: 1rem;
+  }
+
+  .modal-body {
+    padding: var(--spacing-md);
+    /* Better scrolling on iOS */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-footer {
+    padding: var(--spacing-md);
+    padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom, 0));
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .modal-footer .btn {
+    width: 100%;
+  }
+
+  @keyframes slideUpMobile {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Project cards */
+  .project-card-path {
+    font-size: 0.75rem;
+    word-break: break-all;
+  }
+
+  .project-card-footer {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    align-items: stretch;
+  }
+
+  .project-card-footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Project Detail */
+  .project-path-display {
+    font-size: 0.75rem;
+    padding: var(--spacing-sm);
+  }
+
+  .dockerfile-status {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    align-items: stretch;
+  }
+
+  .dockerfile-status .btn {
+    width: 100%;
+  }
+
+  /* Tasks */
+  .task-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-sm);
+  }
+
+  .task-meta {
+    flex-wrap: wrap;
+  }
+
+  /* Session threads */
+  .session-header {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .session-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .session-meta {
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+  }
+
+  .followup-item {
+    margin-left: var(--spacing-md);
+    padding: var(--spacing-md);
+  }
+
+  /* Git Panel */
+  .git-branch-info {
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+  }
+
+  .git-file-item {
+    padding: var(--spacing-md);
+    min-height: var(--touch-target-min);
+  }
+
+  .git-file-item .file-path {
+    font-size: 0.75rem;
+  }
+
+  /* Diff viewer */
+  .diff-viewer-container {
+    max-height: 50vh;
+    max-height: 50dvh;
+  }
+
+  .diff-modal-title {
+    font-size: 0.75rem;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+  }
+
+  /* Logs */
+  .logs-content {
+    font-size: 0.75rem;
+    min-height: 200px;
+    max-height: 40vh;
+    max-height: 40dvh;
+    padding: var(--spacing-sm);
+  }
+
+  /* Followup input */
+  .followup-container {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .followup-container .btn {
+    width: 100%;
+  }
+
+  /* Directory browser */
+  .directory-list {
+    max-height: 50vh;
+    max-height: 50dvh;
+  }
+
+  .directory-item {
+    min-height: var(--touch-target-min);
+    padding: var(--spacing-md);
+  }
+
+  /* Login */
+  .login-card {
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-lg);
     margin: var(--spacing-md);
+  }
+
+  .login-logo {
+    width: 56px;
+    height: 56px;
+  }
+
+  .login-header h1 {
+    font-size: 1.5rem;
+  }
+
+  /* Header user */
+  .header-user {
+    gap: var(--spacing-sm);
+  }
+
+  .user-info {
+    display: none;
+  }
+
+  /* Empty state */
+  .empty-state {
+    padding: var(--spacing-lg);
+  }
+
+  .empty-state-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  /* Status badge */
+  .status-badge {
+    font-size: 0.6875rem;
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+}
+
+/* Small mobile (iPhone SE, etc.) */
+@media (max-width: 375px) {
+  .main-content {
+    padding: var(--spacing-sm);
+  }
+
+  .card {
+    padding: var(--spacing-sm);
+  }
+
+  .modal-body {
+    padding: var(--spacing-sm);
+  }
+
+  .project-card h3 {
+    font-size: 1rem;
+  }
+
+  .logs-content {
+    font-size: 0.6875rem;
+  }
+}
+
+/* Landscape mobile */
+@media (max-width: 896px) and (orientation: landscape) {
+  .modal {
     max-height: 90vh;
+    max-height: 90dvh;
+  }
+
+  .logs-content {
+    max-height: 60vh;
+    max-height: 60dvh;
+  }
+
+  .diff-viewer-container {
+    max-height: 70vh;
+    max-height: 70dvh;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Remove hover effects on touch devices */
+  .card-interactive:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    transform: none;
+  }
+
+  /* Add active states instead */
+  .card-interactive:active {
+    transform: scale(0.98);
+    border-color: var(--accent-primary);
+  }
+
+  .btn:active:not(:disabled) {
+    transform: scale(0.98);
+    opacity: 0.9;
+  }
+
+  .directory-item:active {
+    background: var(--bg-elevated);
+  }
+
+  .git-file-item:active {
+    background: var(--bg-elevated);
+  }
+
+  /* Always show file arrows on touch */
+  .git-file-item .file-arrow {
+    opacity: 0.5;
   }
 }

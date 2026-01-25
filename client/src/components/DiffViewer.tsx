@@ -40,7 +40,7 @@ const darkTheme = {
     padding: '2px 10px',
   },
   contentText: {
-    fontFamily: "'SF Mono', Monaco, Consolas, monospace",
+    fontFamily: "'SF Mono', Monaco, Consolas, 'Liberation Mono', monospace",
     fontSize: '13px',
   },
   gutter: {
