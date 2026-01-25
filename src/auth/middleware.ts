@@ -18,38 +18,70 @@ export interface AuthenticatedRequest extends Request {
   user?: JwtPayload;
 }
 
+// Check if auth is explicitly disabled
+export function isNoAuthMode(): boolean {
+  return process.env.DRAKEN_NO_AUTH === 'true';
+}
+
 // Get auth configuration from environment variables
+// Returns null only if NO_AUTH mode is enabled
+// Throws error if auth is required but not properly configured
 export function getAuthConfig(): AuthConfig | null {
+  // If NO_AUTH is explicitly set, disable authentication
+  if (isNoAuthMode()) {
+    return null;
+  }
+
   const username = process.env.DRAKEN_USERNAME;
   const password = process.env.DRAKEN_PASSWORD;
   const jwtSecret = process.env.DRAKEN_JWT_SECRET;
 
-  // If auth credentials are not configured, auth is disabled
-  if (!username || !password) {
-    return null;
+  // All three are required when auth is enabled
+  const missing: string[] = [];
+  if (!username) missing.push('DRAKEN_USERNAME');
+  if (!password) missing.push('DRAKEN_PASSWORD');
+  if (!jwtSecret) missing.push('DRAKEN_JWT_SECRET');
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Authentication is required. Missing environment variables: ${missing.join(', ')}\n` +
+      `Set these variables or set DRAKEN_NO_AUTH=true to disable authentication.`
+    );
   }
 
   return {
-    username,
-    password,
-    jwtSecret: jwtSecret || 'draken-default-secret-change-me',
+    username: username!,
+    password: password!,
+    jwtSecret: jwtSecret!,
     tokenExpiry: process.env.DRAKEN_TOKEN_EXPIRY || '7d',
   };
 }
 
+// Validate auth config on startup (call this early in server initialization)
+export function validateAuthConfig(): void {
+  if (isNoAuthMode()) {
+    console.log('Warning: Authentication is DISABLED (DRAKEN_NO_AUTH=true)');
+    return;
+  }
+
+  // This will throw if config is invalid
+  const config = getAuthConfig();
+  console.log(`Authentication enabled for user: ${config!.username}`);
+}
+
 // Check if authentication is enabled
 export function isAuthEnabled(): boolean {
-  return getAuthConfig() !== null;
+  return !isNoAuthMode();
 }
 
 // Authentication middleware
 export function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
-  const config = getAuthConfig();
-
-  // If auth is not configured, allow all requests
-  if (!config) {
+  // If NO_AUTH mode, allow all requests
+  if (isNoAuthMode()) {
     return next();
   }
+
+  const config = getAuthConfig();
 
   // Get token from Authorization header
   const authHeader = req.headers.authorization;
@@ -62,7 +94,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
   const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as JwtPayload;
+    const decoded = jwt.verify(token, config!.jwtSecret) as JwtPayload;
     req.user = decoded;
     next();
   } catch (err) {

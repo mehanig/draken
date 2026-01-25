@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { getDb, closeDb } from './db/schema';
-import { authMiddleware, isAuthEnabled } from './auth/middleware';
+import { authMiddleware, validateAuthConfig, isNoAuthMode } from './auth/middleware';
 import authRouter from './routes/auth';
 import projectsRouter from './routes/projects';
 import tasksRouter from './routes/tasks';
@@ -9,6 +9,15 @@ import browseRouter from './routes/browse';
 import gitRouter from './routes/git';
 
 const PORT = 40333;
+
+// Validate auth configuration early - will throw if required vars are missing
+try {
+  validateAuthConfig();
+} catch (err) {
+  console.error('\n' + (err as Error).message + '\n');
+  process.exit(1);
+}
+
 const app = express();
 
 // Middleware
@@ -51,11 +60,5 @@ app.listen(PORT, () => {
 
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn('Warning: ANTHROPIC_API_KEY environment variable is not set');
-  }
-
-  if (isAuthEnabled()) {
-    console.log('Authentication: ENABLED');
-  } else {
-    console.warn('Warning: Authentication is DISABLED. Set DRAKEN_USERNAME and DRAKEN_PASSWORD to enable.');
   }
 });
