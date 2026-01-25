@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Draken - Async Claude Code Dashboard</title>
+  <meta name="description" content="Run Claude Code tasks across multiple projects asynchronously. Submit tasks, come back later, see results via git diff.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Alegreya+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="draken.svg">
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-tertiary: #1a1a24;
+      --border-color: #2a2a3a;
+      --text-primary: #f0f0f5;
+      --text-secondary: #a0a0b0;
+      --text-muted: #606070;
+      --accent-primary: #6366f1;
+      --accent-secondary: #8b5cf6;
+      --success: #22c55e;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Alegreya Sans', sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Alegreya', Georgia, serif;
+      font-weight: 600;
+    }
+
+    code, pre {
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+    }
+
+    a {
+      color: var(--accent-primary);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+      background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .logo {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 24px;
+    }
+
+    .hero h1 {
+      font-size: 3rem;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero .tagline {
+      font-size: 1.25rem;
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin: 0 auto 32px;
+    }
+
+    .cta-group {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 8px;
+      font-family: 'Alegreya Sans', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px rgba(99, 102, 241, 0.4);
+      text-decoration: none;
+    }
+
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--accent-primary);
+      text-decoration: none;
+    }
+
+    /* Install */
+    .install {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .install-box {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .install-box h2 {
+      font-size: 1.5rem;
+      margin-bottom: 20px;
+    }
+
+    .install-command {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px 24px;
+      font-size: 1.1rem;
+      color: var(--success);
+    }
+
+    .install-command code {
+      color: var(--text-primary);
+    }
+
+    .copy-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      transition: color 0.2s;
+    }
+
+    .copy-btn:hover {
+      color: var(--text-primary);
+    }
+
+    /* Why */
+    .why {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .why h2 {
+      font-size: 2rem;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+
+    .why-content {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .why-content p {
+      margin-bottom: 16px;
+    }
+
+    .why-content strong {
+      color: var(--text-primary);
+    }
+
+    /* Features */
+    .features {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .features h2 {
+      font-size: 2rem;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 24px;
+    }
+
+    .feature {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    .feature-icon {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+
+    .feature h3 {
+      font-size: 1.25rem;
+      margin-bottom: 8px;
+    }
+
+    .feature p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    /* Setup */
+    .setup {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .setup h2 {
+      font-size: 2rem;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+
+    .steps {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .step {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+
+    .step-number {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+
+    .step-content h3 {
+      font-size: 1.25rem;
+      margin-bottom: 8px;
+    }
+
+    .step-content p {
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .code-block {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    .code-block code {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    .code-block .comment {
+      color: var(--text-muted);
+    }
+
+    .code-block .cmd {
+      color: var(--success);
+    }
+
+    /* Footer */
+    footer {
+      padding: 40px 0;
+      text-align: center;
+      color: var(--text-muted);
+    }
+
+    footer a {
+      color: var(--text-secondary);
+    }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      .hero {
+        padding: 60px 0 40px;
+      }
+
+      .hero h1 {
+        font-size: 2rem;
+      }
+
+      .hero .tagline {
+        font-size: 1.1rem;
+      }
+
+      .cta-group {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .btn {
+        width: 100%;
+        max-width: 280px;
+        justify-content: center;
+      }
+
+      .install-command {
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px;
+        font-size: 0.95rem;
+      }
+
+      .features h2, .setup h2, .why h2 {
+        font-size: 1.5rem;
+      }
+
+      .step {
+        flex-direction: column;
+        gap: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <div class="container">
+      <svg class="logo" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#6366f1"/>
+            <stop offset="100%" style="stop-color:#8b5cf6"/>
+          </linearGradient>
+        </defs>
+        <path d="M50 10L85 30V70L50 90L15 70V30L50 10Z" fill="url(#grad)"/>
+        <path d="M50 25L70 37V63L50 75L30 63V37L50 25Z" fill="#0a0a0f"/>
+        <circle cx="50" cy="50" r="8" fill="url(#grad)"/>
+      </svg>
+      <h1>Draken</h1>
+      <p class="tagline">Async Claude Code dashboard. Submit tasks to your projects, come back later, see results via git diff.</p>
+      <div class="cta-group">
+        <a href="#install" class="btn btn-primary">Get Started</a>
+        <a href="https://github.com/mehanig/draken" class="btn btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="install" id="install">
+    <div class="container">
+      <div class="install-box">
+        <h2>Quick Install</h2>
+        <div class="install-command">
+          <span class="prompt">$</span>
+          <code>npx draken</code>
+          <button class="copy-btn" onclick="copyCommand()" title="Copy to clipboard">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="why">
+    <div class="container">
+      <h2>Why Draken?</h2>
+      <div class="why-content">
+        <p>I work on multiple projects simultaneously and asynchronously. Often I just want to <strong>submit a task to Claude</strong> in a private repo and return to it later.</p>
+        <p>GitHub integration with Claude lacks full machine access. Tmux sessions require SSH access, which doesn't work when commuting or at events.</p>
+        <p><strong>Draken is async by nature.</strong> Every interaction runs in a single container that completes and exits. The only artifact is visible via <code>git diff</code>. Context is preserved via sessions, so you can have multiple async conversations.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="container">
+      <h2>Features</h2>
+      <div class="features-grid">
+        <div class="feature">
+          <div class="feature-icon">📁</div>
+          <h3>Multi-Project</h3>
+          <p>Manage multiple codebases from a single dashboard. Each project gets isolated Docker execution.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🐳</div>
+          <h3>Docker Isolation</h3>
+          <p>Tasks run in containers. Your system stays clean, and Claude's changes are scoped to the project.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🔄</div>
+          <h3>Session Continuity</h3>
+          <p>Follow up on previous tasks. Claude remembers the conversation context across runs.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">📡</div>
+          <h3>Real-time Logs</h3>
+          <p>Stream Claude's output live via SSE. Watch the AI work or check back later.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🔀</div>
+          <h3>Git Integration</h3>
+          <p>See git status and diffs directly in the UI. Review what Claude changed before committing.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🔐</div>
+          <h3>Authentication</h3>
+          <p>JWT-based auth for secure deployment. Or disable it for local development.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="setup">
+    <div class="container">
+      <h2>VPS Setup Guide</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h3>Install Prerequisites</h3>
+            <p>You need Node.js 18+, Docker, and Claude CLI.</p>
+            <div class="code-block">
+<code><span class="comment"># Install Node.js (Ubuntu/Debian)</span>
+<span class="cmd">curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -</span>
+<span class="cmd">sudo apt-get install -y nodejs</span>
+
+<span class="comment"># Install Docker</span>
+<span class="cmd">curl -fsSL https://get.docker.com | sh</span>
+<span class="cmd">sudo usermod -aG docker $USER</span>
+
+<span class="comment"># Install Claude CLI</span>
+<span class="cmd">npm install -g @anthropic-ai/claude-code</span></code>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h3>Authenticate Claude</h3>
+            <p>Log in with your Anthropic account or set an API key.</p>
+            <div class="code-block">
+<code><span class="comment"># Option 1: OAuth (recommended)</span>
+<span class="cmd">claude login</span>
+
+<span class="comment"># Option 2: API key</span>
+<span class="cmd">export ANTHROPIC_API_KEY=your-key</span></code>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h3>Run Draken</h3>
+            <p>Set authentication and start the server.</p>
+            <div class="code-block">
+<code><span class="comment"># Set credentials</span>
+<span class="cmd">export DRAKEN_USERNAME=admin</span>
+<span class="cmd">export DRAKEN_PASSWORD=your-secure-password</span>
+<span class="cmd">export DRAKEN_JWT_SECRET=random-32-char-string</span>
+
+<span class="comment"># Run Draken</span>
+<span class="cmd">npx draken</span></code>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-number">4</div>
+          <div class="step-content">
+            <h3>Reverse Proxy (Optional)</h3>
+            <p>For HTTPS, put Draken behind nginx or Caddy.</p>
+            <div class="code-block">
+<code><span class="comment"># Caddy (automatic HTTPS)</span>
+<span class="cmd">sudo caddy reverse-proxy --from draken.yourdomain.com --to localhost:40333</span></code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>Built by <a href="https://github.com/mehanig">@mehanig</a> &middot; <a href="https://github.com/mehanig/draken">Source on GitHub</a></p>
+    </div>
+  </footer>
+
+  <script>
+    function copyCommand() {
+      navigator.clipboard.writeText('npx draken');
+      const btn = document.querySelector('.copy-btn');
+      btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => {
+        btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+      }, 2000);
+    }
+  </script>
+</body>
+</html>

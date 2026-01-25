@@ -1,8 +1,11 @@
 {
   "name": "draken",
-  "version": "1.0.0",
-  "description": "Local web-based dashboard for managing Claude Code projects in Docker containers",
+  "version": "0.1.0",
+  "description": "Web dashboard for running Claude Code tasks across multiple projects in Docker containers",
   "main": "dist/server.js",
+  "bin": {
+    "draken": "./dist/cli.js"
+  },
   "scripts": {
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc",
@@ -10,7 +13,31 @@
     "start": "node dist/server.js",
     "dev": "tsc -w",
     "dev:client": "cd client && npm run dev",
-    "install:all": "npm install && cd client && npm install"
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist/",
+    "public/",
+    "draken.dockerfile.template"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ai",
+    "agent",
+    "docker",
+    "dashboard",
+    "anthropic"
+  ],
+  "author": "mehanig",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mehanig/draken"
+  },
+  "homepage": "https://draken.mehanig.com",
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
