@@ -33,3 +33,6 @@ Thumbs.db
 
 # Claude sessions (generated per project)
 .draken-sessions/
+
+# Claude Code local settings
+.claude/
