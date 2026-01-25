@@ -83,15 +83,23 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
 
   const config = getAuthConfig();
 
-  // Get token from Authorization header
+  // Get token from Authorization header or query param (for SSE endpoints)
   const authHeader = req.headers.authorization;
+  const queryToken = req.query.token as string | undefined;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token: string | null = null;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7); // Remove 'Bearer ' prefix
+  } else if (queryToken) {
+    // Allow token via query param for SSE (EventSource doesn't support headers)
+    token = queryToken;
+  }
+
+  if (!token) {
     res.status(401).json({ error: 'Authentication required', code: 'NO_TOKEN' });
     return;
   }
-
-  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
   try {
     const decoded = jwt.verify(token, config!.jwtSecret) as JwtPayload;

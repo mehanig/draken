@@ -92,6 +92,7 @@ router.post('/project/:projectId', async (req: Request, res: Response) => {
         updateTaskStatus(task.id, 'running', containerId);
 
         logEmitter.on('log', (data: string) => {
+          console.log('[task log received]', task.id, 'data length:', data.length, 'subscribers:', logSubscribers.get(task.id)?.length || 0);
           appendTaskLogs(task.id, data);
 
           // Broadcast to SSE subscribers
@@ -296,6 +297,7 @@ router.get('/:id/logs', (req: Request, res: Response) => {
     logSubscribers.set(id, []);
   }
   logSubscribers.get(id)!.push(res);
+  console.log('[SSE] Subscriber added for task', id, 'total:', logSubscribers.get(id)!.length);
 
   // Clean up on disconnect
   req.on('close', () => {

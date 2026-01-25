@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'path';
 import { getDb, closeDb } from './db/schema';
-import { authMiddleware, validateAuthConfig, isNoAuthMode } from './auth/middleware';
+import { authMiddleware, validateAuthConfig } from './auth/middleware';
+import { validateClaudeAuth } from './docker/manager';
 import authRouter from './routes/auth';
 import projectsRouter from './routes/projects';
 import tasksRouter from './routes/tasks';
@@ -10,9 +11,13 @@ import gitRouter from './routes/git';
 
 const PORT = 40333;
 
-// Validate auth configuration early - will throw if required vars are missing
+// Validate configurations early - will throw if required vars are missing
 try {
+  // Validate Draken web auth (DRAKEN_USERNAME, DRAKEN_PASSWORD, DRAKEN_JWT_SECRET)
   validateAuthConfig();
+
+  // Validate Claude auth (OAuth credentials or ANTHROPIC_API_KEY)
+  validateClaudeAuth();
 } catch (err) {
   console.error('\n' + (err as Error).message + '\n');
   process.exit(1);
@@ -57,8 +62,4 @@ process.on('SIGTERM', () => {
 // Start server
 app.listen(PORT, () => {
   console.log(`Draken dashboard running at http://localhost:${PORT}`);
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn('Warning: ANTHROPIC_API_KEY environment variable is not set');
-  }
 });
