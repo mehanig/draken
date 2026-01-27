@@ -33,6 +33,34 @@ const socketPath = getDockerSocket();
 const docker = socketPath ? new Docker({ socketPath }) : new Docker();
 const IMAGE_PREFIX = 'draken-project-';
 
+// ANSI color codes for terminal output
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  // Colors
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m',
+  gray: '\x1b[90m',
+  // Bright colors
+  brightRed: '\x1b[91m',
+  brightGreen: '\x1b[92m',
+  brightYellow: '\x1b[93m',
+  brightBlue: '\x1b[94m',
+  brightMagenta: '\x1b[95m',
+  brightCyan: '\x1b[96m',
+};
+
+// Helper to colorize text
+function colorize(text: string, ...codes: string[]): string {
+  return codes.join('') + text + ANSI.reset;
+}
+
 // Store active task processes for interactive input
 const activeProcesses = new Map<number, ChildProcess>();
 
@@ -250,26 +278,69 @@ export async function runTask(
           logEmitter.emit('session', event.session_id);
         }
 
-        // Extract text content from stream-json events
+        // Extract text content from stream-json events with colorization
         if (event.type === 'assistant' && event.message?.content) {
           for (const block of event.message.content) {
             if (block.type === 'text') {
               console.log('[emit log] text:', block.text.substring(0, 100));
+              // Assistant text in default color
               logEmitter.emit('log', block.text);
             } else if (block.type === 'tool_use') {
               console.log('[emit log] tool_use:', block.name);
-              logEmitter.emit('log', `\n[Tool: ${block.name}]\n`);
+              // Tool header in cyan + bold
+              const toolHeader = colorize(`\n━━━ Tool: ${block.name} ━━━`, ANSI.cyan, ANSI.bold);
+              logEmitter.emit('log', toolHeader + '\n');
+              
+              // Show tool input if present (dimmed)
+              if (block.input) {
+                const inputStr = typeof block.input === 'string' 
+                  ? block.input 
+                  : JSON.stringify(block.input, null, 2);
+                // For common tools, show relevant input nicely
+                if (block.name === 'Bash' && block.input.command) {
+                  logEmitter.emit('log', colorize('$ ' + block.input.command, ANSI.yellow) + '\n');
+                } else if (block.name === 'Read' && block.input.file_path) {
+                  logEmitter.emit('log', colorize('Reading: ' + block.input.file_path, ANSI.blue) + '\n');
+                } else if (block.name === 'Write' && block.input.file_path) {
+                  logEmitter.emit('log', colorize('Writing: ' + block.input.file_path, ANSI.green) + '\n');
+                } else if (block.name === 'Edit' && block.input.file_path) {
+                  logEmitter.emit('log', colorize('Editing: ' + block.input.file_path, ANSI.yellow) + '\n');
+                } else if (inputStr.length < 500) {
+                  logEmitter.emit('log', colorize(inputStr, ANSI.dim) + '\n');
+                }
+              }
+            }
+          }
+        } else if (event.type === 'user' && event.message?.content) {
+          // Tool results from user messages (tool output)
+          for (const block of event.message.content) {
+            if (block.type === 'tool_result') {
+              const content = typeof block.content === 'string' 
+                ? block.content 
+                : JSON.stringify(block.content);
+              // Tool output - keep as-is (may contain its own ANSI codes from bash)
+              logEmitter.emit('log', content + '\n');
+              logEmitter.emit('log', colorize('━━━━━━━━━━━━━━━━━━━━━━━', ANSI.gray) + '\n');
             }
           }
         } else if (event.type === 'result') {
-          // Final result
+          // Final result in green
           if (event.result) {
             console.log('[emit log] result:', event.result.substring(0, 100));
-            logEmitter.emit('log', `\n${event.result}\n`);
+            const resultHeader = colorize('\n✓ Task Complete', ANSI.green, ANSI.bold);
+            logEmitter.emit('log', resultHeader + '\n');
+            logEmitter.emit('log', event.result + '\n');
           }
         } else if (event.type === 'error') {
           console.log('[emit log] error:', event.error?.message);
-          logEmitter.emit('log', `\nError: ${event.error?.message || JSON.stringify(event)}\n`);
+          // Errors in red + bold
+          const errorMsg = colorize(`\n✗ Error: ${event.error?.message || JSON.stringify(event)}`, ANSI.red, ANSI.bold);
+          logEmitter.emit('log', errorMsg + '\n');
+        } else if (event.type === 'system') {
+          // System messages in yellow
+          if (event.message) {
+            logEmitter.emit('log', colorize(`[System] ${event.message}`, ANSI.yellow) + '\n');
+          }
         }
       } catch {
         // Not JSON, emit as raw text
