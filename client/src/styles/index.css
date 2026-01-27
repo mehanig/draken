@@ -402,6 +402,7 @@ p, span, a, li, label {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: auto;
 }
 
 @keyframes slideUp {
@@ -1021,7 +1022,7 @@ p, span, a, li, label {
 .diff-viewer-container {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  overflow: hidden;
+  overflow: auto;
   max-height: 60vh;
   flex: 1;
   display: flex;
@@ -1032,11 +1033,13 @@ p, span, a, li, label {
 .modal-fullscreen .diff-viewer-container {
   max-height: none;
   min-height: 400px;
+  overflow: auto;
 }
 
 .modal-fullscreen .diff-viewer-container > div {
   flex: 1;
   max-height: none !important;
+  overflow: visible !important;
 }
 
 .diff-viewer-empty {
