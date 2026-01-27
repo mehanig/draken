@@ -223,7 +223,7 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
       <Modal
         isOpen={!!selectedFile}
         onClose={closeFileModal}
-        large
+        fullscreen
         title={
           <span className="diff-modal-title">
             <FileIcon status={selectedFile?.status || 'modified'} />

@@ -1023,6 +1023,20 @@ p, span, a, li, label {
   border-radius: var(--radius-md);
   overflow: hidden;
   max-height: 60vh;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Make diff viewer fill available space in fullscreen modal */
+.modal-fullscreen .diff-viewer-container {
+  max-height: none;
+  min-height: 400px;
+}
+
+.modal-fullscreen .diff-viewer-container > div {
+  flex: 1;
+  max-height: none !important;
 }
 
 .diff-viewer-empty {
@@ -1031,6 +1045,10 @@ p, span, a, li, label {
   color: var(--text-muted);
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Dark theme overrides for @git-diff-view */
@@ -1057,6 +1075,7 @@ p, span, a, li, label {
 .diff-viewer-container > div {
   max-height: 60vh;
   overflow: auto;
+  flex: 1;
 }
 
 /* New file viewer styling */
