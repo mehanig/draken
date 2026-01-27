@@ -173,6 +173,11 @@ export async function runTask(
     '--rm',
     '-v', `${projectPath}:/workspace`,
     '--log-driver', 'json-file',
+    // Force color output in terminal commands
+    '-e', 'TERM=xterm-256color',
+    '-e', 'FORCE_COLOR=1',
+    '-e', 'CLICOLOR=1',
+    '-e', 'CLICOLOR_FORCE=1',
   ];
 
   // Add authentication based on type
