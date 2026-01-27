@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Square, Send } from 'lucide-react';
 import { Modal } from './Modal';
 import { StatusBadge } from './StatusBadge';
 import { stopTask, createFollowupTask, getAuthToken } from '../api';
 import type { Task } from '../types';
+import AnsiToHtml from 'ansi-to-html';
 
 // Build SSE URL with auth token (EventSource doesn't support headers)
 function buildSSEUrl(taskId: number): string {
@@ -18,6 +19,30 @@ interface TaskLogsModalProps {
   onTaskUpdate: () => void;
 }
 
+// Create ANSI to HTML converter with terminal-like colors
+const ansiConverter = new AnsiToHtml({
+  fg: '#d4d4d4',
+  bg: 'transparent',
+  colors: {
+    0: '#1e1e1e',   // black
+    1: '#f44747',   // red
+    2: '#6a9955',   // green
+    3: '#dcdcaa',   // yellow
+    4: '#569cd6',   // blue
+    5: '#c586c0',   // magenta
+    6: '#4ec9b0',   // cyan
+    7: '#d4d4d4',   // white
+    8: '#808080',   // bright black
+    9: '#f44747',   // bright red
+    10: '#6a9955',  // bright green
+    11: '#dcdcaa',  // bright yellow
+    12: '#569cd6',  // bright blue
+    13: '#c586c0',  // bright magenta
+    14: '#4ec9b0',  // bright cyan
+    15: '#ffffff',  // bright white
+  },
+});
+
 export function TaskLogsModal({ task, onClose, onTaskUpdate }: TaskLogsModalProps) {
   const [logs, setLogs] = useState('');
   const [status, setStatus] = useState<Task['status']>('pending');
@@ -25,8 +50,14 @@ export function TaskLogsModal({ task, onClose, onTaskUpdate }: TaskLogsModalProp
   const [followupText, setFollowupText] = useState('');
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const logsRef = useRef<HTMLPreElement>(null);
+  const logsRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Convert ANSI codes to HTML
+  const logsHtml = useMemo(() => {
+    if (!logs) return '';
+    return ansiConverter.toHtml(logs);
+  }, [logs]);
 
   useEffect(() => {
     if (!task) return;
@@ -141,7 +172,7 @@ export function TaskLogsModal({ task, onClose, onTaskUpdate }: TaskLogsModalProp
     <Modal
       isOpen={!!task}
       onClose={onClose}
-      large
+      fullscreen
       title={
         <>
           Task Logs
@@ -166,9 +197,13 @@ export function TaskLogsModal({ task, onClose, onTaskUpdate }: TaskLogsModalProp
         </>
       }
     >
-      <pre ref={logsRef} className="logs-content">
-        {logs || 'Waiting for output...'}
-      </pre>
+      <div 
+        ref={logsRef} 
+        className="logs-content logs-terminal"
+        dangerouslySetInnerHTML={{ 
+          __html: logsHtml || '<span class="logs-waiting">Waiting for output...</span>' 
+        }}
+      />
 
       {canFollowup && (
         <div className="followup-container">
