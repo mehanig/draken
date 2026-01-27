@@ -8,9 +8,10 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   large?: boolean;
+  fullscreen?: boolean;
 }
 
-export function Modal({ isOpen, onClose, title, children, footer, large }: ModalProps) {
+export function Modal({ isOpen, onClose, title, children, footer, large, fullscreen }: ModalProps) {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -32,7 +33,7 @@ export function Modal({ isOpen, onClose, title, children, footer, large }: Modal
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className={`modal ${large ? 'modal-large' : ''}`}
+        className={`modal ${large ? 'modal-large' : ''} ${fullscreen ? 'modal-fullscreen' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
