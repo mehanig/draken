@@ -15,6 +15,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
     
+    # Required for npm provenance / trusted publishing
+    permissions:
+      contents: write
+      id-token: write
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,10 +51,10 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
+      # Publish with provenance for supply chain security
+      # Uses OIDC trusted publishing - no NPM_TOKEN needed if configured on npm
       - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
