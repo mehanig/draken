@@ -240,7 +240,7 @@ router.post('/:id/mounts', (req: Request, res: Response) => {
 router.delete('/:id/mounts/:alias', (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id as string, 10);
-    const { alias } = req.params;
+    const alias = req.params.alias as string;
 
     const project = getProjectById(id);
     if (!project) {
