@@ -52,9 +52,11 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       # Publish with provenance for supply chain security
-      # Uses OIDC trusted publishing - no NPM_TOKEN needed if configured on npm
+      # NPM_TOKEN still required, but --provenance adds OIDC attestation
       - name: Publish to npm
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
