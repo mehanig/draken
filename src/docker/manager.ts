@@ -215,13 +215,20 @@ export async function runTask(
     // Multi-repo mode: mount each configured path with its alias
     for (const mount of mounts) {
       dockerArgs.push('-v', `${mount.path}:/workspace/${mount.alias}`);
-      // Hide .git for each mount
-      dockerArgs.push('--mount', `type=tmpfs,destination=/workspace/${mount.alias}/.git,tmpfs-size=1m`);
+      // Hide .git for each mount (only if it's a git repo)
+      const gitDir = path.join(mount.path, '.git');
+      if (fs.existsSync(gitDir)) {
+        dockerArgs.push('--mount', `type=tmpfs,destination=/workspace/${mount.alias}/.git,tmpfs-size=1m`);
+      }
     }
   } else {
     // Backward compatibility: single project mode
     dockerArgs.push('-v', `${projectPath}:/workspace`);
-    dockerArgs.push('--mount', 'type=tmpfs,destination=/workspace/.git,tmpfs-size=1m');
+    // Hide .git only if it exists
+    const gitDir = path.join(projectPath, '.git');
+    if (fs.existsSync(gitDir)) {
+      dockerArgs.push('--mount', 'type=tmpfs,destination=/workspace/.git,tmpfs-size=1m');
+    }
   }
 
   // Add authentication based on type
