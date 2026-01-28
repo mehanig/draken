@@ -23,6 +23,16 @@ export interface GitDiff {
   unstaged: string;
 }
 
+export interface GitBranch {
+  name: string;
+  current: boolean;
+}
+
+export interface CommitResult {
+  hash: string;
+  message: string;
+}
+
 export function isGitRepo(projectPath: string): boolean {
   const gitDir = path.join(projectPath, '.git');
   return fs.existsSync(gitDir);
@@ -30,6 +40,126 @@ export function isGitRepo(projectPath: string): boolean {
 
 function createGit(projectPath: string): SimpleGit {
   return simpleGit(projectPath, { binary: 'git', maxConcurrentProcesses: 6 });
+}
+
+/**
+ * List all local branches
+ */
+export async function listBranches(projectPath: string): Promise<GitBranch[]> {
+  if (!isGitRepo(projectPath)) {
+    return [];
+  }
+
+  try {
+    const git = createGit(projectPath);
+    const branchSummary = await git.branchLocal();
+    
+    return branchSummary.all.map(name => ({
+      name,
+      current: name === branchSummary.current,
+    }));
+  } catch (err) {
+    console.error('Error listing branches:', err);
+    return [];
+  }
+}
+
+/**
+ * Create a new branch
+ */
+export async function createBranch(projectPath: string, branchName: string, checkout: boolean = true): Promise<void> {
+  if (!isGitRepo(projectPath)) {
+    throw new Error('Not a git repository');
+  }
+
+  const git = createGit(projectPath);
+  
+  if (checkout) {
+    await git.checkoutLocalBranch(branchName);
+  } else {
+    await git.branch([branchName]);
+  }
+}
+
+/**
+ * Checkout an existing branch
+ */
+export async function checkoutBranch(projectPath: string, branchName: string): Promise<void> {
+  if (!isGitRepo(projectPath)) {
+    throw new Error('Not a git repository');
+  }
+
+  const git = createGit(projectPath);
+  await git.checkout(branchName);
+}
+
+/**
+ * Stage files for commit
+ */
+export async function stageFiles(projectPath: string, files: string[]): Promise<void> {
+  if (!isGitRepo(projectPath)) {
+    throw new Error('Not a git repository');
+  }
+
+  const git = createGit(projectPath);
+  await git.add(files);
+}
+
+/**
+ * Stage all changes
+ */
+export async function stageAll(projectPath: string): Promise<void> {
+  if (!isGitRepo(projectPath)) {
+    throw new Error('Not a git repository');
+  }
+
+  const git = createGit(projectPath);
+  await git.add('-A');
+}
+
+/**
+ * Unstage files
+ */
+export async function unstageFiles(projectPath: string, files: string[]): Promise<void> {
+  if (!isGitRepo(projectPath)) {
+    throw new Error('Not a git repository');
+  }
+
+  const git = createGit(projectPath);
+  await git.reset(['HEAD', '--', ...files]);
+}
+
+/**
+ * Unstage all files
+ */
+export async function unstageAll(projectPath: string): Promise<void> {
+  if (!isGitRepo(projectPath)) {
+    throw new Error('Not a git repository');
+  }
+
+  const git = createGit(projectPath);
+  await git.reset(['HEAD']);
+}
+
+/**
+ * Commit staged changes
+ */
+export async function commit(projectPath: string, message: string): Promise<CommitResult> {
+  if (!isGitRepo(projectPath)) {
+    throw new Error('Not a git repository');
+  }
+
+  if (!message.trim()) {
+    throw new Error('Commit message cannot be empty');
+  }
+
+  const git = createGit(projectPath);
+  const result = await git.commit(message);
+  
+  return {
+    hash: result.commit,
+    message: message,
+  };
 }
 
 export async function getGitStatus(projectPath: string): Promise<GitStatus> {

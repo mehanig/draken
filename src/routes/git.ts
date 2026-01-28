@@ -2,7 +2,20 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { getProjectById } from '../db/queries';
-import { getGitStatus, getGitDiffs, getGitDiff, getFileDiffContent } from '../git/status';
+import {
+  getGitStatus,
+  getGitDiffs,
+  getGitDiff,
+  getFileDiffContent,
+  listBranches,
+  createBranch,
+  checkoutBranch,
+  stageFiles,
+  stageAll,
+  unstageFiles,
+  unstageAll,
+  commit,
+} from '../git/status';
 
 const router = Router();
 
@@ -145,6 +158,150 @@ router.get('/:projectId/file', (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error reading file:', err);
     res.status(500).json({ error: 'Failed to read file' });
+  }
+});
+
+// List all branches
+router.get('/:projectId/branches', async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.projectId as string, 10);
+    const project = getProjectById(projectId);
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const branches = await listBranches(project.path);
+    res.json(branches);
+  } catch (err) {
+    console.error('Error listing branches:', err);
+    res.status(500).json({ error: 'Failed to list branches' });
+  }
+});
+
+// Create a new branch
+router.post('/:projectId/branch', async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.projectId as string, 10);
+    const { name, checkout = true } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Branch name is required' });
+    }
+
+    const project = getProjectById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    await createBranch(project.path, name, checkout);
+    res.json({ success: true, branch: name });
+  } catch (err) {
+    console.error('Error creating branch:', err);
+    const message = err instanceof Error ? err.message : 'Failed to create branch';
+    res.status(500).json({ error: message });
+  }
+});
+
+// Checkout a branch
+router.post('/:projectId/checkout', async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.projectId as string, 10);
+    const { branch } = req.body;
+
+    if (!branch) {
+      return res.status(400).json({ error: 'Branch name is required' });
+    }
+
+    const project = getProjectById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    await checkoutBranch(project.path, branch);
+    res.json({ success: true, branch });
+  } catch (err) {
+    console.error('Error checking out branch:', err);
+    const message = err instanceof Error ? err.message : 'Failed to checkout branch';
+    res.status(500).json({ error: message });
+  }
+});
+
+// Stage files
+router.post('/:projectId/stage', async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.projectId as string, 10);
+    const { files, all = false } = req.body;
+
+    const project = getProjectById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    if (all) {
+      await stageAll(project.path);
+    } else if (files && files.length > 0) {
+      await stageFiles(project.path, files);
+    } else {
+      return res.status(400).json({ error: 'No files specified' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error staging files:', err);
+    const message = err instanceof Error ? err.message : 'Failed to stage files';
+    res.status(500).json({ error: message });
+  }
+});
+
+// Unstage files
+router.post('/:projectId/unstage', async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.projectId as string, 10);
+    const { files, all = false } = req.body;
+
+    const project = getProjectById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    if (all) {
+      await unstageAll(project.path);
+    } else if (files && files.length > 0) {
+      await unstageFiles(project.path, files);
+    } else {
+      return res.status(400).json({ error: 'No files specified' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error unstaging files:', err);
+    const message = err instanceof Error ? err.message : 'Failed to unstage files';
+    res.status(500).json({ error: message });
+  }
+});
+
+// Commit staged changes
+router.post('/:projectId/commit', async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.projectId as string, 10);
+    const { message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Commit message is required' });
+    }
+
+    const project = getProjectById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const result = await commit(project.path, message);
+    res.json(result);
+  } catch (err) {
+    console.error('Error committing:', err);
+    const message = err instanceof Error ? err.message : 'Failed to commit';
+    res.status(500).json({ error: message });
   }
 });
 
