@@ -22,7 +22,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          aws s3 sync site s3://drakenweb/${{ env.BUILD_PATH }} \
+          aws s3 sync site s3://draken-site/${{ env.BUILD_PATH }} \
             --endpoint-url https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com \
             --region auto
 
@@ -78,5 +78,5 @@ jobs:
 
       - name: Print deployment info
         run: |
-          echo "✅ Deployed to: drakenweb/${{ env.BUILD_PATH }}/"
+          echo "✅ Deployed to: draken-site/${{ env.BUILD_PATH }}/"
           echo "✅ Transform rules updated to point to ${{ env.BUILD_PATH }}"
