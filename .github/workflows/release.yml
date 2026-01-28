@@ -42,7 +42,7 @@ jobs:
       - name: Update version (manual dispatch)
         if: github.event_name == 'workflow_dispatch'
         run: |
-          npm version ${{ inputs.version }} --no-git-tag-version
+          npm version ${{ inputs.version }} --no-git-tag-version --allow-same-version
           echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
 
       - name: Get version from tag
