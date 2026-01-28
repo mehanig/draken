@@ -67,8 +67,8 @@ export async function listBranches(projectPath: string): Promise<GitBranch[]> {
       name,
       current: name === branchSummary.current,
     }));
-  } catch (err) {
-    console.error('Error listing branches:', err);
+  } catch {
+    // Not a valid git repo - return empty
     return [];
   }
 }
@@ -285,8 +285,7 @@ export async function getGitDiff(projectPath: string, staged: boolean = false): 
     const git = createGit(projectPath);
     const options = staged ? ['--cached'] : [];
     return await git.diff(options);
-  } catch (err) {
-    console.error('Error getting git diff:', err);
+  } catch {
     return '';
   }
 }
@@ -376,8 +375,8 @@ export async function getFileDiffContent(
         newContent = fs.readFileSync(fullPath, 'utf-8');
       }
     }
-  } catch (err) {
-    console.error('Error getting file diff content:', err);
+  } catch {
+    // Git error - return empty content
   }
 
   return {
