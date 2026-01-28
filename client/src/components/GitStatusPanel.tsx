@@ -7,11 +7,29 @@ import {
   FileX,
   FileQuestion,
   ChevronRight,
+  ChevronDown,
   ArrowUp,
   ArrowDown,
   RefreshCw,
+  Plus,
+  Check,
+  X,
+  Minus,
 } from 'lucide-react';
-import { getGitStatus, getFileContent, getFileDiffContent } from '../api';
+import {
+  getGitStatus,
+  getFileContent,
+  getFileDiffContent,
+  getBranches,
+  createBranch,
+  checkoutBranch,
+  stageFiles,
+  stageAll,
+  unstageFiles,
+  unstageAll,
+  commitChanges,
+  type GitBranch as GitBranchType,
+} from '../api';
 import { DiffViewer, FileContentViewer } from './DiffViewer';
 import { Modal } from './Modal';
 import type { GitStatus, GitFileChange } from '../types';
@@ -27,17 +45,33 @@ interface DiffContent {
 
 export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
+  const [branches, setBranches] = useState<GitBranchType[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<GitFileChange | null>(null);
   const [diffContent, setDiffContent] = useState<DiffContent | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  
+  // Branch UI state
+  const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+  const [showNewBranchInput, setShowNewBranchInput] = useState(false);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [branchLoading, setBranchLoading] = useState(false);
+  
+  // Commit UI state
+  const [commitMessage, setCommitMessage] = useState('');
+  const [committing, setCommitting] = useState(false);
+  const [showCommitForm, setShowCommitForm] = useState(false);
 
   const loadGitInfo = async () => {
     try {
-      const statusData = await getGitStatus(projectId);
+      const [statusData, branchData] = await Promise.all([
+        getGitStatus(projectId),
+        getBranches(projectId),
+      ]);
       setStatus(statusData);
+      setBranches(branchData);
     } catch (err) {
       console.error('Failed to load git info:', err);
     } finally {
@@ -63,7 +97,6 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
 
     try {
       if (change.status === 'untracked') {
-        // For untracked files, just get the content
         const response = await getFileContent(projectId, change.path);
         if (response.content) {
           setFileContent(response.content);
@@ -75,7 +108,6 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
           setFileContent(`(File too large: ${Math.round(response.size! / 1024)}KB)`);
         }
       } else {
-        // For modified/staged files, get old and new content
         const content = await getFileDiffContent(projectId, change.path, change.staged);
         setDiffContent({
           oldContent: content.oldContent,
@@ -94,6 +126,93 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
     setSelectedFile(null);
     setDiffContent(null);
     setFileContent(null);
+  };
+
+  const handleBranchCheckout = async (branchName: string) => {
+    setBranchLoading(true);
+    try {
+      await checkoutBranch(projectId, branchName);
+      await loadGitInfo();
+      setShowBranchDropdown(false);
+    } catch (err) {
+      console.error('Failed to checkout branch:', err);
+      alert(err instanceof Error ? err.message : 'Failed to checkout branch');
+    } finally {
+      setBranchLoading(false);
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    if (!newBranchName.trim()) return;
+    
+    setBranchLoading(true);
+    try {
+      await createBranch(projectId, newBranchName.trim(), true);
+      await loadGitInfo();
+      setNewBranchName('');
+      setShowNewBranchInput(false);
+      setShowBranchDropdown(false);
+    } catch (err) {
+      console.error('Failed to create branch:', err);
+      alert(err instanceof Error ? err.message : 'Failed to create branch');
+    } finally {
+      setBranchLoading(false);
+    }
+  };
+
+  const handleStageFile = async (e: React.MouseEvent, filePath: string) => {
+    e.stopPropagation();
+    try {
+      await stageFiles(projectId, [filePath]);
+      await loadGitInfo();
+    } catch (err) {
+      console.error('Failed to stage file:', err);
+    }
+  };
+
+  const handleUnstageFile = async (e: React.MouseEvent, filePath: string) => {
+    e.stopPropagation();
+    try {
+      await unstageFiles(projectId, [filePath]);
+      await loadGitInfo();
+    } catch (err) {
+      console.error('Failed to unstage file:', err);
+    }
+  };
+
+  const handleStageAll = async () => {
+    try {
+      await stageAll(projectId);
+      await loadGitInfo();
+    } catch (err) {
+      console.error('Failed to stage all:', err);
+    }
+  };
+
+  const handleUnstageAll = async () => {
+    try {
+      await unstageAll(projectId);
+      await loadGitInfo();
+    } catch (err) {
+      console.error('Failed to unstage all:', err);
+    }
+  };
+
+  const handleCommit = async () => {
+    if (!commitMessage.trim()) return;
+    
+    setCommitting(true);
+    try {
+      await commitChanges(projectId, commitMessage.trim());
+      setCommitMessage('');
+      setShowCommitForm(false);
+      await loadGitInfo();
+    } catch (err) {
+      console.error('Failed to commit:', err);
+      alert(err instanceof Error ? err.message : 'Failed to commit');
+    } finally {
+      setCommitting(false);
+    }
   };
 
   if (loading) {
@@ -139,25 +258,82 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
           </button>
         </div>
 
-        {/* Branch info */}
-        <div className="git-branch-info">
-          <span className="branch-name">
+        {/* Branch selector */}
+        <div className="git-branch-selector">
+          <div className="branch-current" onClick={() => setShowBranchDropdown(!showBranchDropdown)}>
             <GitBranch size={14} />
-            {status.branch}
-          </span>
-          {(status.ahead > 0 || status.behind > 0) && (
-            <span className="branch-sync">
-              {status.ahead > 0 && (
-                <span className="ahead" title={`${status.ahead} commit(s) ahead`}>
-                  <ArrowUp size={12} /> {status.ahead}
-                </span>
+            <span className="branch-name">{status.branch}</span>
+            <ChevronDown size={14} className={showBranchDropdown ? 'rotated' : ''} />
+            {(status.ahead > 0 || status.behind > 0) && (
+              <span className="branch-sync">
+                {status.ahead > 0 && (
+                  <span className="ahead" title={`${status.ahead} commit(s) ahead`}>
+                    <ArrowUp size={12} /> {status.ahead}
+                  </span>
+                )}
+                {status.behind > 0 && (
+                  <span className="behind" title={`${status.behind} commit(s) behind`}>
+                    <ArrowDown size={12} /> {status.behind}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+          
+          {showBranchDropdown && (
+            <div className="branch-dropdown">
+              {showNewBranchInput ? (
+                <div className="branch-new-input">
+                  <input
+                    type="text"
+                    placeholder="New branch name..."
+                    value={newBranchName}
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateBranch();
+                      if (e.key === 'Escape') setShowNewBranchInput(false);
+                    }}
+                    autoFocus
+                    disabled={branchLoading}
+                  />
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={handleCreateBranch}
+                    disabled={branchLoading || !newBranchName.trim()}
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => setShowNewBranchInput(false)}
+                    disabled={branchLoading}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="branch-item branch-new"
+                  onClick={() => setShowNewBranchInput(true)}
+                >
+                  <Plus size={14} /> Create new branch
+                </button>
               )}
-              {status.behind > 0 && (
-                <span className="behind" title={`${status.behind} commit(s) behind`}>
-                  <ArrowDown size={12} /> {status.behind}
-                </span>
-              )}
-            </span>
+              
+              <div className="branch-list">
+                {branches.map((branch) => (
+                  <button
+                    key={branch.name}
+                    className={`branch-item ${branch.current ? 'current' : ''}`}
+                    onClick={() => !branch.current && handleBranchCheckout(branch.name)}
+                    disabled={branch.current || branchLoading}
+                  >
+                    {branch.current && <Check size={14} />}
+                    {branch.name}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
@@ -171,14 +347,26 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
             {stagedChanges.length > 0 && (
               <div className="git-change-group">
                 <div className="git-change-group-header staged">
-                  <FilePlus size={14} />
-                  Staged Changes ({stagedChanges.length})
+                  <div className="header-left">
+                    <FilePlus size={14} />
+                    Staged Changes ({stagedChanges.length})
+                  </div>
+                  <button
+                    className="btn btn-xs btn-ghost"
+                    onClick={handleUnstageAll}
+                    title="Unstage all"
+                  >
+                    <Minus size={12} /> All
+                  </button>
                 </div>
                 {stagedChanges.map((change) => (
                   <FileChangeItem
                     key={`staged-${change.path}`}
                     change={change}
                     onClick={() => handleFileClick(change)}
+                    onAction={(e) => handleUnstageFile(e, change.path)}
+                    actionIcon={<Minus size={14} />}
+                    actionTitle="Unstage"
                   />
                 ))}
               </div>
@@ -187,14 +375,26 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
             {unstagedChanges.length > 0 && (
               <div className="git-change-group">
                 <div className="git-change-group-header unstaged">
-                  <FileEdit size={14} />
-                  Modified ({unstagedChanges.length})
+                  <div className="header-left">
+                    <FileEdit size={14} />
+                    Modified ({unstagedChanges.length})
+                  </div>
+                  <button
+                    className="btn btn-xs btn-ghost"
+                    onClick={handleStageAll}
+                    title="Stage all"
+                  >
+                    <Plus size={12} /> All
+                  </button>
                 </div>
                 {unstagedChanges.map((change) => (
                   <FileChangeItem
                     key={`unstaged-${change.path}`}
                     change={change}
                     onClick={() => handleFileClick(change)}
+                    onAction={(e) => handleStageFile(e, change.path)}
+                    actionIcon={<Plus size={14} />}
+                    actionTitle="Stage"
                   />
                 ))}
               </div>
@@ -203,16 +403,73 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
             {untrackedFiles.length > 0 && (
               <div className="git-change-group">
                 <div className="git-change-group-header untracked">
-                  <FileQuestion size={14} />
-                  Untracked ({untrackedFiles.length})
+                  <div className="header-left">
+                    <FileQuestion size={14} />
+                    Untracked ({untrackedFiles.length})
+                  </div>
+                  <button
+                    className="btn btn-xs btn-ghost"
+                    onClick={handleStageAll}
+                    title="Stage all"
+                  >
+                    <Plus size={12} /> All
+                  </button>
                 </div>
                 {untrackedFiles.map((change) => (
                   <FileChangeItem
                     key={`untracked-${change.path}`}
                     change={change}
                     onClick={() => handleFileClick(change)}
+                    onAction={(e) => handleStageFile(e, change.path)}
+                    actionIcon={<Plus size={14} />}
+                    actionTitle="Stage"
                   />
                 ))}
+              </div>
+            )}
+
+            {/* Commit section */}
+            {stagedChanges.length > 0 && (
+              <div className="git-commit-section">
+                {showCommitForm ? (
+                  <div className="commit-form">
+                    <textarea
+                      placeholder="Commit message..."
+                      value={commitMessage}
+                      onChange={(e) => setCommitMessage(e.target.value)}
+                      rows={3}
+                      autoFocus
+                      disabled={committing}
+                    />
+                    <div className="commit-actions">
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleCommit}
+                        disabled={committing || !commitMessage.trim()}
+                      >
+                        {committing ? <span className="spinner" /> : <GitCommit size={14} />}
+                        Commit
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => {
+                          setShowCommitForm(false);
+                          setCommitMessage('');
+                        }}
+                        disabled={committing}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-primary commit-btn"
+                    onClick={() => setShowCommitForm(true)}
+                  >
+                    <GitCommit size={14} /> Commit {stagedChanges.length} file{stagedChanges.length !== 1 ? 's' : ''}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -271,12 +528,29 @@ function FileIcon({ status }: { status: GitFileChange['status'] }) {
   }
 }
 
-function FileChangeItem({ change, onClick }: { change: GitFileChange; onClick: () => void }) {
+interface FileChangeItemProps {
+  change: GitFileChange;
+  onClick: () => void;
+  onAction: (e: React.MouseEvent) => void;
+  actionIcon: React.ReactNode;
+  actionTitle: string;
+}
+
+function FileChangeItem({ change, onClick, onAction, actionIcon, actionTitle }: FileChangeItemProps) {
   return (
-    <button className={`git-file-item ${change.status}`} onClick={onClick}>
-      <FileIcon status={change.status} />
-      <span className="file-path">{change.path}</span>
-      <ChevronRight size={14} className="file-arrow" />
-    </button>
+    <div className={`git-file-item ${change.status}`}>
+      <button className="file-content" onClick={onClick}>
+        <FileIcon status={change.status} />
+        <span className="file-path">{change.path}</span>
+        <ChevronRight size={14} className="file-arrow" />
+      </button>
+      <button
+        className="btn btn-xs btn-ghost file-action"
+        onClick={onAction}
+        title={actionTitle}
+      >
+        {actionIcon}
+      </button>
+    </div>
   );
 }

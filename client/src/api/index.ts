@@ -187,3 +187,86 @@ export async function getFileDiffContent(
   });
   return handleResponse<FileDiffContentResponse>(response);
 }
+
+// Git branch operations
+export interface GitBranch {
+  name: string;
+  current: boolean;
+}
+
+export async function getBranches(projectId: number): Promise<GitBranch[]> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/branches`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<GitBranch[]>(response);
+}
+
+export async function createBranch(projectId: number, name: string, checkout: boolean = true): Promise<void> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/branch`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ name, checkout }),
+  });
+  return handleVoidResponse(response);
+}
+
+export async function checkoutBranch(projectId: number, branch: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/checkout`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ branch }),
+  });
+  return handleVoidResponse(response);
+}
+
+// Git staging operations
+export async function stageFiles(projectId: number, files: string[]): Promise<void> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/stage`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ files }),
+  });
+  return handleVoidResponse(response);
+}
+
+export async function stageAll(projectId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/stage`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ all: true }),
+  });
+  return handleVoidResponse(response);
+}
+
+export async function unstageFiles(projectId: number, files: string[]): Promise<void> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/unstage`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ files }),
+  });
+  return handleVoidResponse(response);
+}
+
+export async function unstageAll(projectId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/unstage`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ all: true }),
+  });
+  return handleVoidResponse(response);
+}
+
+// Git commit
+export interface CommitResult {
+  hash: string;
+  message: string;
+}
+
+export async function commitChanges(projectId: number, message: string): Promise<CommitResult> {
+  const response = await fetch(`${API_BASE}/git/${projectId}/commit`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ message }),
+  });
+  return handleResponse<CommitResult>(response);
+}

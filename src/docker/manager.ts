@@ -200,6 +200,9 @@ export async function runTask(
     'run',
     '--rm',
     '-v', `${projectPath}:/workspace`,
+    // Hide .git directory inside container by mounting empty tmpfs over it
+    // This prevents Claude from accessing/modifying git history inside the container
+    '--mount', 'type=tmpfs,destination=/workspace/.git,tmpfs-size=1m',
     '--log-driver', 'json-file',
     // Force color output in terminal commands
     '-e', 'TERM=xterm-256color',
