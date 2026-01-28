@@ -34,8 +34,17 @@ export interface CommitResult {
 }
 
 export function isGitRepo(projectPath: string): boolean {
-  const gitDir = path.join(projectPath, '.git');
-  return fs.existsSync(gitDir);
+  try {
+    const gitDir = path.join(projectPath, '.git');
+    if (!fs.existsSync(gitDir)) {
+      return false;
+    }
+    // Check if it's a directory (normal repo) or file (worktree/submodule)
+    const stat = fs.statSync(gitDir);
+    return stat.isDirectory() || stat.isFile();
+  } catch {
+    return false;
+  }
 }
 
 function createGit(projectPath: string): SimpleGit {
@@ -253,8 +262,8 @@ export async function getGitStatus(projectPath: string): Promise<GitStatus> {
       hasUncommittedChanges,
       hasUntrackedFiles,
     };
-  } catch (err) {
-    console.error('Error getting git status:', err);
+  } catch {
+    // Not a valid git repo or git error - return as non-repo
     return {
       isRepo: false,
       branch: null,
