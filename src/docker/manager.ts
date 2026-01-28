@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { spawn, ChildProcess, execSync } from 'child_process';
-import { getDockerfilePath } from './dockerfile';
+import { getDockerfilePath, getProjectMounts, MountConfig } from './dockerfile';
 
 // Detect Docker socket path
 function getDockerSocket(): string | undefined {
@@ -195,14 +195,13 @@ export async function runTask(
     fs.mkdirSync(sessionsDir, { recursive: true });
   }
 
+  // Get mount configuration from dockerfile
+  const mounts = getProjectMounts(projectPath);
+  
   // Build docker run arguments
   const dockerArgs = [
     'run',
     '--rm',
-    '-v', `${projectPath}:/workspace`,
-    // Hide .git directory inside container by mounting empty tmpfs over it
-    // This prevents Claude from accessing/modifying git history inside the container
-    '--mount', 'type=tmpfs,destination=/workspace/.git,tmpfs-size=1m',
     '--log-driver', 'json-file',
     // Force color output in terminal commands
     '-e', 'TERM=xterm-256color',
@@ -210,6 +209,20 @@ export async function runTask(
     '-e', 'CLICOLOR=1',
     '-e', 'CLICOLOR_FORCE=1',
   ];
+
+  // Mount project directories
+  if (mounts.length > 0) {
+    // Multi-repo mode: mount each configured path with its alias
+    for (const mount of mounts) {
+      dockerArgs.push('-v', `${mount.path}:/workspace/${mount.alias}`);
+      // Hide .git for each mount
+      dockerArgs.push('--mount', `type=tmpfs,destination=/workspace/${mount.alias}/.git,tmpfs-size=1m`);
+    }
+  } else {
+    // Backward compatibility: single project mode
+    dockerArgs.push('-v', `${projectPath}:/workspace`);
+    dockerArgs.push('--mount', 'type=tmpfs,destination=/workspace/.git,tmpfs-size=1m');
+  }
 
   // Add authentication based on type
   if (auth.type === 'oauth') {

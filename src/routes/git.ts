@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { getProjectById } from '../db/queries';
+import { getProjectMounts, MountConfig } from '../docker/dockerfile';
 import {
   getGitStatus,
   getGitDiffs,
@@ -15,6 +16,8 @@ import {
   unstageFiles,
   unstageAll,
   commit,
+  isGitRepo,
+  GitStatus,
 } from '../git/status';
 
 const router = Router();
@@ -22,40 +25,112 @@ const router = Router();
 // Max file size to read (100KB)
 const MAX_FILE_SIZE = 100 * 1024;
 
-// Get git status for a project
+/**
+ * Helper to get repo paths for a project
+ * Returns array of { alias, path } for all mounts, or single entry with project path
+ */
+function getRepoPaths(projectPath: string): MountConfig[] {
+  const mounts = getProjectMounts(projectPath);
+  if (mounts.length > 0) {
+    return mounts;
+  }
+  // Backward compatibility: single repo mode
+  return [{ alias: 'main', path: projectPath }];
+}
+
+/**
+ * Helper to resolve repo path from project and optional mount alias
+ */
+function resolveRepoPath(projectPath: string, mountAlias?: string): string {
+  const mounts = getProjectMounts(projectPath);
+  
+  if (mounts.length === 0) {
+    // Single repo mode - always use project path
+    return projectPath;
+  }
+  
+  if (!mountAlias) {
+    // Multi-repo mode but no alias specified - error
+    throw new Error('Mount alias is required for multi-repo projects');
+  }
+  
+  const mount = mounts.find(m => m.alias === mountAlias);
+  if (!mount) {
+    throw new Error(`Mount "${mountAlias}" not found`);
+  }
+  
+  return mount.path;
+}
+
+export interface MultiRepoGitStatus {
+  mount: string;
+  path: string;
+  status: GitStatus;
+}
+
+// Get git status for all repos in a project
 router.get('/:projectId/status', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
+    const mountAlias = req.query.mount as string | undefined;
     const project = getProjectById(projectId);
 
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const status = await getGitStatus(project.path);
-    res.json(status);
+    const mounts = getRepoPaths(project.path);
+    
+    // If specific mount requested, return only that
+    if (mountAlias) {
+      const mount = mounts.find(m => m.alias === mountAlias);
+      if (!mount) {
+        return res.status(404).json({ error: `Mount "${mountAlias}" not found` });
+      }
+      const status = await getGitStatus(mount.path);
+      return res.json(status);
+    }
+
+    // Return status for all mounts
+    const results: MultiRepoGitStatus[] = await Promise.all(
+      mounts.map(async (mount) => ({
+        mount: mount.alias,
+        path: mount.path,
+        status: await getGitStatus(mount.path),
+      }))
+    );
+
+    // For backward compatibility, if single repo, return just the status
+    if (results.length === 1 && mounts[0].alias === 'main' && getProjectMounts(project.path).length === 0) {
+      return res.json(results[0].status);
+    }
+
+    res.json(results);
   } catch (err) {
     console.error('Error getting git status:', err);
     res.status(500).json({ error: 'Failed to get git status' });
   }
 });
 
-// Get git diff for a project
+// Get git diff for a project/mount
 router.get('/:projectId/diff', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
     const staged = req.query.staged === 'true';
+    const mountAlias = req.query.mount as string | undefined;
     const project = getProjectById(projectId);
 
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const diff = await getGitDiff(project.path, staged);
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+    const diff = await getGitDiff(repoPath, staged);
     res.json({ diff });
   } catch (err) {
     console.error('Error getting git diff:', err);
-    res.status(500).json({ error: 'Failed to get git diff' });
+    const message = err instanceof Error ? err.message : 'Failed to get git diff';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -63,17 +138,20 @@ router.get('/:projectId/diff', async (req: Request, res: Response) => {
 router.get('/:projectId/diffs', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
+    const mountAlias = req.query.mount as string | undefined;
     const project = getProjectById(projectId);
 
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const diffs = await getGitDiffs(project.path);
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+    const diffs = await getGitDiffs(repoPath);
     res.json(diffs);
   } catch (err) {
     console.error('Error getting git diffs:', err);
-    res.status(500).json({ error: 'Failed to get git diffs' });
+    const message = err instanceof Error ? err.message : 'Failed to get git diffs';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -83,6 +161,7 @@ router.get('/:projectId/file-diff', async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId as string, 10);
     const filePath = req.query.path as string;
     const staged = req.query.staged === 'true';
+    const mountAlias = req.query.mount as string | undefined;
 
     if (!filePath) {
       return res.status(400).json({ error: 'File path is required' });
@@ -93,17 +172,20 @@ router.get('/:projectId/file-diff', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+
     // Prevent path traversal
-    const fullPath = path.join(project.path, filePath);
-    if (!fullPath.startsWith(project.path)) {
+    const fullPath = path.join(repoPath, filePath);
+    if (!fullPath.startsWith(repoPath)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const diffContent = await getFileDiffContent(project.path, filePath, staged);
+    const diffContent = await getFileDiffContent(repoPath, filePath, staged);
     res.json(diffContent);
   } catch (err) {
     console.error('Error getting file diff content:', err);
-    res.status(500).json({ error: 'Failed to get file diff content' });
+    const message = err instanceof Error ? err.message : 'Failed to get file diff content';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -112,6 +194,7 @@ router.get('/:projectId/file', (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
     const filePath = req.query.path as string;
+    const mountAlias = req.query.mount as string | undefined;
 
     if (!filePath) {
       return res.status(400).json({ error: 'File path is required' });
@@ -122,9 +205,11 @@ router.get('/:projectId/file', (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+
     // Prevent path traversal
-    const fullPath = path.join(project.path, filePath);
-    if (!fullPath.startsWith(project.path)) {
+    const fullPath = path.join(repoPath, filePath);
+    if (!fullPath.startsWith(repoPath)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -157,7 +242,8 @@ router.get('/:projectId/file', (req: Request, res: Response) => {
     res.json({ content });
   } catch (err) {
     console.error('Error reading file:', err);
-    res.status(500).json({ error: 'Failed to read file' });
+    const message = err instanceof Error ? err.message : 'Failed to read file';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -165,17 +251,20 @@ router.get('/:projectId/file', (req: Request, res: Response) => {
 router.get('/:projectId/branches', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
+    const mountAlias = req.query.mount as string | undefined;
     const project = getProjectById(projectId);
 
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const branches = await listBranches(project.path);
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+    const branches = await listBranches(repoPath);
     res.json(branches);
   } catch (err) {
     console.error('Error listing branches:', err);
-    res.status(500).json({ error: 'Failed to list branches' });
+    const message = err instanceof Error ? err.message : 'Failed to list branches';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -183,7 +272,7 @@ router.get('/:projectId/branches', async (req: Request, res: Response) => {
 router.post('/:projectId/branch', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
-    const { name, checkout = true } = req.body;
+    const { name, checkout = true, mount: mountAlias } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Branch name is required' });
@@ -194,7 +283,8 @@ router.post('/:projectId/branch', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    await createBranch(project.path, name, checkout);
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+    await createBranch(repoPath, name, checkout);
     res.json({ success: true, branch: name });
   } catch (err) {
     console.error('Error creating branch:', err);
@@ -207,7 +297,7 @@ router.post('/:projectId/branch', async (req: Request, res: Response) => {
 router.post('/:projectId/checkout', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
-    const { branch } = req.body;
+    const { branch, mount: mountAlias } = req.body;
 
     if (!branch) {
       return res.status(400).json({ error: 'Branch name is required' });
@@ -218,7 +308,8 @@ router.post('/:projectId/checkout', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    await checkoutBranch(project.path, branch);
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+    await checkoutBranch(repoPath, branch);
     res.json({ success: true, branch });
   } catch (err) {
     console.error('Error checking out branch:', err);
@@ -231,17 +322,19 @@ router.post('/:projectId/checkout', async (req: Request, res: Response) => {
 router.post('/:projectId/stage', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
-    const { files, all = false } = req.body;
+    const { files, all = false, mount: mountAlias } = req.body;
 
     const project = getProjectById(projectId);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+
     if (all) {
-      await stageAll(project.path);
+      await stageAll(repoPath);
     } else if (files && files.length > 0) {
-      await stageFiles(project.path, files);
+      await stageFiles(repoPath, files);
     } else {
       return res.status(400).json({ error: 'No files specified' });
     }
@@ -258,17 +351,19 @@ router.post('/:projectId/stage', async (req: Request, res: Response) => {
 router.post('/:projectId/unstage', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
-    const { files, all = false } = req.body;
+    const { files, all = false, mount: mountAlias } = req.body;
 
     const project = getProjectById(projectId);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+
     if (all) {
-      await unstageAll(project.path);
+      await unstageAll(repoPath);
     } else if (files && files.length > 0) {
-      await unstageFiles(project.path, files);
+      await unstageFiles(repoPath, files);
     } else {
       return res.status(400).json({ error: 'No files specified' });
     }
@@ -285,7 +380,7 @@ router.post('/:projectId/unstage', async (req: Request, res: Response) => {
 router.post('/:projectId/commit', async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.projectId as string, 10);
-    const { message } = req.body;
+    const { message, mount: mountAlias } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Commit message is required' });
@@ -296,7 +391,8 @@ router.post('/:projectId/commit', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const result = await commit(project.path, message);
+    const repoPath = resolveRepoPath(project.path, mountAlias);
+    const result = await commit(repoPath, message);
     res.json(result);
   } catch (err) {
     console.error('Error committing:', err);
