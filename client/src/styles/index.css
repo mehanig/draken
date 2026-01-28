@@ -1091,6 +1091,236 @@ p, span, a, li, label {
   border-color: var(--accent-primary);
 }
 
+/* Multi-repo tabs */
+.git-repo-tabs {
+  display: flex;
+  gap: var(--spacing-xs);
+  padding: 0 0 var(--spacing-md) 0;
+  margin-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+}
+
+.repo-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.repo-tab:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.repo-tab.active {
+  background: var(--bg-primary);
+  border-color: var(--border-color);
+  color: var(--accent-primary);
+}
+
+.repo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background: var(--warning-bg);
+  color: var(--warning);
+  border-radius: 9px;
+}
+
+.git-repo-content {
+  display: none;
+}
+
+.git-repo-content.active {
+  display: block;
+}
+
+/* Mounts Panel */
+.mounts-panel {
+  margin-bottom: var(--spacing-xl);
+}
+
+.mounts-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
+.mounts-panel-header h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: 0;
+}
+
+.mounts-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.mounts-loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--spacing-lg);
+}
+
+.mounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-md);
+}
+
+.mount-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+}
+
+.mount-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mount-alias {
+  font-weight: 600;
+  color: var(--accent-primary);
+}
+
+.mount-path {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.mount-remove {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.mount-item:hover .mount-remove {
+  opacity: 1;
+}
+
+.mount-add-form {
+  padding: var(--spacing-md);
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.mount-add-fields {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.mount-path-input {
+  flex: 2;
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.mount-path-input input {
+  flex: 1;
+  padding: var(--spacing-sm);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.mount-alias-input {
+  flex: 1;
+  padding: var(--spacing-sm);
+  font-size: 0.875rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.mount-browser {
+  margin: var(--spacing-sm) 0;
+  padding: var(--spacing-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.browser-current {
+  padding: var(--spacing-xs);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: var(--spacing-xs);
+}
+
+.browser-item {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.8125rem;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.browser-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.browser-select {
+  margin-top: var(--spacing-sm);
+  width: 100%;
+}
+
+.mount-add-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  justify-content: flex-end;
+}
+
+.mounts-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.mounts-hint code {
+  font-family: var(--font-mono);
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+
 /* Git Change Group Header with Actions */
 .git-change-group-header {
   display: flex;

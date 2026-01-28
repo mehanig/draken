@@ -8,7 +8,16 @@ import {
   deleteProject,
   updateProjectDockerfileStatus,
 } from '../db/queries';
-import { dockerfileExists, generateDockerfile, getDockerfileContent } from '../docker/dockerfile';
+import {
+  dockerfileExists,
+  generateDockerfile,
+  getDockerfileContent,
+  getProjectMounts,
+  addMountToDockerfile,
+  removeMountFromDockerfile,
+  deriveAliasFromPath,
+  generateDockerfileWithMount,
+} from '../docker/dockerfile';
 import { buildProjectImage } from '../docker/manager';
 import { CreateProjectRequest } from '../types';
 
@@ -148,8 +157,9 @@ router.post('/:id/generate-dockerfile', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Generate dockerfile from template
-    generateDockerfile(project.path);
+    // Generate dockerfile with initial mount for the project path
+    const alias = deriveAliasFromPath(project.path);
+    generateDockerfileWithMount(project.path, alias, project.path);
     updateProjectDockerfileStatus(project.id, true);
 
     // Build the Docker image
@@ -162,10 +172,93 @@ router.post('/:id/generate-dockerfile', async (req: Request, res: Response) => {
     }
 
     const content = getDockerfileContent(project.path);
-    res.json({ exists: true, content });
+    const mounts = getProjectMounts(project.path);
+    res.json({ exists: true, content, mounts });
   } catch (err) {
     console.error('Error generating dockerfile:', err);
     res.status(500).json({ error: 'Failed to generate dockerfile' });
+  }
+});
+
+// Get project mounts
+router.get('/:id/mounts', (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const project = getProjectById(id);
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const mounts = getProjectMounts(project.path);
+    res.json(mounts);
+  } catch (err) {
+    console.error('Error getting mounts:', err);
+    res.status(500).json({ error: 'Failed to get mounts' });
+  }
+});
+
+// Add a mount to project
+router.post('/:id/mounts', (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const { path: mountPath, alias } = req.body;
+
+    if (!mountPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    // Validate path exists
+    if (!fs.existsSync(mountPath)) {
+      return res.status(400).json({ error: 'Path does not exist' });
+    }
+
+    const project = getProjectById(id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    if (!dockerfileExists(project.path)) {
+      return res.status(400).json({ error: 'Dockerfile does not exist. Generate it first.' });
+    }
+
+    // Use provided alias or derive from path
+    const mountAlias = alias || deriveAliasFromPath(mountPath);
+
+    addMountToDockerfile(project.path, mountAlias, mountPath);
+    
+    const mounts = getProjectMounts(project.path);
+    res.status(201).json(mounts);
+  } catch (err) {
+    console.error('Error adding mount:', err);
+    const message = err instanceof Error ? err.message : 'Failed to add mount';
+    res.status(500).json({ error: message });
+  }
+});
+
+// Remove a mount from project
+router.delete('/:id/mounts/:alias', (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const alias = req.params.alias as string;
+
+    const project = getProjectById(id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    if (!dockerfileExists(project.path)) {
+      return res.status(400).json({ error: 'Dockerfile does not exist' });
+    }
+
+    removeMountFromDockerfile(project.path, alias);
+    
+    const mounts = getProjectMounts(project.path);
+    res.json(mounts);
+  } catch (err) {
+    console.error('Error removing mount:', err);
+    const message = err instanceof Error ? err.message : 'Failed to remove mount';
+    res.status(500).json({ error: message });
   }
 });
 

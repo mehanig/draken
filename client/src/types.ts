@@ -55,3 +55,14 @@ export interface GitDiff {
   staged: string;
   unstaged: string;
 }
+
+export interface MountConfig {
+  alias: string;
+  path: string;
+}
+
+export interface MultiRepoGitStatus {
+  mount: string;
+  path: string;
+  status: GitStatus;
+}

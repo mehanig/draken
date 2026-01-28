@@ -19,6 +19,7 @@ import { StatusDot } from '../components/StatusBadge';
 import { TaskLogsModal } from '../components/TaskLogsModal';
 import { SessionThread, groupTasksBySession } from '../components/SessionThread';
 import { GitStatusPanel } from '../components/GitStatusPanel';
+import { MountsPanel } from '../components/MountsPanel';
 import type { Project, Task, DockerfileStatus } from '../types';
 
 export function ProjectDetail() {
@@ -156,6 +157,9 @@ export function ProjectDetail() {
           )}
         </div>
       </div>
+
+      {/* Mounts Panel */}
+      <MountsPanel projectId={projectId} dockerfileExists={dockerfileStatus?.exists || false} />
 
       {/* Git Status */}
       <GitStatusPanel projectId={projectId} />
