@@ -212,6 +212,7 @@ export async function runTask(
 
   // Mount project directories
   if (mounts.length > 0) {
+    console.log(`[runTask] Mounting ${mounts.length} directories:`);
     // Multi-repo mode: mount each configured path with its alias
     for (const mount of mounts) {
       dockerArgs.push('-v', `${mount.path}:/workspace/${mount.alias}`);
@@ -219,6 +220,9 @@ export async function runTask(
       const gitDir = path.join(mount.path, '.git');
       if (fs.existsSync(gitDir)) {
         dockerArgs.push('--mount', `type=tmpfs,destination=/workspace/${mount.alias}/.git,tmpfs-size=1m`);
+        console.log(`  - ${mount.alias}: ${mount.path} (git repo, .git hidden)`);
+      } else {
+        console.log(`  - ${mount.alias}: ${mount.path} (not a git repo)`);
       }
     }
   } else {
@@ -228,6 +232,9 @@ export async function runTask(
     const gitDir = path.join(projectPath, '.git');
     if (fs.existsSync(gitDir)) {
       dockerArgs.push('--mount', 'type=tmpfs,destination=/workspace/.git,tmpfs-size=1m');
+      console.log(`[runTask] Mounting: ${projectPath} (git repo, .git hidden)`);
+    } else {
+      console.log(`[runTask] Mounting: ${projectPath} (not a git repo)`);
     }
   }
 
