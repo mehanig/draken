@@ -27,8 +27,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '22'
+          # Note: registry-url removed to allow OIDC auth to work properly
+          # With registry-url set, setup-node expects NODE_AUTH_TOKEN
+
+      - name: Debug npm config
+        run: |
+          echo "npm version: $(npm -v)"
+          echo "node version: $(node -v)"
+          echo "=== ~/.npmrc ==="
+          cat ~/.npmrc 2>/dev/null || echo "(none)"
+          echo "=== .npmrc ==="
+          cat .npmrc 2>/dev/null || echo "(none)"
+          echo "=== npm config ==="
+          npm config list
 
       - name: Install root dependencies
         run: npm ci
@@ -52,7 +64,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       # Publish with provenance for supply chain security
-      # Uses OIDC trusted publishing - no NPM_TOKEN needed if configured on npm
+      # Uses OIDC trusted publishing - no NPM_TOKEN needed
       - name: Publish to npm
         run: npm publish --provenance --access public
 
