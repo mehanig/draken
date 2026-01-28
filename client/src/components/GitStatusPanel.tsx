@@ -33,7 +33,7 @@ import {
 } from '../api';
 import { DiffViewer, FileContentViewer } from './DiffViewer';
 import { Modal } from './Modal';
-import type { GitStatus, GitFileChange, MultiRepoGitStatus } from '../types';
+import type { GitStatus, GitFileChange } from '../types';
 
 interface GitStatusPanelProps {
   projectId: number;
