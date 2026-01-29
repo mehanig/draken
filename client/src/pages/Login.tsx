@@ -27,19 +27,7 @@ export function Login() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <svg className="login-logo" viewBox="0 0 100 100">
-            <defs>
-              <linearGradient id="loginGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style={{ stopColor: '#6366f1', stopOpacity: 1 }} />
-                <stop offset="100%" style={{ stopColor: '#8b5cf6', stopOpacity: 1 }} />
-              </linearGradient>
-            </defs>
-            <circle cx="50" cy="50" r="45" fill="url(#loginGrad)" />
-            <path d="M30 35 L50 25 L70 35 L70 65 L50 75 L30 65 Z" fill="none" stroke="white" strokeWidth="3" />
-            <path d="M50 25 L50 75" stroke="white" strokeWidth="2" />
-            <path d="M30 50 L70 50" stroke="white" strokeWidth="2" />
-            <circle cx="50" cy="50" r="8" fill="white" />
-          </svg>
+          <img src="/favicon.png" alt="Draken" className="login-logo" />
           <h1>Draken</h1>
           <p className="login-subtitle">Claude Code Dashboard</p>
         </div>

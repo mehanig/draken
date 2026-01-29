@@ -106,21 +106,21 @@ export function MountsPanel({ projectId, dockerfileExists }: MountsPanelProps) {
 
   if (loading) {
     return (
-      <div className="card mounts-panel">
+      <div className="mounts-panel embedded">
         <div className="mounts-panel-header">
-          <h3><FolderGit2 size={18} /> Project Mounts</h3>
+          <h4><FolderGit2 size={16} /> Mounts</h4>
         </div>
         <div className="mounts-loading">
-          <span className="spinner" />
+          <span className="spinner spinner-sm" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="card mounts-panel">
+    <div className="mounts-panel embedded">
       <div className="mounts-panel-header">
-        <h3><FolderGit2 size={18} /> Project Mounts</h3>
+        <h4><FolderGit2 size={16} /> Mounts</h4>
         <div className="mounts-actions">
           <button
             className="btn btn-ghost btn-icon btn-sm"

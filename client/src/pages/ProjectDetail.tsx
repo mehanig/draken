@@ -118,51 +118,53 @@ export function ProjectDetail() {
 
       {/* Project Info */}
       <div className="card project-info-card">
-        <div className="project-path-display">
-          <FolderOpen size={18} />
-          <span>{project.path}</span>
-        </div>
-
-        <div className="dockerfile-status">
-          <div className="dockerfile-status-text">
-            <FileCode size={18} />
-            {dockerfileStatus?.exists ? (
-              <>
-                <StatusDot status="ready" />
-                <span className="text-success">Dockerfile ready</span>
-              </>
-            ) : (
-              <>
-                <StatusDot status="pending" />
-                <span className="text-warning">Dockerfile not found</span>
-              </>
-            )}
+        <div className="project-info-row">
+          <div className="project-path-display">
+            <FolderOpen size={18} />
+            <span>{project.path}</span>
           </div>
-          {!dockerfileStatus?.exists && (
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={handleGenerateDockerfile}
-              disabled={generating}
-            >
-              {generating ? (
+
+          <div className="dockerfile-status">
+            <div className="dockerfile-status-text">
+              <FileCode size={18} />
+              {dockerfileStatus?.exists ? (
                 <>
-                  <span className="spinner spinner-sm" /> Generating...
+                  <StatusDot status="ready" />
+                  <span className="text-success">Dockerfile ready</span>
                 </>
               ) : (
                 <>
-                  <Sparkles size={14} /> Generate Dockerfile
+                  <StatusDot status="pending" />
+                  <span className="text-warning">Dockerfile not found</span>
                 </>
               )}
-            </button>
-          )}
+            </div>
+            {!dockerfileStatus?.exists && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleGenerateDockerfile}
+                disabled={generating}
+              >
+                {generating ? (
+                  <>
+                    <span className="spinner spinner-sm" /> Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={14} /> Generate Dockerfile
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Embedded Mounts Panel */}
+        <MountsPanel projectId={projectId} dockerfileExists={dockerfileStatus?.exists || false} />
+
+        {/* Embedded Git Status */}
+        <GitStatusPanel projectId={projectId} />
       </div>
-
-      {/* Mounts Panel */}
-      <MountsPanel projectId={projectId} dockerfileExists={dockerfileStatus?.exists || false} />
-
-      {/* Git Status */}
-      <GitStatusPanel projectId={projectId} />
 
       {/* Task Form */}
       <div className="card task-form-card">

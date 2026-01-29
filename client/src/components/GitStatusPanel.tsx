@@ -151,12 +151,12 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
 
   if (loading) {
     return (
-      <div className="card git-panel">
+      <div className="git-panel embedded">
         <div className="git-panel-header">
-          <h3><GitBranch size={18} /> Git Status</h3>
+          <h4><GitBranch size={16} /> Git</h4>
         </div>
         <div className="git-loading">
-          <span className="spinner" />
+          <span className="spinner spinner-sm" />
         </div>
       </div>
     );
@@ -164,9 +164,9 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
 
   if (repos.length === 0 || repos.every(r => !r.status.isRepo)) {
     return (
-      <div className="card git-panel">
+      <div className="git-panel embedded">
         <div className="git-panel-header">
-          <h3><GitBranch size={18} /> Git Status</h3>
+          <h4><GitBranch size={16} /> Git</h4>
         </div>
         <p className="text-muted">No git repositories found</p>
       </div>
@@ -177,9 +177,9 @@ export function GitStatusPanel({ projectId }: GitStatusPanelProps) {
 
   return (
     <>
-      <div className="card git-panel">
+      <div className="git-panel embedded">
         <div className="git-panel-header">
-          <h3><GitBranch size={18} /> Git Status</h3>
+          <h4><GitBranch size={16} /> Git</h4>
           <button
             className="btn btn-ghost btn-icon btn-sm"
             onClick={handleRefresh}
