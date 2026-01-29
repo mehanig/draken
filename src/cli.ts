@@ -4,20 +4,77 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import https from 'https';
+
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
+const currentVersion = pkg.version;
+
+/**
+ * Check for updates (non-blocking, cached for 24h)
+ */
+async function checkForUpdates(): Promise<void> {
+  const dataDir = process.env.DRAKEN_DATA_DIR || path.join(os.homedir(), '.draken');
+  const cacheFile = path.join(dataDir, '.update-check');
+  
+  // Check cache (24 hour TTL)
+  try {
+    if (fs.existsSync(cacheFile)) {
+      const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+      const age = Date.now() - cache.timestamp;
+      if (age < 24 * 60 * 60 * 1000) {
+        // Cache still valid
+        if (cache.latest && cache.latest !== currentVersion) {
+          showUpdateMessage(cache.latest);
+        }
+        return;
+      }
+    }
+  } catch {}
+
+  // Fetch latest version from npm
+  return new Promise((resolve) => {
+    const req = https.get('https://registry.npmjs.org/draken/latest', { timeout: 3000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const latest = JSON.parse(data).version;
+          
+          // Save to cache
+          if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+          }
+          fs.writeFileSync(cacheFile, JSON.stringify({ latest, timestamp: Date.now() }));
+          
+          if (latest !== currentVersion) {
+            showUpdateMessage(latest);
+          }
+        } catch {}
+        resolve();
+      });
+    });
+    
+    req.on('error', () => resolve());
+    req.on('timeout', () => { req.destroy(); resolve(); });
+  });
+}
+
+function showUpdateMessage(latest: string): void {
+  console.log(`\n  📦 Update available: ${currentVersion} → ${latest}`);
+  console.log(`     Run: npm i -g draken@latest\n`);
+}
 
 // Handle --version and --help before anything else
 const args = process.argv.slice(2);
 
 if (args.includes('--version') || args.includes('-v')) {
-  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
-  console.log(`draken v${pkg.version}`);
-  process.exit(0);
-}
+  console.log(`draken v${currentVersion}`);
+  checkForUpdates().then(() => process.exit(0));
+} else if (args.includes('--help') || args.includes('-h')) {
 
-if (args.includes('--help') || args.includes('-h')) {
-  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
+} else if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-  Draken v${pkg.version} - Claude Code Dashboard
+  Draken v${currentVersion} - Claude Code Dashboard
 
   Usage: draken [options]
 
@@ -72,6 +129,9 @@ if (!hasOAuth && !hasApiKey) {
   console.log('    2. Set: ANTHROPIC_API_KEY=your-key\n');
   process.exit(1);
 }
+
+// Check for updates in background (non-blocking)
+checkForUpdates();
 
 // Import and start the server
 import('./server');
