@@ -43,22 +43,22 @@ function getRepoPaths(projectPath: string): MountConfig[] {
  */
 function resolveRepoPath(projectPath: string, mountAlias?: string): string {
   const mounts = getProjectMounts(projectPath);
-  
+
   if (mounts.length === 0) {
     // Single repo mode - always use project path
     return projectPath;
   }
-  
+
   if (!mountAlias) {
-    // Multi-repo mode but no alias specified - error
-    throw new Error('Mount alias is required for multi-repo projects');
+    // Multi-repo mode but no alias specified - default to first mount
+    return mounts[0].path;
   }
-  
+
   const mount = mounts.find(m => m.alias === mountAlias);
   if (!mount) {
     throw new Error(`Mount "${mountAlias}" not found`);
   }
-  
+
   return mount.path;
 }
 
