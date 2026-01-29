@@ -5,6 +5,45 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
+// Handle --version and --help before anything else
+const args = process.argv.slice(2);
+
+if (args.includes('--version') || args.includes('-v')) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
+  console.log(`draken v${pkg.version}`);
+  process.exit(0);
+}
+
+if (args.includes('--help') || args.includes('-h')) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
+  console.log(`
+  Draken v${pkg.version} - Claude Code Dashboard
+
+  Usage: draken [options]
+
+  Options:
+    -v, --version    Show version
+    -h, --help       Show this help
+
+  Environment Variables:
+    DRAKEN_USERNAME     Username for dashboard auth
+    DRAKEN_PASSWORD     Password for dashboard auth
+    DRAKEN_JWT_SECRET   Secret for JWT tokens
+    DRAKEN_NO_AUTH      Set to 'true' to disable auth
+    DRAKEN_PORT         Server port (default: 40333)
+    DRAKEN_DATA_DIR     Data directory (default: ~/.draken)
+
+  Claude Authentication (one required):
+    ANTHROPIC_API_KEY   API key for Claude
+    - or run: claude login
+
+  Examples:
+    DRAKEN_NO_AUTH=true draken
+    DRAKEN_USERNAME=admin DRAKEN_PASSWORD=secret DRAKEN_JWT_SECRET=xyz draken
+`);
+  process.exit(0);
+}
+
 // Check for required environment variables
 const noAuth = process.env.DRAKEN_NO_AUTH === 'true';
 if (!noAuth) {
