@@ -1,22 +1,37 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import os from 'os';
+import fs from 'fs';
 
-const DB_PATH = path.join(__dirname, '../../data/draken.db');
+/**
+ * Get the draken data directory
+ * Uses DRAKEN_DATA_DIR env var if set, otherwise ~/.draken
+ * Works cross-platform (Windows, macOS, Linux)
+ */
+export function getDataDir(): string {
+  if (process.env.DRAKEN_DATA_DIR) {
+    return process.env.DRAKEN_DATA_DIR;
+  }
+  return path.join(os.homedir(), '.draken');
+}
+
+const DATA_DIR = getDataDir();
+const DB_PATH = path.join(DATA_DIR, 'draken.db');
 
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!db) {
     // Ensure data directory exists
-    const fs = require('fs');
-    const dataDir = path.dirname(DB_PATH);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
     }
 
     db = new Database(DB_PATH);
     db.pragma('journal_mode = WAL');
     initSchema(db);
+    
+    console.log(`Database: ${DB_PATH}`);
   }
   return db;
 }
