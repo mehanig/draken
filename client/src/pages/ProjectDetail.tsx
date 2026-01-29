@@ -33,6 +33,7 @@ export function ProjectDetail() {
   const [submitting, setSubmitting] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedSessionChain, setSelectedSessionChain] = useState<Task[]>([]);
 
   const loadProject = async () => {
     try {
@@ -215,7 +216,10 @@ export function ProjectDetail() {
               <SessionThread
                 key={sessionTasks[0].id}
                 tasks={sessionTasks}
-                onTaskClick={setSelectedTask}
+                onTaskClick={(task) => {
+                  setSelectedTask(task);
+                  setSelectedSessionChain(sessionTasks);
+                }}
               />
             ))}
           </div>
@@ -224,6 +228,7 @@ export function ProjectDetail() {
 
       <TaskLogsModal
         task={selectedTask}
+        sessionChain={selectedSessionChain}
         onClose={() => setSelectedTask(null)}
         onTaskUpdate={loadTasks}
       />

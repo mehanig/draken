@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 
@@ -63,9 +64,9 @@ export function XTerminal({
 
     const terminal = new Terminal({
       theme: TERMINAL_THEME,
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, monospace',
-      fontSize: 13,
-      lineHeight: 1.2,
+      fontFamily: '"IBM Plex Mono", monospace',
+      fontSize: 14,
+      lineHeight: 1.3,
       cursorBlink: false,
       cursorStyle: 'block',
       scrollback: 10000,
@@ -79,6 +80,17 @@ export function XTerminal({
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
     terminal.open(containerRef.current);
+
+    // Use WebGL renderer for proper character positioning (no span gaps)
+    try {
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+      });
+      terminal.loadAddon(webglAddon);
+    } catch (e) {
+      console.warn('[XTerminal] WebGL not available, using DOM renderer:', e);
+    }
 
     // Fit terminal to container
     fitAddon.fit();
