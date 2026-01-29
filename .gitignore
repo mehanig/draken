@@ -30,6 +30,7 @@ Thumbs.db
 
 # Docker
 *.dockerfile
+Dockerfile.draken
 !draken.dockerfile.template
 
 # Claude sessions (generated per project)
