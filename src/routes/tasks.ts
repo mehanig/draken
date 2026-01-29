@@ -14,6 +14,12 @@ import { runTask, stopContainer, sendInputToTask, isTaskRunning } from '../docke
 import { dockerfileExists } from '../docker/dockerfile';
 import { CreateTaskRequest } from '../types';
 import { getAuthConfig } from '../auth/middleware';
+import {
+  broadcastOutput,
+  broadcastSession,
+  broadcastEnd,
+  broadcastError,
+} from '../websocket/terminal';
 
 interface CreateFollowupRequest {
   prompt: string;
@@ -92,10 +98,12 @@ router.post('/project/:projectId', async (req: Request, res: Response) => {
         updateTaskStatus(task.id, 'running', containerId);
 
         logEmitter.on('log', (data: string) => {
-          console.log('[task log received]', task.id, 'data length:', data.length, 'subscribers:', logSubscribers.get(task.id)?.length || 0);
           appendTaskLogs(task.id, data);
 
-          // Broadcast to SSE subscribers
+          // Broadcast to WebSocket clients
+          broadcastOutput(task.id, data);
+
+          // Also broadcast to SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'log', data })}\n\n`);
@@ -106,7 +114,10 @@ router.post('/project/:projectId', async (req: Request, res: Response) => {
           // Save session ID for follow-up conversations
           updateTaskSessionId(task.id, sessionId);
 
-          // Notify subscribers of session ID
+          // Broadcast to WebSocket clients
+          broadcastSession(task.id, sessionId);
+
+          // Also notify SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`);
@@ -117,7 +128,10 @@ router.post('/project/:projectId', async (req: Request, res: Response) => {
           const status = exitCode === 0 ? 'completed' : 'failed';
           updateTaskCompleted(task.id, status);
 
-          // Notify subscribers of completion
+          // Broadcast to WebSocket clients
+          broadcastEnd(task.id, status, exitCode);
+
+          // Also notify SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'end', status, exitCode })}\n\n`);
@@ -131,7 +145,10 @@ router.post('/project/:projectId', async (req: Request, res: Response) => {
           appendTaskLogs(task.id, `\nError: ${err.message}\n`);
           updateTaskCompleted(task.id, 'failed');
 
-          // Notify subscribers of error
+          // Broadcast to WebSocket clients
+          broadcastError(task.id, err.message);
+
+          // Also notify SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
@@ -198,6 +215,11 @@ router.post('/:id/followup', async (req: Request, res: Response) => {
 
         logEmitter.on('log', (data: string) => {
           appendTaskLogs(task.id, data);
+
+          // Broadcast to WebSocket clients
+          broadcastOutput(task.id, data);
+
+          // Also broadcast to SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'log', data })}\n\n`);
@@ -206,6 +228,11 @@ router.post('/:id/followup', async (req: Request, res: Response) => {
 
         logEmitter.on('session', (sessionId: string) => {
           updateTaskSessionId(task.id, sessionId);
+
+          // Broadcast to WebSocket clients
+          broadcastSession(task.id, sessionId);
+
+          // Also notify SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`);
@@ -215,6 +242,11 @@ router.post('/:id/followup', async (req: Request, res: Response) => {
         logEmitter.on('end', (exitCode: number) => {
           const status = exitCode === 0 ? 'completed' : 'failed';
           updateTaskCompleted(task.id, status);
+
+          // Broadcast to WebSocket clients
+          broadcastEnd(task.id, status, exitCode);
+
+          // Also notify SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'end', status, exitCode })}\n\n`);
@@ -227,6 +259,11 @@ router.post('/:id/followup', async (req: Request, res: Response) => {
           console.error('Container error:', err);
           appendTaskLogs(task.id, `\nError: ${err.message}\n`);
           updateTaskCompleted(task.id, 'failed');
+
+          // Broadcast to WebSocket clients
+          broadcastError(task.id, err.message);
+
+          // Also notify SSE subscribers (backward compatibility)
           const subscribers = logSubscribers.get(task.id) || [];
           subscribers.forEach(subscriber => {
             subscriber.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);

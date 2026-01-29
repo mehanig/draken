@@ -33,33 +33,53 @@ const socketPath = getDockerSocket();
 const docker = socketPath ? new Docker({ socketPath }) : new Docker();
 const IMAGE_PREFIX = 'draken-project-';
 
-// ANSI color codes for terminal output
-const ANSI = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  // Colors
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  magenta: '\x1b[35m',
-  cyan: '\x1b[36m',
-  white: '\x1b[37m',
-  gray: '\x1b[90m',
-  // Bright colors
-  brightRed: '\x1b[91m',
-  brightGreen: '\x1b[92m',
-  brightYellow: '\x1b[93m',
-  brightBlue: '\x1b[94m',
-  brightMagenta: '\x1b[95m',
-  brightCyan: '\x1b[96m',
-};
+// UUID pattern for session IDs
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
-// Helper to colorize text
-function colorize(text: string, ...codes: string[]): string {
-  return codes.join('') + text + ANSI.reset;
+/**
+ * Find session ID created after a given timestamp from the sessions directory
+ * Claude stores sessions in projects/<project-hash>/<session-id>.jsonl
+ */
+function findSessionAfter(sessionsDir: string, afterTime: number): string | null {
+  try {
+    const projectsDir = path.join(sessionsDir, 'projects');
+    if (!fs.existsSync(projectsDir)) {
+      return null;
+    }
+
+    let latestTime = afterTime;
+    let latestSessionId: string | null = null;
+
+    // Recursively search for .jsonl files
+    const searchDir = (dir: string) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          searchDir(fullPath);
+        } else if (entry.name.endsWith('.jsonl')) {
+          // Extract session ID from filename (remove .jsonl extension)
+          const sessionId = entry.name.replace('.jsonl', '');
+          if (UUID_PATTERN.test(sessionId)) {
+            const stat = fs.statSync(fullPath);
+            // Only consider files modified after the task started
+            if (stat.mtimeMs > latestTime) {
+              latestTime = stat.mtimeMs;
+              latestSessionId = sessionId;
+            }
+          }
+        }
+      }
+    };
+
+    searchDir(projectsDir);
+    return latestSessionId;
+  } catch (err) {
+    console.error('[findSessionAfter] Error:', err);
+    return null;
+  }
 }
+
 
 // Store active task processes for interactive input
 const activeProcesses = new Map<number, ChildProcess>();
@@ -189,6 +209,9 @@ export async function runTask(
 
   const logEmitter = new EventEmitter() as ContainerLogEmitter;
 
+  // Record start time to find sessions created during this task
+  const taskStartTime = Date.now();
+
   // Create a persistent sessions directory for this project
   const sessionsDir = path.join(projectPath, '.draken-sessions');
   if (!fs.existsSync(sessionsDir)) {
@@ -202,6 +225,7 @@ export async function runTask(
   const dockerArgs = [
     'run',
     '--rm',
+    '-t',  // Allocate TTY for proper terminal output
     '--log-driver', 'json-file',
     // Force color output in terminal commands
     '-e', 'TERM=xterm-256color',
@@ -258,7 +282,6 @@ export async function runTask(
   dockerArgs.push('-p', prompt);
   dockerArgs.push('--dangerously-skip-permissions');  // Skip permission prompts for non-interactive container
   dockerArgs.push('--verbose');
-  dockerArgs.push('--output-format', 'stream-json');
   dockerArgs.push('--allowedTools', 'Read,Edit,Write,Bash,Glob,Grep');
 
   // Add --resume if continuing a conversation
@@ -285,98 +308,10 @@ export async function runTask(
   // Generate a pseudo container ID from the process
   const containerId = `pid-${dockerProcess.pid}`;
 
-  // Buffer for incomplete JSON lines
-  let buffer = '';
-
   dockerProcess.stdout.on('data', (chunk: Buffer) => {
     const chunkStr = chunk.toString('utf-8');
-    console.log('[stdout chunk]', chunkStr.substring(0, 200)); // Debug: show first 200 chars
-    buffer += chunkStr;
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-
-        // Debug: log all event types to understand the stream format
-        console.log('[stream-json event]', event.type, event.session_id ? `session=${event.session_id}` : '');
-
-        // Capture session_id from any event that has it
-        if (event.session_id) {
-          logEmitter.emit('session', event.session_id);
-        }
-
-        // Extract text content from stream-json events with colorization
-        if (event.type === 'assistant' && event.message?.content) {
-          for (const block of event.message.content) {
-            if (block.type === 'text') {
-              console.log('[emit log] text:', block.text.substring(0, 100));
-              // Assistant text in default color
-              logEmitter.emit('log', block.text);
-            } else if (block.type === 'tool_use') {
-              console.log('[emit log] tool_use:', block.name);
-              // Tool header in cyan + bold
-              const toolHeader = colorize(`\n━━━ Tool: ${block.name} ━━━`, ANSI.cyan, ANSI.bold);
-              logEmitter.emit('log', toolHeader + '\n');
-              
-              // Show tool input if present (dimmed)
-              if (block.input) {
-                const inputStr = typeof block.input === 'string' 
-                  ? block.input 
-                  : JSON.stringify(block.input, null, 2);
-                // For common tools, show relevant input nicely
-                if (block.name === 'Bash' && block.input.command) {
-                  logEmitter.emit('log', colorize('$ ' + block.input.command, ANSI.yellow) + '\n');
-                } else if (block.name === 'Read' && block.input.file_path) {
-                  logEmitter.emit('log', colorize('Reading: ' + block.input.file_path, ANSI.blue) + '\n');
-                } else if (block.name === 'Write' && block.input.file_path) {
-                  logEmitter.emit('log', colorize('Writing: ' + block.input.file_path, ANSI.green) + '\n');
-                } else if (block.name === 'Edit' && block.input.file_path) {
-                  logEmitter.emit('log', colorize('Editing: ' + block.input.file_path, ANSI.yellow) + '\n');
-                } else if (inputStr.length < 500) {
-                  logEmitter.emit('log', colorize(inputStr, ANSI.dim) + '\n');
-                }
-              }
-            }
-          }
-        } else if (event.type === 'user' && event.message?.content) {
-          // Tool results from user messages (tool output)
-          for (const block of event.message.content) {
-            if (block.type === 'tool_result') {
-              const content = typeof block.content === 'string' 
-                ? block.content 
-                : JSON.stringify(block.content);
-              // Tool output - keep as-is (may contain its own ANSI codes from bash)
-              logEmitter.emit('log', content + '\n');
-              logEmitter.emit('log', colorize('━━━━━━━━━━━━━━━━━━━━━━━', ANSI.gray) + '\n');
-            }
-          }
-        } else if (event.type === 'result') {
-          // Final result in green
-          if (event.result) {
-            console.log('[emit log] result:', event.result.substring(0, 100));
-            const resultHeader = colorize('\n✓ Task Complete', ANSI.green, ANSI.bold);
-            logEmitter.emit('log', resultHeader + '\n');
-            logEmitter.emit('log', event.result + '\n');
-          }
-        } else if (event.type === 'error') {
-          console.log('[emit log] error:', event.error?.message);
-          // Errors in red + bold
-          const errorMsg = colorize(`\n✗ Error: ${event.error?.message || JSON.stringify(event)}`, ANSI.red, ANSI.bold);
-          logEmitter.emit('log', errorMsg + '\n');
-        } else if (event.type === 'system') {
-          // System messages in yellow
-          if (event.message) {
-            logEmitter.emit('log', colorize(`[System] ${event.message}`, ANSI.yellow) + '\n');
-          }
-        }
-      } catch {
-        // Not JSON, emit as raw text
-        logEmitter.emit('log', line + '\n');
-      }
-    }
+    // Emit raw terminal output directly - xterm.js will handle rendering
+    logEmitter.emit('log', chunkStr);
   });
 
   dockerProcess.stdout.on('end', () => {
@@ -391,6 +326,19 @@ export async function runTask(
 
   dockerProcess.on('close', (code: number | null) => {
     activeProcesses.delete(taskId);
+
+    // Try to find session ID from the Claude config directory
+    // Claude stores sessions in CLAUDE_CONFIG_DIR/projects/<project-hash>/<session-id>.jsonl
+    // When using OAuth, this is the mounted config dir (e.g., ~/.claude)
+    const searchDir = auth.type === 'oauth' ? auth.configDir! : sessionsDir;
+    const sessionId = findSessionAfter(searchDir, taskStartTime);
+    if (sessionId) {
+      logEmitter.emit('session', sessionId);
+      console.log('[runTask] Session ID from file:', sessionId);
+    } else {
+      console.log('[runTask] No new session file found in', searchDir, 'after', new Date(taskStartTime).toISOString());
+    }
+
     logEmitter.emit('end', code ?? 0);
   });
 

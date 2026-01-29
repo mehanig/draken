@@ -1,8 +1,10 @@
 import express from 'express';
+import { createServer } from 'http';
 import path from 'path';
 import { getDb, closeDb } from './db/schema';
 import { authMiddleware, validateAuthConfig } from './auth/middleware';
 import { validateClaudeAuth } from './docker/manager';
+import { initWebSocketServer } from './websocket/terminal';
 import authRouter from './routes/auth';
 import projectsRouter from './routes/projects';
 import tasksRouter from './routes/tasks';
@@ -24,6 +26,10 @@ try {
 }
 
 const app = express();
+const server = createServer(app);
+
+// Initialize WebSocket server for terminal streaming
+initWebSocketServer(server);
 
 // Middleware
 app.use(express.json());
@@ -59,7 +65,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server (using http server to support WebSocket upgrade)
+server.listen(PORT, () => {
   console.log(`Draken dashboard running at http://localhost:${PORT}`);
 });
