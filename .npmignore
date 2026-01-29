@@ -1,0 +1,37 @@
+# Source files (not needed in package)
+src/
+client/
+site/
+*.ts
+tsconfig.json
+
+# Development files
+.github/
+.vscode/
+.idea/
+*.md
+!README.md
+
+# Database
+*.db
+data/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Tests
+*.test.ts
+*.spec.ts
+__tests__/
+
+# Claude sessions
+.draken-sessions/
+.claude/
