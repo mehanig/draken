@@ -23,7 +23,7 @@ export function dockerfileExists(projectPath: string): boolean {
  */
 export function parseMountsFromDockerfile(content: string): MountConfig[] {
   const mounts: MountConfig[] = [];
-  const mountRegex = /^#\s*DRAKEN_MOUNT\s+(\w+)=(.+)$/gm;
+  const mountRegex = /^#\s*DRAKEN_MOUNT\s+([\w-]+)=(.+)$/gm;
   
   let match;
   while ((match = mountRegex.exec(content)) !== null) {
@@ -53,7 +53,7 @@ export function generateMountComments(mounts: MountConfig[]): string {
  */
 export function updateMountsInDockerfile(content: string, mounts: MountConfig[]): string {
   // Remove existing mount comments
-  const withoutMounts = content.replace(/^#\s*DRAKEN_MOUNT\s+\w+=.+\n?/gm, '');
+  const withoutMounts = content.replace(/^#\s*DRAKEN_MOUNT\s+[\w-]+=.+\n?/gm, '');
   
   // Add new mount comments at the top
   const mountComments = generateMountComments(mounts);

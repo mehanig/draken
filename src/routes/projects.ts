@@ -190,7 +190,21 @@ router.get('/:id/mounts', (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const mounts = getProjectMounts(project.path);
+    // Check if Dockerfile exists
+    if (!dockerfileExists(project.path)) {
+      return res.json([]);
+    }
+
+    let mounts = getProjectMounts(project.path);
+
+    // If Dockerfile exists but has no mounts, auto-add the project's own path
+    // This handles Dockerfiles created before mount support was added
+    if (mounts.length === 0) {
+      const alias = deriveAliasFromPath(project.path);
+      addMountToDockerfile(project.path, alias, project.path);
+      mounts = getProjectMounts(project.path);
+    }
+
     res.json(mounts);
   } catch (err) {
     console.error('Error getting mounts:', err);
