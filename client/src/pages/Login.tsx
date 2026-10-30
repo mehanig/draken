@@ -34,7 +34,7 @@ export function Login() {
 
         <form onSubmit={handleSubmit} className="login-form">
           {error && (
-            <div className="login-error">
+            <div className="login-error" role="alert">
               <AlertCircle size={16} />
               {error}
             </div>

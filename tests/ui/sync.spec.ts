@@ -27,6 +27,8 @@ test('scan → briefing → discussion → finish → remembered second sync, in
   await page.reload();
   await expect(page.getByRole('button', { name: 'Cancel generation', exact: true })).toBeVisible();
   await expect(page.getByText('Generation stopped. No model calls are running.', { exact: true })).toBeVisible();
+  await expect(page.locator('.tree-card .alert.warning')).toHaveCSS('background-color', 'rgb(255, 240, 184)');
+  await expect(page.locator('.tree-card .alert.error')).toHaveCSS('background-color', 'rgb(251, 224, 220)');
   await expect(page.getByRole('button', { name: 'Cancel generation', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Resume generation', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Finish sync', exact: true })).toBeDisabled();
@@ -34,6 +36,8 @@ test('scan → briefing → discussion → finish → remembered second sync, in
   await page.getByRole('button', { name: 'Resume generation', exact: true }).click();
   await expect(page.getByText('Needs your attention', { exact: false })).toBeVisible();
   await expect(page.getByText('70 / 70 entries processed', { exact: true })).toBeVisible();
+  await expect(page.locator('.briefing-card .prose')).toHaveCSS('text-transform', 'none');
+  await expect(page.locator('.tree-card progress')).toHaveCSS('border-radius', '0px');
   const citation = page.getByRole('button', { name: /Inspect evidence E/ }).first();
   const reference = (await citation.getAttribute('aria-label'))!.split(' ').pop();
   await citation.click();
@@ -54,6 +58,7 @@ test('scan → briefing → discussion → finish → remembered second sync, in
   await page.getByLabel('Carry into the next sync', { exact: true }).fill('Choose polling versus events.');
   await page.getByRole('button', { name: 'Save notes', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Notes saved');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: '.test-artifacts/desktop-sync.png', fullPage: true });
   await page.reload();
   await expect(page.getByLabel('Decisions', { exact: true })).toHaveValue('Validate exports before changing dashboard behavior.');
@@ -71,6 +76,8 @@ test('scan → briefing → discussion → finish → remembered second sync, in
   await expect(page.getByRole('heading', { name: 'Pick up where you left off.' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: '.test-artifacts/mobile-sync.png', fullPage: true });
+  await page.setViewportSize({ width: 320, height: 700 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
   expect(modelConfigWrites).toBe(0);
 });

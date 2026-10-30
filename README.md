@@ -130,6 +130,10 @@ Environment variables are read from the process environment; `.env` is **not** a
 | `DRAKEN_PI_MAX_INVOCATIONS` | `120`, bounded to 1–500; server-side default |
 | `DRAKEN_PI_TIMEOUT_MS` | `180000` per invocation, bounded to 1–600 seconds |
 
+## Visual identity
+
+Draken shares GifGun's blocky Bauhaus style: concrete-gray surfaces, square black borders, hard purple shadows, bold headings, and restrained primary-color accents. The dragon logo stays Draken's own. See [DESIGN.md](DESIGN.md) for the shared palette and rules.
+
 ## Development and verification
 
 ```bash
