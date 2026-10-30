@@ -3,8 +3,9 @@ import { api } from '../api';
 import type { Evidence, NodeSummary, TopicGroups, TreeNode, TreeProgress } from '../types';
 import { CitedText } from './EvidenceList';
 
-export function SummaryTree({ syncId, progress, evidence, onCancel }: {
+export function SummaryTree({ syncId, progress, evidence, onCancel, onResume, resumeEnabled }: {
   syncId: number; progress: TreeProgress; evidence: Evidence[]; onCancel: () => void;
+  onResume?: () => void; resumeEnabled: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<{ label: string; output: NodeSummary | TopicGroups; refs: Record<string, string> } | null>(null);
@@ -13,6 +14,7 @@ export function SummaryTree({ syncId, progress, evidence, onCancel }: {
   const run = progress.run;
   useEffect(() => { setSelected(null); setExpanded(new Set()); }, [run?.id]);
   if (!run) return null;
+  const stopped = !progress.busy && ['failed', 'cancelled', 'interrupted'].includes(run.status);
   const nodes = new Map(progress.nodes.map(node => [node.key, node]));
   const childKeys = new Set(progress.nodes.flatMap(node => node.children));
   const roots = progress.nodes.filter(node => !childKeys.has(node.key));
@@ -45,10 +47,18 @@ export function SummaryTree({ syncId, progress, evidence, onCancel }: {
     <progress max={Math.max(1, run.total_entries)} value={run.processed_entries} aria-label="Evidence compression progress" />
     <div className="tree-stats"><span>{run.processed_entries} / {run.total_entries} entries processed</span>
       <span>{run.invocations} / {run.max_invocations} pi invocations</span><span>{run.cache_hits} cached nodes reused</span></div>
-    <p className="small">{run.stage}</p>
+    <p className="small">{stopped ? 'Stopped at: ' : ''}{run.stage}</p>
     {run.question && <p className="small muted">Question: {run.question}</p>}
     <p className="small muted">Compression: {run.summary_model} · Final: {run.final_model}. Processed does not mean verified or marked reviewed. Provider retries may add requests; this is not a dollar-cost meter.</p>
-    {run.error && <div className="alert error" role="alert">{run.error}</div>}
+    {run.error && <div className="alert error" role="alert"><strong>Last run’s error:</strong> {run.error}</div>}
+    {stopped && <div className="alert warning">
+      <strong>Generation stopped. No model calls are running.</strong>
+      <p className="small">{run.processed_entries < run.total_entries
+        ? `${run.total_entries - run.processed_entries} entries still need compression.`
+        : 'Raw chunks were processed, but reconciliation or the final reply did not finish.'} Successful chunks are cached; nothing was marked reviewed.</p>
+      {onResume && <><p className="small">Authorize model access above, then resume. Cached chunks will be reused instead of being generated again.</p>
+        <button className="btn btn-primary" disabled={!resumeEnabled} onClick={onResume}>Resume generation</button></>}
+    </div>}
     {progress.busy && <button className="btn btn-secondary" onClick={onCancel}>Cancel generation</button>}
     <details className="tree-browser"><summary>Inspect {progress.nodes.length} summary nodes</summary><ul>{roots.map(node => renderNode(node))}</ul></details>
     {error && <p role="alert" className="error">{error}</p>}

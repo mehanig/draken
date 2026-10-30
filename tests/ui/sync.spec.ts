@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
 
 test('scan → briefing → discussion → finish → remembered second sync, including mobile layout', async ({ page }) => {
   const errors: string[] = [];
@@ -10,10 +12,24 @@ test('scan → briefing → discussion → finish → remembered second sync, in
   await page.getByRole('button', { name: 'Start sync', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Sync #1 open' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Generate briefing' })).toBeDisabled();
+  const overview = await page.evaluate(async () => (await fetch('/api/overview')).json());
+  const fixtureRoot = path.dirname(overview.session_root);
+  expect(path.basename(fixtureRoot)).toMatch(/^draken-browser-/);
+  const controlPath = path.join(overview.session_root, 'fake-control.json');
+  fs.writeFileSync(controlPath, JSON.stringify({ delay: 400, invalidSources: true }));
   await page.getByLabel('Allow briefing and discussion').check();
+  const started = page.waitForResponse(response => response.url().endsWith('/api/syncs/1/briefing') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Generate briefing' }).click();
+  expect((await started).status()).toBe(202);
   await page.reload();
   await expect(page.getByRole('button', { name: 'Cancel generation', exact: true })).toBeVisible();
+  await expect(page.getByText('Generation stopped. No model calls are running.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel generation', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Resume generation', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Finish sync', exact: true })).toBeDisabled();
+  fs.writeFileSync(controlPath, JSON.stringify({ delay: 400 }));
+  await page.getByLabel('Allow briefing and discussion').check();
+  await page.getByRole('button', { name: 'Resume generation', exact: true }).click();
   await expect(page.getByText('Needs your attention', { exact: false })).toBeVisible();
   await expect(page.getByText('70 / 70 entries processed', { exact: true })).toBeVisible();
   const citation = page.getByRole('button', { name: /Inspect evidence E/ }).first();

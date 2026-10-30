@@ -15,6 +15,7 @@ process.stdin.on('end', () => {
   if (process.env.DRAKEN_TEST_CALL_LOG) fs.appendFileSync(process.env.DRAKEN_TEST_CALL_LOG, JSON.stringify({
     task: value.task, stage: value.stage, model, input: value.input, snapshot: value.snapshot,
     verification_evidence: value.verification_evidence, retrieved_evidence: value.retrieved_evidence,
+    allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair,
   }) + '\n');
   if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage)) {
     console.error('provider unavailable'); process.exit(1);
@@ -33,7 +34,8 @@ process.stdin.on('end', () => {
       for (const child of value.input.children) for (const observation of child.summary.observations) latest.set(observation.topic, observation);
       observations = [...latest.values()].map(({ topic, state, summary, evidence }) => ({ topic, state, summary, evidence }));
     }
-    if (control.invalidSources) observations[0].evidence = ['K-invented'];
+    if (control.tooManySources && !value.repair && value.stage === 'chunk') observations[0].evidence = value.input.evidence.slice(0, 17).map(item => item.id);
+    if (control.invalidSources || (control.repairableSources && !value.repair)) observations[0].evidence = ['K-invented'];
     emit({ observations, limitations: [] });
   } else if (value.task === 'group_topics') {
     const groups = new Map();

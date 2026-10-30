@@ -8,7 +8,8 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { scanSessions } = require('../dist/sync/collector');
 const store = require('../dist/sync/store');
 const { generateReply, cancelReply, retrieveEvidence, validateVerdict } = require('../dist/sync/manager');
-const { validateSummary, validateGroups } = require('../dist/sync/tree');
+const { SummaryTree, validateSummary, validateGroups } = require('../dist/sync/tree');
+const { prepareModelInput } = require('../dist/sync/references');
 
 let temp, root, controlPath, logPath;
 beforeEach(() => {
@@ -151,7 +152,7 @@ test('failure after leaf processing preserves the cache and blocks coverage unti
 test('invented references and incomplete topic partitions are rejected, not cached as valid results', async () => {
   const sync = await begin();
   control({ invalidSources: true });
-  await assert.rejects(() => generateReply(sync.id), /unknown or missing source/);
+  await assert.rejects(() => generateReply(sync.id), /unknown source/);
   assert.equal(calls().length, 2, 'one bounded schema-repair attempt');
   assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM summary_cache').get().n, 0);
   assert.equal(store.getProgress(sync.id).run.processed_entries, 0);
@@ -242,6 +243,75 @@ test('question retrieval can reach raw evidence omitted by summaries and final c
   const last = calls().at(-1);
   assert.ok(last.retrieved_evidence.some(item => item.ref === 'E220'));
   assert.equal(result.messages.length, 2);
+});
+
+test('short wire labels round-trip exactly, without rewriting source prose or accepting guessed references', () => {
+  const ids = new Set(['Kabcdef123456', 'K987654fedcba']);
+  const text = 'Source prose mentions Kabcdef123456 and S2; leave it unchanged.';
+  const wire = prepareModelInput('chunk', { evidence: [{ id: 'Kabcdef123456', text }], background: [{ id: 'K987654fedcba', text }] }, ids);
+  assert.equal(wire.input.evidence[0].id, 'S1');
+  assert.equal(wire.input.background[0].id, 'S2');
+  assert.equal(wire.input.evidence[0].text, text);
+  const result = { observations: [{ topic: 'Demo', state: 'reported_done', summary: text, evidence: ['S2'] }], limitations: [] };
+  assert.deepEqual(wire.decode(validateSummary(result, wire.allowed)).observations[0].evidence, ['K987654fedcba']);
+  assert.throws(() => wire.decode({ ...result, observations: [{ ...result.observations[0], evidence: ['S99'] }] }), /unknown local label/);
+  const merged = prepareModelInput('session', { children: [{ id: 'long-child-hash', summary: wire.decode(result) }] }, ids);
+  assert.equal(merged.input.children[0].id, 'child1');
+  assert.deepEqual(merged.input.children[0].summary.observations[0].evidence, ['S2']);
+  const groups = prepareModelInput('topics', { observations: [{ id: 'Nlonghash_0', summary: text }] }, new Set(['Nlonghash_0']));
+  assert.equal(groups.input.observations[0].id, 'O1');
+  assert.deepEqual(groups.decode({ groups: [{ topic: 'Demo', members: ['O1'] }] }).groups[0].members, ['Nlonghash_0']);
+});
+
+test('citation cardinality errors are distinguished from missing and invented references', () => {
+  const allowed = new Set(Array.from({ length: 17 }, (_, i) => `S${i + 1}`));
+  const summary = evidence => ({ observations: [{ topic: 'Demo', state: 'requested', summary: 'A request', evidence }], limitations: [] });
+  assert.throws(() => validateSummary(summary([...allowed]), allowed), /17 distinct source IDs; the maximum is 16/);
+  assert.throws(() => validateSummary(summary([]), allowed), /nonempty evidence array/);
+  assert.throws(() => validateSummary(summary(['S999']), allowed), /unknown source ID/);
+  assert.deepEqual(validateSummary(summary(Array(20).fill('S1')), allowed).observations[0].evidence, ['S1']);
+});
+
+test('repair receives the rejected response, precise error, and allowed short labels', async () => {
+  const sync = await begin(20);
+  control({ tooManySources: true });
+  const result = await generateReply(sync.id);
+  const chunks = calls().filter(call => call.stage === 'chunk');
+  assert.equal(chunks.length, 2);
+  assert.match(chunks[1].repair.validation_error, /17 distinct source IDs/);
+  assert.equal(JSON.parse(chunks[1].repair.previous_output).observations[0].evidence.length, 17);
+  assert.ok(chunks[1].allowed_source_ids.every(id => /^S\d+$/.test(id)));
+  assert.equal(result.tree.complete, true);
+  const cached = getDb().prepare("SELECT output_json FROM summary_cache WHERE kind = 'chunk'").get();
+  assert.ok(JSON.parse(cached.output_json).observations[0].evidence.every(id => /^K/.test(id)), 'cache holds canonical IDs, never short wire labels');
+});
+
+test('an invented label is rejected, then repaired by the model rather than guessed locally', async () => {
+  const sync = await begin();
+  control({ repairableSources: true });
+  const result = await generateReply(sync.id);
+  const chunks = calls().filter(call => call.stage === 'chunk');
+  assert.equal(chunks.length, 2);
+  assert.match(chunks[1].repair.validation_error, /unknown source ID/);
+  assert.match(chunks[1].repair.previous_output, /K-invented/);
+  assert.equal(result.tree.complete, true);
+});
+
+test('validated v1 leaf caches survive the short-label upgrade without another model call', async () => {
+  const sync = await begin(120);
+  const runId = Number(getDb().prepare(`INSERT INTO sync_runs(sync_id, summary_model, final_model, max_invocations, total_entries, started_at)
+    VALUES (?, 'test/cheap', 'test/strong', 120, 120, ?)`).run(sync.id, new Date().toISOString()).lastInsertRowid);
+  const tree = new SummaryTree(sync, runId, new AbortController().signal);
+  const specs = [...tree.chunkSpecs().values()].flat();
+  for (const spec of specs) {
+    const output = { observations: [{ topic: 'Demo', state: 'reported_done', summary: 'A previously validated cached summary', evidence: [spec.sources.at(-1)] }], limitations: [] };
+    getDb().prepare('INSERT INTO summary_cache(key, kind, model, prompt_version, output_json, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(spec.legacyKey, 'chunk', 'test/cheap', 'sync-tree-v1', JSON.stringify(output), new Date().toISOString());
+  }
+  const result = await generateReply(sync.id);
+  assert.equal(calls().filter(call => call.stage === 'chunk').length, 0);
+  assert.ok(result.tree.run.cache_hits >= specs.length);
+  assert.equal(result.tree.complete, true);
 });
 
 test('missing cheap-model selection does not silently use the expensive default', async () => {

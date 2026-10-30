@@ -58,7 +58,9 @@ all eligible entries in a frozen snapshot
 
 Chunks are bounded to 100 entries / 48,000 serialized characters, plus limited adjacent/background context. Merge inputs target 60,000 characters; individual structured outputs are limited to 20,000. These are **internal inference limits, not user-facing sync batches**. Processing is serial for predictable cancellation and quotas.
 
-Summaries carry structured states, source IDs, and limitations. Prompts reconcile earlier plans against later results and preserve contradictions. Validation rejects invented source IDs, invalid schemas, and topic groupings that omit or duplicate observations. Every pending entry must pass through a successful leaf before a final verdict is attempted. That is an **input-processing guarantee, not proof that every fact survived compression**.
+Summaries carry structured states, source IDs, and limitations. Models receive short request-local labels (`S1`, `S2`, etc.; `O1`, `O2` for grouping), which are strictly mapped back to canonical source IDs before caching. Reference fields are translated, not source text; unknown IDs are never guessed or silently dropped. Prompts reconcile earlier plans against later results and preserve contradictions. Validation rejects invented source IDs, invalid schemas, and topic groupings that omit or duplicate observations. Every pending entry must pass through a successful leaf before a final verdict is attempted. That is an **input-processing guarantee, not proof that every fact survived compression**.
+
+A schema failure gets one repair attempt containing the rejected response, the specific validation error, and the allowed labels. Empty evidence, unknown IDs, and excess distinct citations are separate errors. If repair still fails, generation **stops**—it is not an ongoing job. The UI offers **Resume generation**, which still requires model consent and reuses valid cached work. The short-label upgrade can reuse previously validated v1 leaf summaries.
 
 Nodes are cached by content fingerprints, model selector, prompt text/version, and node type. Source IDs are independent of sync-local E/C citations, so identical inputs can reuse cache across retries and discarded snapshots. Changes to source text, model, or prompts invalidate affected nodes. A new snapshot's different chunk boundaries/background may require new summaries; there is no permanent per-project state rollup yet.
 
@@ -148,6 +150,7 @@ src/sync/normalize.ts    minimal, bounded, best-effort-redacted evidence
 src/sync/store.ts        immutable snapshots, coverage, decisions, history
 src/sync/pi.ts           isolated tool-free, cancellable pi invocation
 src/sync/tree.ts         structured summaries, hierarchical merges, cache
+src/sync/references.ts   short model labels ↔ canonical provenance
 src/sync/manager.ts      background runs, retrieval, final verdict and conversation
 src/routes/sync.ts      authenticated sync API
 src/db/schema.ts        additive SQLite schema

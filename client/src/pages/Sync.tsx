@@ -107,12 +107,13 @@ export function Sync() {
     await saveModels(sync.id);
     showSync(await api.brief(sync.id)); await refresh();
   });
-  const discuss = () => void run('Starting discussion', async () => {
+  const discuss = (message = question) => void run('Starting discussion', async () => {
     if (!sync) return;
     await api.notes(sync.id, decisions, carry);
     await saveModels(sync.id);
-    showSync(await api.discuss(sync.id, question));
+    showSync(await api.discuss(sync.id, message));
   });
+  const resume = () => sync?.tree.run?.question ? discuss(sync.tree.run.question) : generate();
   const evidence = sync ? [...sync.items, ...sync.context] : [];
   const workspaces = new Set(overview?.sessions.filter(s => s.included && !s.missing).map(s => s.cwd));
   const latest = overview?.syncs.find(s => s.status === 'completed');
@@ -201,7 +202,7 @@ export function Sync() {
           </div>}
         </section>
 
-        <SummaryTree key={sync.id} syncId={sync.id} progress={sync.tree} evidence={evidence} onCancel={() => void run('Cancelling generation', async () => { await api.cancel(sync.id); })} />
+        <SummaryTree key={sync.id} syncId={sync.id} progress={sync.tree} evidence={evidence} onResume={open ? resume : undefined} resumeEnabled={!disabled && canGenerate} onCancel={() => void run('Cancelling generation', async () => { await api.cancel(sync.id); })} />
 
         {(sync.messages.length > 0 || open) && <section className="card discussion"><h2>Talk it through</h2>
           {sync.messages.map(message => <div className={`message ${message.role}`} key={message.id}><span className="message-author">{message.role === 'user' ? 'You' : 'Draken'}</span><CitedText text={message.content} evidence={evidence} /></div>)}
