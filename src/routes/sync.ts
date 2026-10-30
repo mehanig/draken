@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { scanSessions } from '../sync/collector';
-import { completeSync, discardSync, getSync, HttpError, overview, saveNotes, setIncluded, startSync } from '../sync/store';
-import { generateReply } from '../sync/manager';
+import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, HttpError, overview, saveNotes, setIncluded, startSync } from '../sync/store';
+import { cancelReply, launchReply } from '../sync/manager';
 
 const router = Router();
 const route = (handler: (req: Request, res: Response) => unknown | Promise<unknown>) =>
@@ -33,18 +33,35 @@ router.post('/syncs', route(async (req, res) => {
   res.json({ sync: startSync(since), scan });
 }));
 router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req)))));
+router.get('/syncs/:id/progress', route((req, res) => res.json(getProgress(id(req)))));
+router.get('/syncs/:id/tree/:key', route((req, res) => res.json(getTreeNode(id(req), String(req.params.key)))));
+router.post('/syncs/:id/expand', route(async (req, res) => {
+  const scan = await scanSessions();
+  res.json({ sync: expandSnapshot(id(req)), scan });
+}));
+router.patch('/syncs/:id/models', route((req, res) => {
+  res.json(configureModels(id(req), {
+    summary: text(req.body?.summary, 'Summary model', 200),
+    final: text(req.body?.final, 'Final model', 200),
+    max_invocations: req.body?.max_invocations,
+  }));
+}));
+router.post('/syncs/:id/cancel', route((req, res) => {
+  cancelReply(id(req));
+  res.status(202).json(getProgress(id(req)));
+}));
 router.patch('/syncs/:id/notes', route((req, res) => {
   res.json(saveNotes(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward')));
 }));
-router.post('/syncs/:id/briefing', route(async (req, res) => {
+router.post('/syncs/:id/briefing', route((req, res) => {
   consent(req);
-  res.json(await generateReply(id(req)));
+  res.status(202).json(launchReply(id(req)));
 }));
-router.post('/syncs/:id/messages', route(async (req, res) => {
+router.post('/syncs/:id/messages', route((req, res) => {
   consent(req);
   const question = text(req.body?.message, 'Message');
   if (!question) throw new HttpError(400, 'Message cannot be empty');
-  res.json(await generateReply(id(req), question));
+  res.status(202).json(launchReply(id(req), question));
 }));
 router.post('/syncs/:id/complete', route((req, res) => {
   res.json(completeSync(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward'), req.body?.reviewed === true));

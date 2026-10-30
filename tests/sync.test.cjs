@@ -25,6 +25,10 @@ beforeEach(() => {
   process.env.DRAKEN_NO_AUTH = 'true';
   delete process.env.DRAKEN_PI_TIMEOUT_MS;
   delete process.env.DRAKEN_PI_MODEL;
+  delete process.env.DRAKEN_FAKE_CONTROL;
+  delete process.env.DRAKEN_TEST_CALL_LOG;
+  process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/cheap';
+  process.env.DRAKEN_PI_FINAL_MODEL = 'test/strong';
 });
 afterEach(async () => {
   for (const server of servers) await new Promise(resolve => server.close(resolve));
@@ -46,23 +50,8 @@ function session(entries, options = {}) {
 function append(file, entry) { fs.appendFileSync(file, JSON.stringify(entry) + '\n'); }
 function fakePi() {
   const executable = path.join(temp, 'fake-pi');
-  fs.writeFileSync(executable, `#!/usr/bin/env node
-const fs = require('fs');
-const args = process.argv.slice(2);
-for (const required of ['--no-session', '--no-tools', '--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates', '--no-context-files', '--no-approve']) {
-  if (!args.includes(required)) { console.error('Missing safety flag ' + required); process.exit(2); }
-}
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => input += chunk);
-process.stdin.on('end', () => {
-  const value = JSON.parse(input);
-  if (value.user_question === 'FAIL') { console.error('provider unavailable'); process.exit(1); }
-  if (value.user_question === 'TIMEOUT') { setTimeout(() => console.log('too late'), 10000); return; }
-  if (value.user_question === 'SHOW MEMORY') { console.log(JSON.stringify(value.previous_sync_memory)); return; }
-  setTimeout(() => console.log('Progress\\nAgent reported a change [E1]. Validation remains unknown.'), 80);
-});
-`, { mode: 0o700 });
+  fs.copyFileSync(path.join(__dirname, 'fixtures/fake-pi.cjs'), executable);
+  fs.chmodSync(executable, 0o700);
   process.env.DRAKEN_PI_BIN = executable;
 }
 async function serve() {
@@ -260,7 +249,7 @@ test('unsupported session formats and Draken-owned conversations are not ingeste
   assert.equal(store.pendingCount(), 0);
 });
 
-test('bounded snapshots interleave sessions and leave all omitted entries uncovered', async () => {
+test('full snapshots include all eligible evidence across sessions, with no count or character cutoff', async () => {
   for (let project = 0; project < 3; project++) {
     const entries = [];
     for (let i = 0; i < 60; i++) entries.push(event(`p${project}e${i}`, i ? `p${project}e${i - 1}` : null, `Project ${project}: ` + 'x'.repeat(1800)));
@@ -268,11 +257,12 @@ test('bounded snapshots interleave sessions and leave all omitted entries uncove
   }
   await scanSessions();
   const first = store.startSync();
-  assert.ok(first.items.length < 100);
+  assert.equal(first.items.length, 180);
   assert.equal(new Set(first.items.map(item => item.session_id)).size, 3);
-  assert.equal(first.remaining_count, 180 - first.items.length);
+  assert.equal(first.remaining_count, 0);
+  assert.equal(first.snapshot_version, 2);
   store.completeSync(first.id, '', '', true);
-  assert.equal(store.pendingCount(), first.remaining_count);
+  assert.equal(store.pendingCount(), 0);
 });
 
 test('schema migration preserves legacy project and task data', () => {
@@ -333,7 +323,12 @@ test('HTTP sync flow enforces consent, validation, review and removal of executi
   const started = await request('/syncs', 'POST');
   const id = started.data.sync.id;
   assert.equal((await request(`/syncs/${id}/briefing`, 'POST', {})).status, 400);
-  assert.equal((await request(`/syncs/${id}/briefing`, 'POST', { consent: true })).status, 200);
+  assert.equal((await request(`/syncs/${id}/briefing`, 'POST', { consent: true })).status, 202);
+  for (let tries = 0; (await request(`/syncs/${id}/progress`)).data.busy; tries++) {
+    assert.ok(tries < 100, 'generation should settle');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.equal((await request(`/syncs/${id}/progress`)).data.run.status, 'completed');
   assert.equal((await request(`/syncs/${id}/notes`, 'PATCH', { decisions: 42, carry_forward: '' })).status, 400);
   assert.equal((await request(`/syncs/${id}/complete`, 'POST', { decisions: '', carry_forward: '' })).status, 400);
   assert.equal((await request(`/syncs/${id}/complete`, 'POST', { decisions: 'Done', carry_forward: '', reviewed: true })).status, 200);

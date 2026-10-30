@@ -88,6 +88,43 @@ export function initSchema(database: Database.Database): void {
       event_key TEXT PRIMARY KEY,
       sync_id INTEGER NOT NULL REFERENCES syncs(id)
     );
+    CREATE TABLE IF NOT EXISTS summary_cache (
+      key TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_version TEXT NOT NULL,
+      output_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sync_tree_nodes (
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      children_json TEXT NOT NULL,
+      source_count INTEGER NOT NULL,
+      error TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY(sync_id, key)
+    );
+    CREATE TABLE IF NOT EXISTS sync_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      status TEXT NOT NULL DEFAULT 'running',
+      stage TEXT NOT NULL DEFAULT 'Planning',
+      summary_model TEXT NOT NULL,
+      final_model TEXT NOT NULL,
+      invocations INTEGER NOT NULL DEFAULT 0,
+      max_invocations INTEGER NOT NULL,
+      processed_entries INTEGER NOT NULL DEFAULT 0,
+      total_entries INTEGER NOT NULL,
+      cache_hits INTEGER NOT NULL DEFAULT 0,
+      error TEXT NOT NULL DEFAULT '',
+      question TEXT,
+      started_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS sync_runs_sync ON sync_runs(sync_id, id);
     CREATE TABLE IF NOT EXISTS sync_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sync_id INTEGER NOT NULL REFERENCES syncs(id),
@@ -96,6 +133,16 @@ export function initSchema(database: Database.Database): void {
       created_at TEXT NOT NULL
     );
   `);
+  const columns = new Set((database.prepare('PRAGMA table_info(syncs)').all() as { name: string }[]).map(column => column.name));
+  for (const [name, definition] of Object.entries({
+    snapshot_version: 'INTEGER NOT NULL DEFAULT 1',
+    snapshot_at: 'TEXT',
+    model_config_json: "TEXT NOT NULL DEFAULT '{}'",
+    compression_complete: 'INTEGER NOT NULL DEFAULT 0',
+  })) {
+    if (!columns.has(name)) database.exec(`ALTER TABLE syncs ADD COLUMN ${name} ${definition}`);
+  }
+  database.prepare('UPDATE syncs SET snapshot_at = created_at WHERE snapshot_at IS NULL').run();
 }
 
 export function closeDb(): void {

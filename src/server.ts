@@ -4,11 +4,12 @@ import { getDb, closeDb } from './db/schema';
 import { authMiddleware, isNoAuthMode, validateAuthConfig } from './auth/middleware';
 import authRouter from './routes/auth';
 import syncRouter from './routes/sync';
-import { HttpError } from './sync/store';
+import { HttpError, recoverInterruptedRuns } from './sync/store';
 import { stopManagerProcesses } from './sync/manager';
 
-export function createApp() {
+export function createApp(options: { staticDir?: string } = {}) {
   const app = express();
+  const staticDir = options.staticDir || path.join(__dirname, '../public');
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
@@ -29,8 +30,8 @@ export function createApp() {
   app.use('/api/auth', authRouter);
   app.use('/api', authMiddleware, syncRouter);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found' }));
-  app.use(express.static(path.join(__dirname, '../public')));
-  app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
+  app.use(express.static(staticDir));
+  app.get('*', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')));
   app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = error instanceof HttpError ? error.status : error.status === 400 || error.status === 413 ? error.status : 500;
     if (status === 500) console.error('Draken request failed:', error.message);
@@ -48,6 +49,7 @@ export function startServer(): void {
     throw new Error('No-auth mode may only bind to loopback. Configure authentication before exposing Draken.');
   }
   getDb();
+  recoverInterruptedRuns();
   const server = createApp().listen(port, host, () => {
     console.log(`Draken sync running at http://${host}:${port}`);
     console.log('Session indexing is local. Model requests happen only when you ask for a briefing or reply.');

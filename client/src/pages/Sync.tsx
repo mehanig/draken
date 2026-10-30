@@ -3,6 +3,7 @@ import { ArrowRight, Check, ChevronRight, Clock3, FolderOpen, MessageSquare, Ref
 import { api } from '../api';
 import type { Overview, SyncDetail } from '../types';
 import { CitedText, EvidenceList } from '../components/EvidenceList';
+import { SummaryTree } from '../components/SummaryTree';
 
 const date = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -19,9 +20,13 @@ export function Sync() {
   const [consent, setConsent] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [initialWindow, setInitialWindow] = useState('24');
+  const [summaryModel, setSummaryModel] = useState('');
+  const [finalModel, setFinalModel] = useState('');
+  const [maxInvocations, setMaxInvocations] = useState(120);
 
   const showSync = (value: SyncDetail) => {
     setSync(value); setDecisions(value.decisions); setCarry(value.carry_forward);
+    setSummaryModel(value.models.summary); setFinalModel(value.models.final); setMaxInvocations(value.models.max_invocations);
   };
   const refresh = async () => { const value = await api.overview(); setOverview(value); return value; };
   const run = async (label: string, fn: () => Promise<void>) => {
@@ -43,18 +48,36 @@ export function Sync() {
     return () => { alive = false; };
   }, []);
 
-  // If the page was reloaded during generation, reconnect to the durable sync.
+  // Poll only compact progress, not the potentially large frozen evidence payload.
   useEffect(() => {
-    if (!sync?.busy || work) return;
-    const timer = setInterval(() => {
-      api.sync(sync.id).then(showSync).catch(err => setError(err.message));
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [sync?.id, sync?.busy, work]);
+    if (!sync?.busy) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const progress = await api.progress(sync.id);
+        if (!alive) return;
+        if (progress.busy) setSync(current => current?.id === sync.id ? { ...current, tree: progress } : current);
+        else {
+          const current = await api.sync(sync.id);
+          if (!alive) return;
+          showSync(current);
+          if (progress.run?.status === 'completed') setQuestion(value => value === progress.run?.question ? '' : value);
+          await refresh();
+          return;
+        }
+      } catch (err) { if (alive) setError(err instanceof Error ? err.message : 'Could not refresh progress'); }
+      if (alive) timer = setTimeout(() => void poll(), 1000);
+    };
+    void poll();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [sync?.id, sync?.busy]);
 
   const disabled = Boolean(work || sync?.busy);
   const open = sync?.status === 'open';
-  const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward));
+  const modelsDirty = Boolean(sync && (summaryModel !== sync.models.summary || finalModel !== sync.models.final || maxInvocations !== sync.models.max_invocations));
+  const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward || modelsDirty));
+  const canGenerate = Boolean(consent && summaryModel.trim() && Number.isInteger(maxInvocations) && maxInvocations >= 1 && maxInvocations <= 500 && sync?.snapshot_version === 2);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -77,15 +100,18 @@ export function Sync() {
     const result = await api.start(since); showSync(result.sync); setWarnings(result.scan.warnings);
     setReviewed(false); setConsent(false); await refresh();
   });
-  const generate = () => void run('Draken is preparing your briefing', async () => {
+  const saveModels = (id: number) => api.models(id, { summary: summaryModel.trim(), final: finalModel.trim(), max_invocations: maxInvocations });
+  const generate = () => void run('Starting summary tree', async () => {
     if (!sync) return;
     await api.notes(sync.id, decisions, carry);
+    await saveModels(sync.id);
     showSync(await api.brief(sync.id)); await refresh();
   });
-  const discuss = () => void run('Draken is thinking', async () => {
+  const discuss = () => void run('Starting discussion', async () => {
     if (!sync) return;
     await api.notes(sync.id, decisions, carry);
-    showSync(await api.discuss(sync.id, question)); setQuestion('');
+    await saveModels(sync.id);
+    showSync(await api.discuss(sync.id, question));
   });
   const evidence = sync ? [...sync.items, ...sync.context] : [];
   const workspaces = new Set(overview?.sessions.filter(s => s.included && !s.missing).map(s => s.cwd));
@@ -143,47 +169,63 @@ export function Sync() {
         <div className="welcome-symbol"><MessageSquare size={32} /></div><h2>What happened since we last talked?</h2>
         <p>Draken reads your pi sessions, brings the evidence together, and helps you separate progress from unfinished work.</p>
         <div className="steps"><span><b>01</b> Scan & select sessions</span><ChevronRight size={15} /><span><b>02</b> Review & discuss</span><ChevronRight size={15} /><span><b>03</b> Save decisions</span></div>
-        <p className="muted small">Choose your first-sync window above. Large histories are split into explicit batches; nothing is silently marked covered. No model calls happen while scanning.</p>
+        <p className="muted small">Choose your first-sync window above. All eligible history enters one snapshot; a cheaper model builds a summary tree before the final verdict. No model calls happen while scanning.</p>
         <button className="btn btn-primary" disabled={disabled || !overview} onClick={start}>Prepare first sync <ArrowRight size={16} /></button>
       </section>}
 
       {sync && <>
         <section className="card briefing-card">
-          <div className="section-heading"><h2>Sync #{sync.id} <span className={`status ${sync.status}`}>{sync.status}</span></h2><span className="muted small">Snapshot · {date(sync.created_at)}</span></div>
+          <div className="section-heading"><h2>Sync #{sync.id} <span className={`status ${sync.status}`}>{sync.status}</span></h2><span className="muted small">Snapshot · {date(sync.snapshot_at)}</span></div>
           <p className="muted small">{sync.items.length} new evidence entries · {new Set(sync.items.map(item => item.session_id)).size} sessions. Activity arriving after this snapshot belongs to a later sync.</p>
-          {sync.remaining_count > 0 && <div className="alert warning">This is a batch. {sync.remaining_count} additional entries were left for later syncs; finishing this one will not cover them.</div>}
+          {sync.snapshot_version < 2 && <div className="alert warning">This is an old capped snapshot: {sync.remaining_count} entries were left out. Its briefing may describe outdated plans rather than later outcomes.
+            {open && <p><button className="btn btn-secondary" disabled={disabled} onClick={() => {
+              if (!window.confirm('Expand to all currently eligible history? Notes and discussion are kept, the old briefing is archived, and existing evidence references remain available. This performs no model calls.')) return;
+              void run('Expanding snapshot', async () => {
+                await api.notes(sync.id, decisions, carry);
+                const result = await api.expand(sync.id); showSync(result.sync); setWarnings(result.scan.warnings);
+                setConsent(false); setReviewed(false); await refresh();
+              });
+            }}>Expand to full history</button></p>}
+          </div>}
           {sync.briefing ? <CitedText text={sync.briefing} evidence={evidence} /> : <div className="briefing-placeholder"><Sparkles size={25} /><h3>Your evidence is ready.</h3><p>Inspect the source excerpts below, then ask Draken for a briefing. You can also review and finish without a model.</p></div>}
           {open && <div className="model-consent">
+            <div className="model-grid">
+              <div><label htmlFor="summary-model">Cheap model · parsing and merging</label><input id="summary-model" className="input" value={summaryModel} disabled={disabled} onChange={e => { setSummaryModel(e.target.value); setConsent(false); }} placeholder="provider/model — required" /></div>
+              <div><label htmlFor="final-model">Stronger model · final verdict</label><input id="final-model" className="input" value={finalModel} disabled={disabled} onChange={e => { setFinalModel(e.target.value); setConsent(false); }} placeholder="Leave blank for pi’s configured default" /></div>
+              <div><label htmlFor="invocation-limit">Maximum pi invocations per run</label><input id="invocation-limit" className="input" type="number" min={1} max={500} value={maxInvocations} disabled={disabled} onChange={e => { setMaxInvocations(Number(e.target.value)); setConsent(false); }} /></div>
+            </div>
             <label className="check-row"><input type="checkbox" checked={consent} disabled={disabled} onChange={e => setConsent(e.target.checked)} />
-              <span>Allow briefing and discussion to send this snapshot, saved notes, and conversation to <strong>{overview?.model}</strong> through pi.</span></label>
-            <p className="muted small">Common token patterns are redacted, but excerpts can still contain private code or secrets. Review the evidence first. The manager has no tools and cannot run tasks.</p>
-            {!sync.briefing && <button className="btn btn-primary" disabled={disabled || !consent} onClick={generate}><Sparkles size={16} />Generate briefing</button>}
+              <span>Allow briefing and discussion to send the full snapshot to <strong>{summaryModel || 'a summary model you choose'}</strong>, and compressed summaries, verification excerpts, notes, and conversation to <strong>{finalModel || overview?.model || 'pi configured default'}</strong>.</span></label>
+            <p className="muted small">Cached nodes are reused; only the final verdict uses the stronger model. This can make many model calls on the first run (up to the limit above). No automatic expensive-model fallback. The manager has no tools and cannot run tasks. Redaction is best-effort: review evidence before sharing.</p>
+            {(!sync.briefing || modelsDirty) && <button className="btn btn-primary" disabled={disabled || !canGenerate} onClick={generate}><Sparkles size={16} />Generate briefing</button>}
           </div>}
         </section>
+
+        <SummaryTree key={sync.id} syncId={sync.id} progress={sync.tree} evidence={evidence} onCancel={() => void run('Cancelling generation', async () => { await api.cancel(sync.id); })} />
 
         {(sync.messages.length > 0 || open) && <section className="card discussion"><h2>Talk it through</h2>
           {sync.messages.map(message => <div className={`message ${message.role}`} key={message.id}><span className="message-author">{message.role === 'user' ? 'You' : 'Draken'}</span><CitedText text={message.content} evidence={evidence} /></div>)}
           {open && <form onSubmit={e => { e.preventDefault(); discuss(); }}><label htmlFor="question" className="sr-only">Ask Draken about this sync</label>
             <textarea id="question" rows={3} maxLength={4000} placeholder="What is still blocked? Did we actually validate that change?" value={question} disabled={disabled} onChange={e => setQuestion(e.target.value)} />
-            <div className="form-footer"><span className="muted small">Answers stay attached to this sync.</span><button className="btn btn-primary" disabled={disabled || !consent || !question.trim()}>Ask Draken <ArrowRight size={16} /></button></div></form>}
+            <div className="form-footer"><span className="muted small">Answers stay attached to this sync.</span><button className="btn btn-primary" disabled={disabled || !canGenerate || !question.trim()}>Ask Draken <ArrowRight size={16} /></button></div></form>}
         </section>}
 
         <section className="card notes-card"><div className="section-heading"><h2>What we’re taking away</h2>{dirty && <span className="small unsaved">Unsaved changes</span>}</div>
           <div className="notes-grid"><div><label htmlFor="decisions">Decisions</label><textarea id="decisions" rows={5} maxLength={4000} disabled={!open || disabled} value={decisions} onChange={e => setDecisions(e.target.value)} placeholder="What did we agree? Priorities, choices, things not to do…" /></div>
             <div><label htmlFor="carry-forward">Carry into the next sync</label><textarea id="carry-forward" rows={5} maxLength={4000} disabled={!open || disabled} value={carry} onChange={e => setCarry(e.target.value)} placeholder="Open questions, blockers, deferred topics. Remove resolved items." /></div></div>
           <p className="muted small">These are your notes, not automatic model conclusions. Carry-forward items persist until you remove them; the manager also receives decisions from the last 10 completed syncs.</p>
-          {open && <div className="finish-controls"><button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes', async () => { showSync(await api.notes(sync.id, decisions, carry)); setNotice('Notes saved. Coverage has not advanced.'); })}>Save notes</button>
+          {open && <div className="finish-controls"><button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes', async () => { await api.notes(sync.id, decisions, carry); if (modelsDirty) await saveModels(sync.id); showSync(await api.sync(sync.id)); setNotice('Notes saved. Coverage has not advanced.'); })}>Save notes</button>
             <label className="check-row"><input type="checkbox" checked={reviewed} disabled={disabled} onChange={e => setReviewed(e.target.checked)} /><span>I reviewed this snapshot. Mark its {sync.items.length} entries covered when I finish.</span></label>
             <div className="finish-actions"><button className="btn btn-ghost" disabled={disabled} onClick={() => {
               if (window.confirm('Discard this sync? Its entries remain uncovered. The discarded snapshot stays in history.')) void run('Discarding sync', async () => { showSync(await api.discard(sync.id)); await refresh(); });
-            }}>Discard sync</button><button className="btn btn-primary" disabled={disabled || !reviewed} onClick={() => void run('Finishing sync', async () => {
-              showSync(await api.finish(sync.id, decisions, carry)); await refresh(); setReviewed(false); setNotice('Sync saved. New activity and unfinished batches remain for next time.');
+            }}>Discard sync</button><button className="btn btn-primary" disabled={disabled || !reviewed || Boolean(sync.tree.run && !sync.tree.complete)} onClick={() => void run('Finishing sync', async () => {
+              showSync(await api.finish(sync.id, decisions, carry)); await refresh(); setReviewed(false); setNotice('Sync saved. Activity arriving after this snapshot remains for next time.');
             })}><Check size={17} />Finish sync</button></div>
           </div>}
         </section>
         {sync.memory.length > 0 && <details className="memory-panel"><summary>Memory from previous syncs</summary>{sync.memory.map((item, index) => <div key={item.sync_id}><h4>Sync #{item.sync_id}{index === 0 ? ' · most recent' : ''}</h4><p className="prose">{item.decisions || 'No decisions recorded.'}</p>{index === 0 && <p className="prose muted">Carried forward: {item.carry_forward || 'Nothing recorded.'}</p>}</div>)}</details>}
-        <EvidenceList items={sync.items} title="New evidence in this snapshot" />
-        <EvidenceList items={sync.context} title="Earlier context — not new progress" />
+        <EvidenceList key={`new-${sync.id}`} items={sync.items} title="New evidence in this snapshot" />
+        <EvidenceList key={`context-${sync.id}`} items={sync.context} title="Earlier context — not new progress" />
       </>}
     </main>
   </div>;

@@ -1,7 +1,13 @@
 import { createHash } from 'crypto';
+import type { Evidence } from '../types';
 
 export function digest(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+// Stable across sync-local E/C references, but changes when a context edit changes the excerpt.
+export function sourceKey(item: Evidence): string {
+  return `K${digest(JSON.stringify([item.event_key, item.text])).slice(0, 20)}`;
 }
 
 /** Best-effort minimization, NOT a guarantee that session text contains no secrets. */
