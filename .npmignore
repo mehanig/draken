@@ -14,7 +14,12 @@ tsconfig.json
 
 # Database
 *.db
+*.db-wal
+*.db-shm
 data/
+.draken/
+.test-artifacts/
+*.jsonl
 
 # Environment
 .env
@@ -31,7 +36,9 @@ Thumbs.db
 *.test.ts
 *.spec.ts
 __tests__/
+tests/
 
-# Claude sessions
+# Local session/configuration data
+.pi/
 .draken-sessions/
 .claude/

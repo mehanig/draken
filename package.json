@@ -1,14 +1,16 @@
 {
   "name": "draken",
   "version": "0.1.6",
-  "description": "Web dashboard for running Claude Code tasks across multiple projects in Docker containers",
+  "description": "Local-first engineering sync across pi coding sessions",
   "main": "dist/server.js",
   "bin": {
     "draken": "./dist/cli.js"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsc",
+    "build:server": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "test": "npm run build:server && node --test tests/*.test.cjs",
+    "test:ui": "npm run build && playwright test",
     "build:client": "cd client && npm run build",
     "start": "node dist/server.js",
     "dev": "tsc -w",
@@ -17,17 +19,14 @@
   },
   "files": [
     "dist/",
-    "public/",
-    "draken.dockerfile.template"
+    "public/"
   ],
   "keywords": [
-    "claude",
-    "claude-code",
+    "pi",
     "ai",
-    "agent",
-    "docker",
-    "dashboard",
-    "anthropic"
+    "sessions",
+    "sync",
+    "dashboard"
   ],
   "author": "mehanig",
   "license": "MIT",
@@ -37,25 +36,19 @@
   },
   "homepage": "https://draken.mehanig.com",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.19.0"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",
-    "dockerode": "^4.0.4",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.3",
-    "simple-git": "^3.30.0",
-    "ws": "^8.19.0"
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
+    "@playwright/test": "^1.64.1",
     "@types/better-sqlite3": "^7.6.12",
-    "@types/dockerode": "^3.3.34",
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.5",
-    "@types/ws": "^8.18.1",
     "typescript": "^5.7.3"
   }
 }

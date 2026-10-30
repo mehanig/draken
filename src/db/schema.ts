@@ -3,83 +3,102 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-/**
- * Get the draken data directory
- * Uses DRAKEN_DATA_DIR env var if set, otherwise ~/.draken
- * Works cross-platform (Windows, macOS, Linux)
- */
 export function getDataDir(): string {
-  if (process.env.DRAKEN_DATA_DIR) {
-    return process.env.DRAKEN_DATA_DIR;
-  }
-  return path.join(os.homedir(), '.draken');
+  return path.resolve(process.env.DRAKEN_DATA_DIR || path.join(os.homedir(), '.draken'));
 }
-
-const DATA_DIR = getDataDir();
-const DB_PATH = path.join(DATA_DIR, 'draken.db');
 
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!db) {
-    // Ensure data directory exists
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-
-    db = new Database(DB_PATH);
+    const dir = getDataDir();
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    db = new Database(path.join(dir, 'draken.db'));
+    // Set mode before SQLite creates WAL/SHM sidecars, which inherit database permissions.
+    fs.chmodSync(path.join(dir, 'draken.db'), 0o600);
     db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    db.pragma('busy_timeout = 5000');
     initSchema(db);
-    
-    console.log(`Database: ${DB_PATH}`);
   }
   return db;
 }
 
-function initSchema(db: Database.Database): void {
-  // Create tables
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
+export function initSchema(database: Database.Database): void {
+  // Additive migration: legacy projects/tasks are deliberately left untouched.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS sync_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS pi_sessions (
+      id TEXT PRIMARY KEY,
       path TEXT NOT NULL UNIQUE,
-      dockerfile_exists INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      cwd TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      included INTEGER NOT NULL DEFAULT 1,
+      missing INTEGER NOT NULL DEFAULT 0,
+      modified_at TEXT NOT NULL,
+      file_identity TEXT NOT NULL DEFAULT '',
+      byte_offset INTEGER NOT NULL DEFAULT 0,
+      boundary_hash TEXT NOT NULL DEFAULT '',
+      prefix_hash TEXT NOT NULL DEFAULT '',
+      leaf_id TEXT
     );
-
-    CREATE TABLE IF NOT EXISTS tasks (
+    CREATE TABLE IF NOT EXISTS pi_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER NOT NULL,
-      prompt TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      container_id TEXT,
-      logs TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      completed_at DATETIME,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      session_id TEXT NOT NULL REFERENCES pi_sessions(id),
+      entry_id TEXT NOT NULL,
+      parent_id TEXT,
+      timestamp TEXT NOT NULL,
+      type TEXT NOT NULL,
+      role TEXT NOT NULL,
+      text TEXT NOT NULL,
+      effective_text TEXT NOT NULL,
+      event_key TEXT NOT NULL,
+      is_activity INTEGER NOT NULL,
+      active INTEGER NOT NULL DEFAULT 0,
+      present INTEGER NOT NULL DEFAULT 1,
+      target_id TEXT,
+      replacement TEXT,
+      UNIQUE(session_id, entry_id)
     );
-
-    CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+    CREATE INDEX IF NOT EXISTS pi_entries_pending ON pi_entries(active, is_activity, present);
+    CREATE INDEX IF NOT EXISTS pi_entries_event ON pi_entries(event_key);
+    CREATE TABLE IF NOT EXISTS syncs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'completed', 'discarded')),
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      briefing TEXT NOT NULL DEFAULT '',
+      decisions TEXT NOT NULL DEFAULT '',
+      carry_forward TEXT NOT NULL DEFAULT '',
+      context_json TEXT NOT NULL DEFAULT '[]',
+      memory_json TEXT NOT NULL DEFAULT '[]',
+      remaining_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS one_open_sync ON syncs(status) WHERE status = 'open';
+    CREATE TABLE IF NOT EXISTS sync_items (
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      event_key TEXT NOT NULL,
+      evidence_json TEXT NOT NULL,
+      PRIMARY KEY(sync_id, event_key)
+    );
+    CREATE TABLE IF NOT EXISTS sync_coverage (
+      event_key TEXT PRIMARY KEY,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id)
+    );
+    CREATE TABLE IF NOT EXISTS sync_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
-
-  // Migration: Add session_id column if it doesn't exist
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN session_id TEXT`);
-  } catch { /* Column already exists */ }
-
-  // Migration: Add parent_task_id column if it doesn't exist
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL`);
-  } catch { /* Column already exists */ }
-
-  // Create index on session_id (after migration ensures column exists)
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id)`);
 }
 
 export function closeDb(): void {
-  if (db) {
-    db.close();
-    db = null;
-  }
+  db?.close();
+  db = null;
 }
