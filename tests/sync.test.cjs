@@ -10,7 +10,8 @@ const { scanSessions } = require('../dist/sync/collector');
 const { cleanText } = require('../dist/sync/normalize');
 const store = require('../dist/sync/store');
 const { generateReply } = require('../dist/sync/manager');
-const { createApp } = require('../dist/server');
+const { createApp, startServer } = require('../dist/server');
+const { isNoAuthMode, getAuthConfig } = require('../dist/auth/middleware');
 
 let temp;
 let root;
@@ -23,6 +24,7 @@ beforeEach(() => {
   process.env.DRAKEN_DATA_DIR = path.join(temp, 'state');
   process.env.DRAKEN_PI_SESSIONS_DIR = root;
   process.env.DRAKEN_NO_AUTH = 'true';
+  for (const key of ['DRAKEN_HOST', 'DRAKEN_USERNAME', 'DRAKEN_PASSWORD', 'DRAKEN_JWT_SECRET']) delete process.env[key];
   delete process.env.DRAKEN_PI_TIMEOUT_MS;
   delete process.env.DRAKEN_PI_MODEL;
   delete process.env.DRAKEN_FAKE_CONTROL;
@@ -314,7 +316,7 @@ test('model failure and timeout keep the sync open and do not save incomplete ex
   assert.equal(store.pendingCount(), 1);
 });
 
-test('HTTP sync flow enforces consent, validation, review and removal of execution routes', async () => {
+test('HTTP model actions work directly while preserving input validation, review and removed execution routes', async () => {
   fakePi();
   session([event('u', null, 'Task', 'user')]);
   const request = await serve();
@@ -322,13 +324,19 @@ test('HTTP sync flow enforces consent, validation, review and removal of executi
   assert.equal((await request('/scan', 'POST')).status, 200);
   const started = await request('/syncs', 'POST');
   const id = started.data.sync.id;
-  assert.equal((await request(`/syncs/${id}/briefing`, 'POST', {})).status, 400);
-  assert.equal((await request(`/syncs/${id}/briefing`, 'POST', { consent: true })).status, 202);
+  assert.equal((await request(`/syncs/${id}/briefing`, 'POST')).status, 202);
   for (let tries = 0; (await request(`/syncs/${id}/progress`)).data.busy; tries++) {
     assert.ok(tries < 100, 'generation should settle');
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   assert.equal((await request(`/syncs/${id}/progress`)).data.run.status, 'completed');
+  assert.equal((await request(`/syncs/${id}/messages`, 'POST', { message: '' })).status, 400);
+  assert.equal((await request(`/syncs/${id}/messages`, 'POST', { message: 'Explain' })).status, 202);
+  for (let tries = 0; (await request(`/syncs/${id}/progress`)).data.busy; tries++) {
+    assert.ok(tries < 100, 'discussion should settle');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.equal((await request(`/syncs/${id}`)).data.messages.length, 2);
   assert.equal((await request(`/syncs/${id}/notes`, 'PATCH', { decisions: 42, carry_forward: '' })).status, 400);
   assert.equal((await request(`/syncs/${id}/complete`, 'POST', { decisions: '', carry_forward: '' })).status, 400);
   assert.equal((await request(`/syncs/${id}/complete`, 'POST', { decisions: 'Done', carry_forward: '', reviewed: true })).status, 200);
@@ -336,6 +344,35 @@ test('HTTP sync flow enforces consent, validation, review and removal of executi
   assert.equal((await request('/tasks/project/1', 'POST', { prompt: 'run something' })).status, 404);
   assert.equal((await request('/git/1/commit', 'POST', { message: 'no' })).status, 404);
   assert.equal((await request('/syncs/nope')).status, 400);
+});
+
+test('plain loopback launch needs no login or auth environment configuration', async () => {
+  delete process.env.DRAKEN_NO_AUTH;
+  assert.equal(isNoAuthMode(), true);
+  assert.equal(getAuthConfig(), null);
+  const request = await serve();
+  assert.equal((await request('/auth/status')).data.enabled, false);
+  assert.equal((await request('/overview')).status, 200);
+  assert.equal((await request('/overview', 'GET', undefined, { Host: 'attacker.example' })).status, 403);
+  assert.equal((await request('/scan', 'POST', {}, { Origin: 'https://attacker.example' })).status, 403);
+});
+
+test('LAN bindings and explicitly configured credentials do not silently become anonymous', () => {
+  delete process.env.DRAKEN_NO_AUTH;
+  for (const host of ['0.0.0.0', '192.168.3.112', '::']) {
+    process.env.DRAKEN_HOST = host;
+    assert.equal(isNoAuthMode(), false);
+    assert.throws(() => getAuthConfig(), /Authentication is required/);
+  }
+  process.env.DRAKEN_NO_AUTH = 'true';
+  assert.throws(() => startServer(), /only bind to loopback/);
+  delete process.env.DRAKEN_HOST;
+  delete process.env.DRAKEN_NO_AUTH;
+  process.env.DRAKEN_USERNAME = 'test';
+  assert.equal(isNoAuthMode(), false, 'configured authentication remains enabled on loopback');
+  assert.throws(() => getAuthConfig(), /DRAKEN_PASSWORD/);
+  process.env.DRAKEN_NO_AUTH = 'typo';
+  assert.throws(() => isNoAuthMode(), /must be true or false/);
 });
 
 test('private session APIs reject unauthenticated, cross-origin and rebinding-style requests', async () => {
@@ -350,4 +387,5 @@ test('private session APIs reject unauthenticated, cross-origin and rebinding-st
   const login = await request('/auth/login', 'POST', { username: 'test', password: 'test-password' });
   assert.equal(login.status, 200);
   assert.equal((await request('/overview', 'GET', undefined, { Authorization: `Bearer ${login.data.token}` })).status, 200);
+  assert.equal((await request(`/overview?token=${login.data.token}`)).status, 401, 'no legacy URL-token authentication');
 });

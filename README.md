@@ -20,15 +20,15 @@ Requires Node.js **22.19+**. Indexing and evidence review do not require a model
 npm ci
 npm --prefix client ci
 npm run build
-DRAKEN_NO_AUTH=true npm start
+npm start
 ```
 
-Open **http://127.0.0.1:40333**. No Docker or Claude installation is needed.
+Open **http://127.0.0.1:40333**. A normal loopback launch needs **no dashboard login or auth setup**. No Docker or Claude installation is needed.
 
 1. **Scan local sessions.** This only reads files and updates Draken's local SQLite index.
 2. Select the sessions to include. Sources are grouped by their recorded working directory, which is not necessarily a repository boundary.
 3. Choose the first-sync history window (**last 24 hours**, **last 7 days**, or **all indexed history**) and **Start sync**. This sets a fixed baseline, not a rolling time filter. Draken rescans and freezes a snapshot. An existing open sync is resumed instead of creating a duplicate.
-4. Inspect the evidence. Choose a **cheap summary model**, a **stronger final model**, and an invocation limit. Explicitly authorize sharing, then **Generate briefing** or ask a question. Watch progress and inspect source-linked summary nodes; generation can be cancelled or resumed after failure.
+4. Inspect the evidence. Choose a **cheap summary model**, a **stronger final model**, and an invocation limit. Click **Generate briefing**, **Resume generation**, or ask a question directly—there is no extra permission checkbox. Watch progress and inspect source-linked summary nodes; generation can be cancelled or resumed after failure.
 5. Edit **Decisions** and **Carry into the next sync**. Save notes whenever you want.
 6. Confirm you reviewed the snapshot and **Finish sync**. Only its evidence is marked covered. New activity remains for the next sync.
 
@@ -60,7 +60,7 @@ Chunks are bounded to 100 entries / 48,000 serialized characters, plus limited a
 
 Summaries carry structured states, source IDs, and limitations. Models receive short request-local labels (`S1`, `S2`, etc.; `O1`, `O2` for grouping), which are strictly mapped back to canonical source IDs before caching. Reference fields are translated, not source text; unknown IDs are never guessed or silently dropped. Prompts reconcile earlier plans against later results and preserve contradictions. Validation rejects invented source IDs, invalid schemas, and topic groupings that omit or duplicate observations. Every pending entry must pass through a successful leaf before a final verdict is attempted. That is an **input-processing guarantee, not proof that every fact survived compression**.
 
-A schema failure gets one repair attempt containing the rejected response, the specific validation error, and the allowed labels. Empty evidence, unknown IDs, and excess distinct citations are separate errors. If repair still fails, generation **stops**—it is not an ongoing job. The UI offers **Resume generation**, which still requires model consent and reuses valid cached work. The short-label upgrade can reuse previously validated v1 leaf summaries.
+A schema failure gets one repair attempt containing the rejected response, the specific validation error, and the allowed labels. Empty evidence, unknown IDs, and excess distinct citations are separate errors. If repair still fails, generation **stops**—it is not an ongoing job. The UI offers **Resume generation**, which directly continues using valid cached work. The short-label upgrade can reuse previously validated v1 leaf summaries.
 
 Nodes are cached by content fingerprints, model selector, prompt text/version, and node type. Source IDs are independent of sync-local E/C citations, so identical inputs can reuse cache across retries and discarded snapshots. Changes to source text, model, or prompts invalidate affected nodes. A new snapshot's different chunk boundaries/background may require new summaries; there is no permanent per-project state rollup yet.
 
@@ -101,11 +101,11 @@ Current limits: discovery is eight directories deep; each scan reads up to 32 Mi
 
 Session logs can contain private source code, prompts, command output, and credentials.
 
-- **No automatic model calls.** You explicitly authorize briefing/discussion. Scanning and reading evidence stay local.
+- **Model calls happen when you click Generate, Resume, or Ask.** There is no separate permission checkbox or API flag. Scanning and reading evidence stay local.
 - Thinking blocks, system prompts, images, and opaque signatures are not indexed. Tool-call arguments are minimized; common secret patterns are redacted. **This is best-effort, not a guarantee that the remaining text is safe to share.** Inspect evidence and exclude sensitive sessions before calling a provider.
 - SQLite contains excerpts, cached summaries, run metadata, decisions, and conversations. It lives outside the checkout in `~/.draken/draken.db` by default. Protect/back up the directory as private data. Deleting original pi files does not erase historical Draken snapshots. There is no in-app retention/purge UI yet.
-- The server binds to loopback by default. No-auth mode refuses non-loopback bindings. API requests are authenticated when enabled and reject cross-origin requests.
-- For remote use, configure authentication, set `DRAKEN_HOST`, and use an HTTPS reverse proxy preserving the request's Host/Origin. Do not expose no-auth development mode.
+- The server defaults to loopback with **no dashboard login**. Explicitly configured credentials (or `DRAKEN_NO_AUTH=false`) retain authentication even on loopback. Local API access still rejects cross-origin requests and unexpected Host headers.
+- A LAN bind is different from loopback: other devices can reach the server, read session history, and trigger model usage. Non-loopback bindings require authentication. Configure credentials, set `DRAKEN_HOST`, and use an HTTPS reverse proxy preserving Host/Origin. No-auth mode remains loopback-only.
 - No telemetry, update checks, remote fonts, or third-party browser scripts.
 
 ### Configuration
@@ -114,7 +114,7 @@ Environment variables are read from the process environment; `.env` is **not** a
 
 | Variable | Default / purpose |
 |---|---|
-| `DRAKEN_NO_AUTH` | `true` disables login for loopback-only use |
+| `DRAKEN_NO_AUTH` | Unset: no login on loopback unless credentials are configured. `false` forces login; `true` explicitly disables it on loopback only |
 | `DRAKEN_USERNAME` | Dashboard username when auth is enabled |
 | `DRAKEN_PASSWORD` | Dashboard password when auth is enabled |
 | `DRAKEN_JWT_SECRET` | Signing secret when auth is enabled; use a strong random value |
@@ -155,7 +155,7 @@ src/sync/manager.ts      background runs, retrieval, final verdict and conversat
 src/routes/sync.ts      authenticated sync API
 src/db/schema.ts        additive SQLite schema
 client/src/pages/Sync.tsx
-                        sources, model consent, progress, briefing, notes
+                        sources, model settings, progress, briefing, notes
 client/src/components/SummaryTree.tsx
                         expandable nodes, structured observations, provenance
 ```

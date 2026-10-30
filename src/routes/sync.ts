@@ -15,9 +15,6 @@ function text(value: unknown, name: string, max = 4000): string {
   if (typeof value !== 'string' || value.length > max) throw new HttpError(400, `${name} must be text of at most ${max} characters`);
   return value.trim();
 }
-function consent(req: Request): void {
-  if (req.body?.consent !== true) throw new HttpError(400, 'Explicit consent is required to send this snapshot to your configured pi model');
-}
 
 router.get('/overview', route((_req, res) => res.json(overview())));
 router.post('/scan', route(async (_req, res) => res.json(await scanSessions())));
@@ -54,11 +51,9 @@ router.patch('/syncs/:id/notes', route((req, res) => {
   res.json(saveNotes(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward')));
 }));
 router.post('/syncs/:id/briefing', route((req, res) => {
-  consent(req);
   res.status(202).json(launchReply(id(req)));
 }));
 router.post('/syncs/:id/messages', route((req, res) => {
-  consent(req);
   const question = text(req.body?.message, 'Message');
   if (!question) throw new HttpError(400, 'Message cannot be empty');
   res.status(202).json(launchReply(id(req), question));

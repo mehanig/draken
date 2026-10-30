@@ -56,7 +56,7 @@ export function SummaryTree({ syncId, progress, evidence, onCancel, onResume, re
       <p className="small">{run.processed_entries < run.total_entries
         ? `${run.total_entries - run.processed_entries} entries still need compression.`
         : 'Raw chunks were processed, but reconciliation or the final reply did not finish.'} Successful chunks are cached; nothing was marked reviewed.</p>
-      {onResume && <><p className="small">Authorize model access above, then resume. Cached chunks will be reused instead of being generated again.</p>
+      {onResume && <><p className="small">Resume to continue from cached chunks instead of generating them again.</p>
         <button className="btn btn-primary" disabled={!resumeEnabled} onClick={onResume}>Resume generation</button></>}
     </div>}
     {progress.busy && <button className="btn btn-secondary" onClick={onCancel}>Cancel generation</button>}

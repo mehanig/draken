@@ -17,7 +17,6 @@ export function Sync() {
   const [question, setQuestion] = useState('');
   const [decisions, setDecisions] = useState('');
   const [carry, setCarry] = useState('');
-  const [consent, setConsent] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [initialWindow, setInitialWindow] = useState('24');
   const [summaryModel, setSummaryModel] = useState('');
@@ -77,7 +76,7 @@ export function Sync() {
   const open = sync?.status === 'open';
   const modelsDirty = Boolean(sync && (summaryModel !== sync.models.summary || finalModel !== sync.models.final || maxInvocations !== sync.models.max_invocations));
   const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward || modelsDirty));
-  const canGenerate = Boolean(consent && summaryModel.trim() && Number.isInteger(maxInvocations) && maxInvocations >= 1 && maxInvocations <= 500 && sync?.snapshot_version === 2);
+  const canGenerate = Boolean(summaryModel.trim() && Number.isInteger(maxInvocations) && maxInvocations >= 1 && maxInvocations <= 500 && sync?.snapshot_version === 2);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -87,7 +86,7 @@ export function Sync() {
   const selectSync = (id: number) => {
     if (dirty && !window.confirm('Leave without saving your notes?')) return;
     void run('Opening sync', async () => {
-      showSync(await api.sync(id)); setReviewed(false); setConsent(false); setQuestion('');
+      showSync(await api.sync(id)); setReviewed(false); setQuestion('');
     });
   };
   const scan = () => void run('Reading local sessions', async () => {
@@ -98,7 +97,7 @@ export function Sync() {
     const since = overview?.history_initialized ? undefined : initialWindow === 'all' ? null
       : new Date(Date.now() - Number(initialWindow) * 60 * 60 * 1000).toISOString();
     const result = await api.start(since); showSync(result.sync); setWarnings(result.scan.warnings);
-    setReviewed(false); setConsent(false); await refresh();
+    setReviewed(false); await refresh();
   });
   const saveModels = (id: number) => api.models(id, { summary: summaryModel.trim(), final: finalModel.trim(), max_invocations: maxInvocations });
   const generate = () => void run('Starting summary tree', async () => {
@@ -184,20 +183,18 @@ export function Sync() {
               void run('Expanding snapshot', async () => {
                 await api.notes(sync.id, decisions, carry);
                 const result = await api.expand(sync.id); showSync(result.sync); setWarnings(result.scan.warnings);
-                setConsent(false); setReviewed(false); await refresh();
+                setReviewed(false); await refresh();
               });
             }}>Expand to full history</button></p>}
           </div>}
           {sync.briefing ? <CitedText text={sync.briefing} evidence={evidence} /> : <div className="briefing-placeholder"><Sparkles size={25} /><h3>Your evidence is ready.</h3><p>Inspect the source excerpts below, then ask Draken for a briefing. You can also review and finish without a model.</p></div>}
-          {open && <div className="model-consent">
+          {open && <div className="model-settings">
             <div className="model-grid">
-              <div><label htmlFor="summary-model">Cheap model · parsing and merging</label><input id="summary-model" className="input" value={summaryModel} disabled={disabled} onChange={e => { setSummaryModel(e.target.value); setConsent(false); }} placeholder="provider/model — required" /></div>
-              <div><label htmlFor="final-model">Stronger model · final verdict</label><input id="final-model" className="input" value={finalModel} disabled={disabled} onChange={e => { setFinalModel(e.target.value); setConsent(false); }} placeholder="Leave blank for pi’s configured default" /></div>
-              <div><label htmlFor="invocation-limit">Maximum pi invocations per run</label><input id="invocation-limit" className="input" type="number" min={1} max={500} value={maxInvocations} disabled={disabled} onChange={e => { setMaxInvocations(Number(e.target.value)); setConsent(false); }} /></div>
+              <div><label htmlFor="summary-model">Cheap model · parsing and merging</label><input id="summary-model" className="input" value={summaryModel} disabled={disabled} onChange={e => setSummaryModel(e.target.value)} placeholder="provider/model — required" /></div>
+              <div><label htmlFor="final-model">Stronger model · final verdict</label><input id="final-model" className="input" value={finalModel} disabled={disabled} onChange={e => setFinalModel(e.target.value)} placeholder="Leave blank for pi’s configured default" /></div>
+              <div><label htmlFor="invocation-limit">Maximum pi invocations per run</label><input id="invocation-limit" className="input" type="number" min={1} max={500} value={maxInvocations} disabled={disabled} onChange={e => setMaxInvocations(Number(e.target.value))} /></div>
             </div>
-            <label className="check-row"><input type="checkbox" checked={consent} disabled={disabled} onChange={e => setConsent(e.target.checked)} />
-              <span>Allow briefing and discussion to send the full snapshot to <strong>{summaryModel || 'a summary model you choose'}</strong>, and compressed summaries, verification excerpts, notes, and conversation to <strong>{finalModel || overview?.model || 'pi configured default'}</strong>.</span></label>
-            <p className="muted small">Cached nodes are reused; only the final verdict uses the stronger model. This can make many model calls on the first run (up to the limit above). No automatic expensive-model fallback. The manager has no tools and cannot run tasks. Redaction is best-effort: review evidence before sharing.</p>
+            <p className="muted small">Generate, Resume, and Ask use these models through pi. Completed summaries are cached and reused.</p>
             {(!sync.briefing || modelsDirty) && <button className="btn btn-primary" disabled={disabled || !canGenerate} onClick={generate}><Sparkles size={16} />Generate briefing</button>}
           </div>}
         </section>

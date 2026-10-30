@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { getDb, closeDb } from './db/schema';
-import { authMiddleware, isNoAuthMode, validateAuthConfig } from './auth/middleware';
+import { authMiddleware, isLoopbackHost, isNoAuthMode, validateAuthConfig } from './auth/middleware';
 import authRouter from './routes/auth';
 import syncRouter from './routes/sync';
 import { HttpError, recoverInterruptedRuns } from './sync/store';
@@ -45,7 +45,7 @@ export function startServer(): void {
   const host = process.env.DRAKEN_HOST || '127.0.0.1';
   const port = Number(process.env.DRAKEN_PORT || 40333);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('DRAKEN_PORT must be between 1 and 65535');
-  if (isNoAuthMode() && !['127.0.0.1', 'localhost', '::1'].includes(host)) {
+  if (isNoAuthMode() && !isLoopbackHost(host)) {
     throw new Error('No-auth mode may only bind to loopback. Configure authentication before exposing Draken.');
   }
   getDb();

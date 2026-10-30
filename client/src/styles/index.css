@@ -82,9 +82,9 @@ p { line-height: 1.65; }
 .briefing-placeholder { text-align: center; padding: 26px 20px; color: #a5b49b; }
 .briefing-placeholder h3 { color: #d5dfcd; }
 .briefing-placeholder p { font-size: 13px; max-width: 480px; margin: auto; }
-.model-consent { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 18px; }
+.model-settings { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 18px; }
 .check-row { display: flex; align-items: flex-start; gap: 10px; font-size: 12px; line-height: 1.6; cursor: pointer; }
-.model-consent p { font-size: 11px; line-height: 1.7; }
+.model-settings p { font-size: 11px; line-height: 1.7; }
 .message { padding: 15px 18px; border-radius: 8px; margin: 14px 0; border: 1px solid #343c30; background: #1f261c; }
 .message.user { background: #1d211e; border-color: #303630; }
 .message-author { font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: .12em; display: block; margin-bottom: 9px; }

@@ -14,7 +14,7 @@ The current pipeline is:
 6. Retrieve raw evidence for questions using lexical matches or explicit citation IDs.
 7. Require every snapshot entry to pass through successful compression and a valid final reply before completing a sync whose model run has started. Only the user's explicit completion advances coverage.
 
-The UI exposes model choices, consent, progress, node inspection, failures, cancellation, cache reuse, and a per-run invocation ceiling. Legacy partial snapshots can be explicitly expanded without losing their notes, discussion, or historical citations. Unchanged scans make no model calls; unchanged tree inputs reuse cached nodes. Work arriving during a full snapshot remains pending for the next sync.
+The UI exposes model choices, progress, node inspection, failures, cancellation, cache reuse, and a per-run invocation ceiling. Generate/Resume/Ask run directly; there is no per-action model permission checkbox. A plain loopback launch also needs no dashboard login; LAN bindings remain authenticated. Legacy partial snapshots can be explicitly expanded without losing their notes, discussion, or historical citations. Unchanged scans make no model calls; unchanged tree inputs reuse cached nodes. Work arriving during a full snapshot remains pending for the next sync.
 
 **Important limits:** a processed entry is not proof that all its facts survived lossy compression. Valid source references do not establish semantic support for every claim. Invocation counts are not token/dollar accounting. There is no background inference, semantic search, or durable incremental project-state rollup yet.
 

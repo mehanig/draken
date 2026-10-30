@@ -30,7 +30,9 @@ fs.chmodSync(fake, 0o700);
 process.env.DRAKEN_DATA_DIR = path.join(temp, 'state');
 process.env.DRAKEN_PI_SESSIONS_DIR = root;
 process.env.DRAKEN_PI_BIN = fake;
-process.env.DRAKEN_NO_AUTH = 'true';
+// Exercise the normal local default, not an explicit no-auth override.
+process.env.DRAKEN_HOST = '127.0.0.1';
+for (const key of ['DRAKEN_NO_AUTH', 'DRAKEN_USERNAME', 'DRAKEN_PASSWORD', 'DRAKEN_JWT_SECRET']) delete process.env[key];
 process.env.DRAKEN_PI_MODEL = 'test/strong';
 process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/cheap';
 const control = path.join(root, 'fake-control.json');
