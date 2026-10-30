@@ -28,7 +28,7 @@ Open **http://127.0.0.1:40333**. A normal loopback launch needs **no dashboard l
 1. **Scan local sessions.** This only reads files and updates Draken's local SQLite index.
 2. Select the sessions to include. Sources are grouped by their recorded working directory, which is not necessarily a repository boundary.
 3. Choose the first-sync history window (**last 24 hours**, **last 7 days**, or **all indexed history**) and **Start sync**. This sets a fixed baseline, not a rolling time filter. Draken rescans and freezes a snapshot. An existing open sync is resumed instead of creating a duplicate.
-4. Inspect the evidence. Choose a **cheap summary model**, a **stronger final model**, and an invocation limit. Click **Generate briefing**, **Resume generation**, or ask a question directly—there is no extra permission checkbox. Watch progress and inspect source-linked summary nodes; generation can be cancelled or resumed after failure.
+4. Inspect the evidence. Click **Generate briefing**, **Resume generation**, or ask a question directly. Model defaults are configured server-side; there are no model settings or extra permission checkboxes in the sync page. Watch progress and inspect source-linked summary nodes; generation can be cancelled or resumed after failure.
 5. Edit **Decisions** and **Carry into the next sync**. Save notes whenever you want.
 6. Confirm you reviewed the snapshot and **Finish sync**. Only its evidence is marked covered. New activity remains for the next sync.
 
@@ -40,8 +40,9 @@ An old capped snapshot must be explicitly **expanded to full history** before ge
 
 Draken invokes `pi --print` with all tools, extensions, MCP, skills, templates, context-file discovery, and session persistence disabled. It runs outside project checkouts and never resumes or writes to your coding sessions. Credentials stay with your configured pi installation; Draken does not copy auth files.
 
-- **Summary model:** choose explicitly in the UI or set `DRAKEN_PI_SUMMARY_MODEL`. No silent fallback to an expensive model.
-- **Final model:** choose in the UI, set `DRAKEN_PI_FINAL_MODEL`, or use `DRAKEN_PI_MODEL` / pi's configured default.
+- **Summary model:** defaults to `openai/gpt-6-luna`. Override with `DRAKEN_PI_SUMMARY_MODEL`; there is no automatic fallback to the stronger model.
+- **Final model:** defaults to `openai/gpt-6-astra`. Override with `DRAKEN_PI_FINAL_MODEL` or the legacy `DRAKEN_PI_MODEL`.
+- Model and budget controls are intentionally absent from the UI for now. Existing syncs retain their saved settings; the advanced `/api/syncs/:id/models` PATCH endpoint remains available for changing an open sync.
 - Selectors use pi's `provider/model` syntax. Catalog presence does not guarantee your subscription/API credential can access that model. Both models must support ordinary text generation; the summary model must reliably emit JSON.
 - **Invocation ceiling:** `DRAKEN_PI_MAX_INVOCATIONS` defaults to 120 per briefing/question, including schema-repair attempts and the final verdict. This limits pi subprocess invocations, not provider-internal retries, tokens, or dollars. Exhaustion stops the run without losing cached work.
 
@@ -123,10 +124,10 @@ Environment variables are read from the process environment; `.env` is **not** a
 | `DRAKEN_DATA_DIR` | `~/.draken` |
 | `DRAKEN_PI_SESSIONS_DIR` | `~/.pi/agent/sessions`; override for custom pi storage |
 | `DRAKEN_PI_BIN` | `pi`; executable name/path, not a shell command |
-| `DRAKEN_PI_SUMMARY_MODEL` | Required for generation unless chosen in the UI; cheap model selector |
-| `DRAKEN_PI_FINAL_MODEL` | Optional final-verdict model selector |
-| `DRAKEN_PI_MODEL` | Legacy fallback for the final model; otherwise pi's default |
-| `DRAKEN_PI_MAX_INVOCATIONS` | `120`, bounded to 1–500; overridable per sync |
+| `DRAKEN_PI_SUMMARY_MODEL` | `openai/gpt-6-luna`; summary-model override |
+| `DRAKEN_PI_FINAL_MODEL` | `openai/gpt-6-astra`; final-model override |
+| `DRAKEN_PI_MODEL` | Legacy final-model override, used when `DRAKEN_PI_FINAL_MODEL` is unset |
+| `DRAKEN_PI_MAX_INVOCATIONS` | `120`, bounded to 1–500; server-side default |
 | `DRAKEN_PI_TIMEOUT_MS` | `180000` per invocation, bounded to 1–600 seconds |
 
 ## Development and verification
@@ -155,7 +156,7 @@ src/sync/manager.ts      background runs, retrieval, final verdict and conversat
 src/routes/sync.ts      authenticated sync API
 src/db/schema.ts        additive SQLite schema
 client/src/pages/Sync.tsx
-                        sources, model settings, progress, briefing, notes
+                        sources, progress, briefing, discussion, notes
 client/src/components/SummaryTree.tsx
                         expandable nodes, structured observations, provenance
 ```

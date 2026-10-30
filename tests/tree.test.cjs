@@ -314,9 +314,19 @@ test('validated v1 leaf caches survive the short-label upgrade without another m
   assert.equal(result.tree.complete, true);
 });
 
-test('missing cheap-model selection does not silently use the expensive default', async () => {
+test('built-in defaults run without model selection and server overrides remain available', async () => {
+  for (const key of ['DRAKEN_PI_SUMMARY_MODEL', 'DRAKEN_PI_FINAL_MODEL', 'DRAKEN_PI_MODEL']) delete process.env[key];
+  assert.deepEqual(store.defaultModels(), { summary: 'openai/gpt-6-luna', final: 'openai/gpt-6-astra', max_invocations: 120 });
   const sync = await begin();
-  process.env.DRAKEN_PI_SUMMARY_MODEL = '';
-  await assert.rejects(() => generateReply(sync.id), /Choose a summary model explicitly/);
-  assert.equal(calls().length, 0);
+  const result = await generateReply(sync.id);
+  assert.equal(result.tree.complete, true);
+  assert.equal(calls().find(call => call.stage === 'chunk').model, 'openai/gpt-6-luna');
+  assert.equal(calls().at(-1).model, 'openai/gpt-6-astra');
+  process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/custom-cheap';
+  process.env.DRAKEN_PI_MODEL = 'test/legacy-final';
+  assert.equal(store.defaultModels().summary, 'test/custom-cheap');
+  assert.equal(store.defaultModels().final, 'test/legacy-final');
+  process.env.DRAKEN_PI_FINAL_MODEL = 'test/custom-final';
+  assert.equal(store.defaultModels().final, 'test/custom-final');
+  assert.equal(store.getSync(sync.id).models.summary, 'openai/gpt-6-luna', 'existing run settings stay frozen');
 });

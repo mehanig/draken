@@ -7,14 +7,14 @@ The first raw-evidence prototype cut off snapshots at 100 entries / 80,000 chara
 The current pipeline is:
 
 1. Freeze all eligible indexed evidence from the selected sources/history baseline.
-2. Use an explicitly selected cheaper model for chronological session chunks.
+2. Use the configured cheaper model for chronological session chunks (default: GPT-6 Luna).
 3. Reconcile session outcomes hierarchically, group related observations across sessions, and merge workstreams.
 4. Cache structured results by source content, model, prompt/version, and node type.
 5. Give the final model bounded summaries and verification excerpts, plus previous decisions and recent discussion.
 6. Retrieve raw evidence for questions using lexical matches or explicit citation IDs.
 7. Require every snapshot entry to pass through successful compression and a valid final reply before completing a sync whose model run has started. Only the user's explicit completion advances coverage.
 
-The UI exposes model choices, progress, node inspection, failures, cancellation, cache reuse, and a per-run invocation ceiling. Generate/Resume/Ask run directly; there is no per-action model permission checkbox. A plain loopback launch also needs no dashboard login; LAN bindings remain authenticated. Legacy partial snapshots can be explicitly expanded without losing their notes, discussion, or historical citations. Unchanged scans make no model calls; unchanged tree inputs reuse cached nodes. Work arriving during a full snapshot remains pending for the next sync.
+The UI focuses on briefing, discussion, notes, and progress, with node inspection, failures, cancellation, and cache reuse. Model/budget settings stay server-side: Luna for compression, Astra for the final reply, and 120 invocations per run by default. Generate/Resume/Ask run directly; there is no per-action model permission checkbox. A plain loopback launch also needs no dashboard login; LAN bindings remain authenticated. Legacy partial snapshots can be explicitly expanded without losing their notes, discussion, or historical citations. Unchanged scans make no model calls; unchanged tree inputs reuse cached nodes. Work arriving during a full snapshot remains pending for the next sync.
 
 **Important limits:** a processed entry is not proof that all its facts survived lossy compression. Valid source references do not establish semantic support for every claim. Invocation counts are not token/dollar accounting. There is no background inference, semantic search, or durable incremental project-state rollup yet.
 
@@ -46,6 +46,7 @@ Pi's compaction/branch summaries remain useful background, not independent proof
 
 ## Later
 
+- A dedicated settings UI for models and budgets, rather than putting configuration in every sync.
 - Voice input/output using the same persisted sync workflow.
 - Searchable full sync history, retention/purge controls, and baseline management.
 - Optional read-only Git/CI evidence to verify transcript claims.

@@ -19,13 +19,9 @@ export function Sync() {
   const [carry, setCarry] = useState('');
   const [reviewed, setReviewed] = useState(false);
   const [initialWindow, setInitialWindow] = useState('24');
-  const [summaryModel, setSummaryModel] = useState('');
-  const [finalModel, setFinalModel] = useState('');
-  const [maxInvocations, setMaxInvocations] = useState(120);
 
   const showSync = (value: SyncDetail) => {
     setSync(value); setDecisions(value.decisions); setCarry(value.carry_forward);
-    setSummaryModel(value.models.summary); setFinalModel(value.models.final); setMaxInvocations(value.models.max_invocations);
   };
   const refresh = async () => { const value = await api.overview(); setOverview(value); return value; };
   const run = async (label: string, fn: () => Promise<void>) => {
@@ -74,9 +70,8 @@ export function Sync() {
 
   const disabled = Boolean(work || sync?.busy);
   const open = sync?.status === 'open';
-  const modelsDirty = Boolean(sync && (summaryModel !== sync.models.summary || finalModel !== sync.models.final || maxInvocations !== sync.models.max_invocations));
-  const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward || modelsDirty));
-  const canGenerate = Boolean(summaryModel.trim() && Number.isInteger(maxInvocations) && maxInvocations >= 1 && maxInvocations <= 500 && sync?.snapshot_version === 2);
+  const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward));
+  const canGenerate = sync?.snapshot_version === 2;
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -99,17 +94,14 @@ export function Sync() {
     const result = await api.start(since); showSync(result.sync); setWarnings(result.scan.warnings);
     setReviewed(false); await refresh();
   });
-  const saveModels = (id: number) => api.models(id, { summary: summaryModel.trim(), final: finalModel.trim(), max_invocations: maxInvocations });
   const generate = () => void run('Starting summary tree', async () => {
     if (!sync) return;
     await api.notes(sync.id, decisions, carry);
-    await saveModels(sync.id);
     showSync(await api.brief(sync.id)); await refresh();
   });
   const discuss = (message = question) => void run('Starting discussion', async () => {
     if (!sync) return;
     await api.notes(sync.id, decisions, carry);
-    await saveModels(sync.id);
     showSync(await api.discuss(sync.id, message));
   });
   const resume = () => sync?.tree.run?.question ? discuss(sync.tree.run.question) : generate();
@@ -188,14 +180,8 @@ export function Sync() {
             }}>Expand to full history</button></p>}
           </div>}
           {sync.briefing ? <CitedText text={sync.briefing} evidence={evidence} /> : <div className="briefing-placeholder"><Sparkles size={25} /><h3>Your evidence is ready.</h3><p>Inspect the source excerpts below, then ask Draken for a briefing. You can also review and finish without a model.</p></div>}
-          {open && <div className="model-settings">
-            <div className="model-grid">
-              <div><label htmlFor="summary-model">Cheap model · parsing and merging</label><input id="summary-model" className="input" value={summaryModel} disabled={disabled} onChange={e => setSummaryModel(e.target.value)} placeholder="provider/model — required" /></div>
-              <div><label htmlFor="final-model">Stronger model · final verdict</label><input id="final-model" className="input" value={finalModel} disabled={disabled} onChange={e => setFinalModel(e.target.value)} placeholder="Leave blank for pi’s configured default" /></div>
-              <div><label htmlFor="invocation-limit">Maximum pi invocations per run</label><input id="invocation-limit" className="input" type="number" min={1} max={500} value={maxInvocations} disabled={disabled} onChange={e => setMaxInvocations(Number(e.target.value))} /></div>
-            </div>
-            <p className="muted small">Generate, Resume, and Ask use these models through pi. Completed summaries are cached and reused.</p>
-            {(!sync.briefing || modelsDirty) && <button className="btn btn-primary" disabled={disabled || !canGenerate} onClick={generate}><Sparkles size={16} />Generate briefing</button>}
+          {open && !sync.briefing && <div className="briefing-actions">
+            <button className="btn btn-primary" disabled={disabled || !canGenerate} onClick={generate}><Sparkles size={16} />Generate briefing</button>
           </div>}
         </section>
 
@@ -212,7 +198,7 @@ export function Sync() {
           <div className="notes-grid"><div><label htmlFor="decisions">Decisions</label><textarea id="decisions" rows={5} maxLength={4000} disabled={!open || disabled} value={decisions} onChange={e => setDecisions(e.target.value)} placeholder="What did we agree? Priorities, choices, things not to do…" /></div>
             <div><label htmlFor="carry-forward">Carry into the next sync</label><textarea id="carry-forward" rows={5} maxLength={4000} disabled={!open || disabled} value={carry} onChange={e => setCarry(e.target.value)} placeholder="Open questions, blockers, deferred topics. Remove resolved items." /></div></div>
           <p className="muted small">These are your notes, not automatic model conclusions. Carry-forward items persist until you remove them; the manager also receives decisions from the last 10 completed syncs.</p>
-          {open && <div className="finish-controls"><button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes', async () => { await api.notes(sync.id, decisions, carry); if (modelsDirty) await saveModels(sync.id); showSync(await api.sync(sync.id)); setNotice('Notes saved. Coverage has not advanced.'); })}>Save notes</button>
+          {open && <div className="finish-controls"><button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes', async () => { showSync(await api.notes(sync.id, decisions, carry)); setNotice('Notes saved. Coverage has not advanced.'); })}>Save notes</button>
             <label className="check-row"><input type="checkbox" checked={reviewed} disabled={disabled} onChange={e => setReviewed(e.target.checked)} /><span>I reviewed this snapshot. Mark its {sync.items.length} entries covered when I finish.</span></label>
             <div className="finish-actions"><button className="btn btn-ghost" disabled={disabled} onClick={() => {
               if (window.confirm('Discard this sync? Its entries remain uncovered. The discarded snapshot stays in history.')) void run('Discarding sync', async () => { showSync(await api.discard(sync.id)); await refresh(); });

@@ -1,4 +1,4 @@
-import type { Overview, ScanResult, SyncDetail, SyncModels, TreeProgress, NodeSummary, TopicGroups } from '../types';
+import type { Overview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const token = localStorage.getItem('draken_token');
@@ -27,7 +27,6 @@ export const api = {
   progress: (id: number) => request<TreeProgress>(`/syncs/${id}/progress`),
   treeNode: (id: number, key: string) => request<{ label: string; output: NodeSummary | TopicGroups; refs: Record<string, string> }>(`/syncs/${id}/tree/${key}`),
   expand: (id: number) => request<{ sync: SyncDetail; scan: ScanResult }>(`/syncs/${id}/expand`, 'POST'),
-  models: (id: number, models: SyncModels) => request<SyncDetail>(`/syncs/${id}/models`, 'PATCH', models),
   cancel: (id: number) => request<TreeProgress>(`/syncs/${id}/cancel`, 'POST'),
   brief: (id: number) => request<SyncDetail>(`/syncs/${id}/briefing`, 'POST'),
   discuss: (id: number, message: string) => request<SyncDetail>(`/syncs/${id}/messages`, 'POST', { message }),

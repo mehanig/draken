@@ -23,8 +23,8 @@ DRAKEN_PORT                    Port (default: 40333)
 DRAKEN_DATA_DIR                Local state (default: ~/.draken)
 DRAKEN_PI_SESSIONS_DIR         Source logs (default: ~/.pi/agent/sessions)
 DRAKEN_PI_BIN                  pi executable (default: pi)
-DRAKEN_PI_SUMMARY_MODEL        Cheap model selector (or choose in the UI)
-DRAKEN_PI_FINAL_MODEL          Final model selector
+DRAKEN_PI_SUMMARY_MODEL        Summary model (default: openai/gpt-6-luna)
+DRAKEN_PI_FINAL_MODEL          Final model (default: openai/gpt-6-astra)
 DRAKEN_PI_MODEL                Legacy final-model fallback
 DRAKEN_PI_TIMEOUT_MS           Model request timeout (default: 180000)
 

@@ -4,7 +4,9 @@ import path from 'node:path';
 
 test('scan → briefing → discussion → finish → remembered second sync, including mobile layout', async ({ page }) => {
   const errors: string[] = [];
+  let modelConfigWrites = 0;
   page.on('pageerror', error => errors.push(error.message));
+  page.on('request', request => { if (request.method() === 'PATCH' && request.url().endsWith('/models')) modelConfigWrites++; });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Pick up where you left off.' })).toBeVisible();
   await page.getByRole('button', { name: 'Scan local sessions', exact: true }).click();
@@ -13,9 +15,7 @@ test('scan → briefing → discussion → finish → remembered second sync, in
   await expect(page.getByRole('heading', { name: 'Sync #1 open' })).toBeVisible();
   await expect(page.getByRole('checkbox', { name: /Allow briefing and discussion/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Generate briefing' })).toBeEnabled();
-  await page.getByLabel('Maximum pi invocations per run').fill('121');
-  await expect(page.getByRole('button', { name: 'Generate briefing' })).toBeEnabled();
-  await page.getByLabel('Maximum pi invocations per run').fill('120');
+  await expect(page.locator('#summary-model, #final-model, #invocation-limit')).toHaveCount(0);
   const overview = await page.evaluate(async () => (await fetch('/api/overview')).json());
   const fixtureRoot = path.dirname(overview.session_root);
   expect(path.basename(fixtureRoot)).toMatch(/^draken-browser-/);
@@ -72,4 +72,5 @@ test('scan → briefing → discussion → finish → remembered second sync, in
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: '.test-artifacts/mobile-sync.png', fullPage: true });
   expect(errors).toEqual([]);
+  expect(modelConfigWrites).toBe(0);
 });

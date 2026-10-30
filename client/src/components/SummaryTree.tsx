@@ -49,7 +49,6 @@ export function SummaryTree({ syncId, progress, evidence, onCancel, onResume, re
       <span>{run.invocations} / {run.max_invocations} pi invocations</span><span>{run.cache_hits} cached nodes reused</span></div>
     <p className="small">{stopped ? 'Stopped at: ' : ''}{run.stage}</p>
     {run.question && <p className="small muted">Question: {run.question}</p>}
-    <p className="small muted">Compression: {run.summary_model} · Final: {run.final_model}. Processed does not mean verified or marked reviewed. Provider retries may add requests; this is not a dollar-cost meter.</p>
     {run.error && <div className="alert error" role="alert"><strong>Last run’s error:</strong> {run.error}</div>}
     {stopped && <div className="alert warning">
       <strong>Generation stopped. No model calls are running.</strong>
