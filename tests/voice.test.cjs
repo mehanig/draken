@@ -156,6 +156,38 @@ test('pretty-printed and repeated complete JSON sentences are validated and spok
   assert.equal((turn.answer.match(/targeted export tests/g) || []).length, 1);
 });
 
+test('comma-separated replies keep citations and do not interrupt playback', async () => {
+  const call = await voice.startCall(syncId);
+  for (const voiceArray of [false, true]) {
+    fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ voiceCommas: true, voiceArray, repeatVoice: true }));
+    const events = await completeTurn(call);
+    assert.equal(events.at(-1).type, 'done');
+    assert.equal(events.filter(event => event.type === 'audio').length, 2);
+    assert.equal(voice.callHistory(syncId)[0].turns.at(-1).status, 'completed');
+  }
+});
+
+test('invalid tails never truncate already validated audio or masquerade as completed replies', async () => {
+  const call = await voice.startCall(syncId);
+  for (const control of [{ voiceBadTail: true }, { voiceBadCitationTail: true }]) {
+    fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify(control));
+    const events = [];
+    await voice.reply(call.id, question, randomUUID(), new AbortController().signal, event => events.push(event));
+    assert.equal(events.at(-1).type, 'done');
+    assert.ok(events.some(event => event.type === 'warning'));
+    assert.equal(events.some(event => event.type === 'error'), false);
+    const audio = events.filter(event => event.type === 'audio'); assert.equal(audio.length, 2);
+    for (const event of audio) {
+      assert.ok(voice.getAudio(call.id, event.id, event.index).length > 44, 'audio remains fetchable after stream completion');
+      voice.played(call.id, event.id, event.index);
+    }
+    const turn = voice.callHistory(syncId)[0].turns.at(-1);
+    assert.equal(turn.status, 'failed'); assert.equal(turn.heard_text, turn.answer);
+    assert.doesNotMatch(turn.heard_text, /invented result|not a JSON/);
+    assert.match(store.getSync(syncId).messages.at(-1).content, /Voice reply failed/);
+  }
+});
+
 test('time and turn limits close calls without advancing coverage or making another invocation', async () => {
   const call = await voice.startCall(syncId);
   const now = Date.now;

@@ -114,13 +114,14 @@ test('call playback, mute, source inspection, interruption, failure recovery and
   expect(errors).toEqual([]); expect(noteWrites).toEqual([]);
 });
 
-test('real browser VAD sends speech hands-free and speaking over a reply interrupts it', async ({ page }) => {
+test('headphone mode supports hands-free speech and spoken interruption', async ({ page }) => {
   test.setTimeout(45000);
   const { syncId } = await prepare(page);
   await virtualMicrophone(page);
   const external: string[] = [];
   page.on('request', request => { if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== 'http://127.0.0.1:41889') external.push(request.url()); });
   await openCall(page);
+  await page.getByRole('button', { name: 'Headphone mode', exact: true }).click();
   const firstSpeech = page.evaluate(() => (window as any).__say());
   await expect(dialog(page).getByRole('status')).toHaveText('Listening to you');
   await firstSpeech;
@@ -136,6 +137,46 @@ test('real browser VAD sends speech hands-free and speaking over a reply interru
   expect(history[0].turns.map((turn: any) => turn.status)).toEqual(['interrupted', 'completed']);
   expect(history[0].turns.every((turn: any) => turn.question === 'Did the export tests pass?')).toBe(true);
   expect(external).toEqual([]);
+});
+
+test('speaker-safe playback ignores microphone feedback and listens again after the entire reply', async ({ page }) => {
+  test.setTimeout(45000);
+  const { syncId, root } = await prepare(page);
+  fs.writeFileSync(path.join(root, 'audio/audio-control.json'), JSON.stringify({ seconds: 3 }));
+  await virtualMicrophone(page); await openCall(page);
+  let recognitions = 0; page.on('request', request => { if (request.url().endsWith('/transcribe')) recognitions++; });
+  await expect(page.getByRole('button', { name: 'Headphone mode', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await typeQuestion(page, 'Did the export tests pass?');
+  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
+  await page.evaluate(() => (window as any).__say()); // Speech leaking into the microphone during output.
+  await expect(dialog(page).getByRole('status')).toHaveText('Your turn', { timeout: 10000 });
+  expect(recognitions).toBe(0);
+  let history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
+  expect(history[0].turns).toHaveLength(1); expect(history[0].turns[0].status).toBe('completed');
+  await page.evaluate(() => (window as any).__say());
+  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
+  await expect(dialog(page).getByRole('status')).toHaveText('Your turn', { timeout: 10000 });
+  expect(recognitions).toBe(1);
+  await page.getByRole('button', { name: 'End call', exact: true }).click();
+  await expect(dialog(page)).not.toBeVisible(); expect(await stoppedTracks(page)).toBe(true);
+  history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
+  expect(history[0].turns.map((turn: any) => turn.status)).toEqual(['completed', 'completed']);
+});
+
+test('a later format error cannot stop a valid sentence after its first second', async ({ page }) => {
+  const { syncId, root } = await prepare(page);
+  fs.writeFileSync(path.join(root, 'sessions/fake-control.json'), JSON.stringify({ voiceCommas: true, voiceBadTail: true, streamDelay: 20 }));
+  fs.writeFileSync(path.join(root, 'audio/audio-control.json'), JSON.stringify({ seconds: 3 }));
+  await virtualMicrophone(page); await openCall(page);
+  await typeQuestion(page, 'Did the export tests pass?');
+  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
+  await expect(page.locator('.voice-notice')).toContainText('validated part');
+  await expect(dialog(page).getByRole('status')).toHaveText('Your turn', { timeout: 10000 });
+  const history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
+  expect(history[0].turns[0].status).toBe('failed');
+  expect(history[0].turns[0].heard_text).toBe('The targeted export tests passed. Deployment is not confirmed by this evidence.');
+  await page.getByRole('button', { name: 'End call', exact: true }).click();
+  await expect(dialog(page)).not.toBeVisible();
 });
 
 test('microphone denial keeps a usable typed call with local spoken replies', async ({ page }) => {

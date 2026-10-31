@@ -3,10 +3,10 @@ import type { MicVAD } from '@ricky0123/vad-web';
 export type CallPhase = 'connecting' | 'listening' | 'hearing' | 'transcribing' | 'thinking' | 'speaking' | 'paused' | 'ended';
 export interface VoiceStatus { installed: boolean; state: string; error: string; httpsPort: number | null; certificateAvailable: boolean; activeCall: { id: string; syncId: number } | null }
 export interface CallState {
-  phase: CallPhase; muted: boolean; microphone: boolean; question: string; answer: string; evidence: string[];
+  phase: CallPhase; muted: boolean; microphone: boolean; voiceInterruption: boolean; question: string; answer: string; evidence: string[];
   error: string; notice: string; startedAt: number; turnId: number; modelMs?: number;
 }
-export const INITIAL_CALL: CallState = { phase: 'connecting', muted: false, microphone: false, question: '', answer: '', evidence: [], error: '', notice: '', startedAt: 0, turnId: 0 };
+export const INITIAL_CALL: CallState = { phase: 'connecting', muted: false, microphone: false, voiceInterruption: false, question: '', answer: '', evidence: [], error: '', notice: '', startedAt: 0, turnId: 0 };
 export interface CallHistory { id: string; status: string; started_at: string; ended_at: string | null; end_reason: string;
   turns: { id: number; question: string; answer: string; heard_text: string; status: string; error: string; evidence_json: string }[] }
 
@@ -60,6 +60,9 @@ export class VoiceSession {
   private splitting = false;
   private heartbeatPending = false;
   private changingMicrophone = false;
+  private outputActive = false;
+  private outputRelease?: ReturnType<typeof setTimeout>;
+  private detectorBarrier: Promise<void> = Promise.resolve();
   private pageExit = () => { void this.end(); };
 
   constructor(private options: Options) {
@@ -74,6 +77,7 @@ export class VoiceSession {
   }
   private valid(version: number) { return this.alive && version === this.version; }
   private async microphone() {
+    if (!this.alive) throw new Error('Call ended');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
     if (!this.alive) { stream.getTracks().forEach(track => track.stop()); throw new Error('Call ended'); }
     this.stream = stream;
@@ -82,6 +86,7 @@ export class VoiceSession {
         this.captureVersion = -1; this.speechStarted = 0; this.options.onLevel(0);
         this.set({ microphone: false, muted: true, phase: this.state.phase === 'hearing' ? 'listening' : this.state.phase,
           notice: 'Microphone disconnected. You can type or enable it again.' });
+        void this.reconcileDetector();
       }
     };
     this.set({ microphone: true });
@@ -97,11 +102,13 @@ export class VoiceSession {
       // A 0.7s pause finishes a thought; a quarter-second of speech permits barge-in.
       redemptionMs: 700, minSpeechMs: 250, preSpeechPadMs: 300,
       getStream: async () => this.stream?.active ? this.stream : this.microphone(),
-      pauseStream: async stream => { stream.getTracks().forEach(track => track.stop()); },
-      resumeStream: async () => this.microphone(),
+      // Playback pauses detection without reopening the device for each sentence.
+      // User mute, disconnect and hang-up explicitly stop the actual input tracks.
+      pauseStream: async () => {},
+      resumeStream: async () => this.stream?.active ? this.stream : this.microphone(),
       onSpeechStart: () => { this.speechStarted = Date.now(); },
       onSpeechRealStart: () => {
-        if (!this.alive || this.state.muted) return;
+        if (!this.alive || this.state.muted || (this.outputActive && !this.state.voiceInterruption)) return;
         void this.interrupt(false);
         this.captureVersion = this.version;
         this.set({ phase: 'hearing', error: '' });
@@ -121,6 +128,44 @@ export class VoiceSession {
     });
     if (!this.alive) { await vad.destroy(); return; }
     this.vad = vad;
+  }
+  private reconcileDetector(): Promise<void> {
+    this.detectorBarrier = this.detectorBarrier.then(async () => {
+      if (!this.alive || !this.vad) return;
+      const listen = !this.state.muted && (!this.outputActive || this.state.voiceInterruption);
+      if (listen && !this.vad.listening) await this.vad.start();
+      else if (!listen && this.vad.listening) await this.vad.pause();
+    }).catch(() => {
+      this.stream?.getTracks().forEach(track => track.stop());
+      if (this.alive) this.set({ muted: true, microphone: false, notice: 'Microphone paused. Enable it again, or type your question.' });
+    });
+    return this.detectorBarrier;
+  }
+  private beginOutput() {
+    clearTimeout(this.outputRelease);
+    if (this.outputActive) return;
+    this.outputActive = true; this.captureVersion = -1; this.speechStarted = 0;
+    void this.reconcileDetector();
+  }
+  private releaseOutput() {
+    clearTimeout(this.outputRelease); this.outputActive = false;
+    void this.reconcileDetector();
+  }
+  private finishOutput() {
+    if (!this.alive || this.pumping || this.queue.length || !this.generationDone || this.state.phase === 'paused') return;
+    clearTimeout(this.outputRelease);
+    const version = this.version;
+    // Reset VAD after the speaker tail; otherwise echo and the next question can
+    // become one utterance. Keep the UI in speaking state until input is ready.
+    this.outputRelease = setTimeout(async () => {
+      if (!this.valid(version)) return;
+      this.outputActive = false; await this.reconcileDetector();
+      if (this.valid(version) && !this.outputActive) this.set({ phase: 'listening' });
+    }, 200);
+  }
+  setVoiceInterruption(enabled: boolean) {
+    this.set({ voiceInterruption: enabled });
+    void this.reconcileDetector();
   }
   private async splitLongTurn() {
     if (!this.vad) return;
@@ -158,7 +203,7 @@ export class VoiceSession {
       }
       this.set({ startedAt: Date.parse(call.startedAt), phase: 'listening', answer: call.greeting });
       this.heartbeat = setInterval(() => { void this.ping(); }, call.limits.heartbeatSeconds * 1000);
-      if (this.vad && !this.state.muted) await this.vad.start();
+      this.beginOutput();
       this.queue.push({ turnId: 0, index: 0, text: call.greeting, version: this.version });
       this.generationDone = true;
       void this.pump();
@@ -183,7 +228,7 @@ export class VoiceSession {
     this.captureVersion = -1;
     this.request?.abort(); this.request = undefined;
     this.stopPlayback?.(); this.stopPlayback = undefined;
-    this.queue = []; this.generationDone = false;
+    this.queue = []; this.generationDone = false; this.releaseOutput();
     if (listening && this.alive) this.set({ phase: 'listening' });
     if (this.id && this.alive) {
       this.barrier = this.barrier.catch(() => {}).then(() => this.receipt.catch(() => {}))
@@ -221,7 +266,7 @@ export class VoiceSession {
   }
   private failed(error: unknown, version: number) {
     if (!this.valid(version) || (error instanceof DOMException && error.name === 'AbortError')) return;
-    ++this.version; this.stopPlayback?.(); this.queue = []; this.generationDone = true;
+    ++this.version; this.stopPlayback?.(); this.queue = []; this.generationDone = true; this.releaseOutput();
     this.set({ phase: 'listening', error: error instanceof Error ? error.message : 'The reply failed. Please try again.' });
   }
   private async beginReply(question: string, version: number, controller: AbortController) {
@@ -249,11 +294,12 @@ export class VoiceSession {
             this.set({ answer: event.text, evidence: event.evidence, modelMs: event.modelMs });
             this.options.onTurn(question, event.text, event.evidence, event.id);
           }
-          if (event.type === 'audio') { this.queue.push({ turnId: event.id, index: event.index, text: event.text, version }); void this.pump(); }
-          if (event.type === 'done') { done = true; this.generationDone = true; if (!this.pumping && !this.queue.length && this.state.phase !== 'paused') this.set({ phase: 'listening' }); }
+          if (event.type === 'audio') { this.beginOutput(); this.queue.push({ turnId: event.id, index: event.index, text: event.text, version }); void this.pump(); }
+          if (event.type === 'warning') this.set({ notice: event.error });
+          if (event.type === 'done') { done = true; this.generationDone = true; this.finishOutput(); }
           if (event.type === 'error') {
             done = true; ++this.version; this.generationDone = true;
-            this.stopPlayback?.(); this.queue = [];
+            this.stopPlayback?.(); this.queue = []; this.releaseOutput();
             this.set({ phase: 'listening', error: event.error });
           }
         }
@@ -282,7 +328,8 @@ export class VoiceSession {
         if (!response.ok) throw new Error('Spoken audio could not be loaded. You can still read the reply.');
         const buffer = await this.context.decodeAudioData(await response.arrayBuffer());
         if (!this.valid(chunk.version)) { if (this.queue[0] === chunk) this.queue.shift(); continue; }
-        await this.context.resume();
+        await this.detectorBarrier; await this.context.resume();
+        if (!this.valid(chunk.version)) continue;
         if (this.context.state !== 'running') { this.set({ phase: 'paused', error: 'Sound is paused by the browser. Tap Resume sound.' }); return; }
         this.set({ phase: 'speaking' });
         const complete = await new Promise<boolean>(resolve => {
@@ -299,13 +346,13 @@ export class VoiceSession {
           await this.confirmPlayback();
         }
       }
-      if (this.alive && this.generationDone && this.state.phase === 'speaking') this.set({ phase: 'listening' });
     } catch (error) {
       if (this.valid(playingVersion)) this.set({ phase: 'paused', error: error instanceof Error ? error.message : 'Sound playback failed. Tap Resume sound.' });
     } finally {
       this.pumping = false;
       // An interrupted playback can have a new turn queued while its old loop unwinds.
       if (this.alive && this.queue.length && this.state.phase !== 'paused') void this.pump();
+      else this.finishOutput();
     }
   }
   async resumeSound() {
@@ -321,18 +368,16 @@ export class VoiceSession {
       if (!this.state.muted) {
         this.captureVersion = -1; this.speechStarted = 0;
         this.set({ muted: true });
-        try { await this.vad?.pause(); }
+        try { await this.reconcileDetector(); }
         catch { this.set({ notice: 'Speech detection paused. Enable the microphone again to retry.' }); }
         finally { this.stream?.getTracks().forEach(track => track.stop()); this.options.onLevel(0); }
       } else {
         try {
           await this.context.resume();
-          if (!this.vad) { await this.microphone(); await this.detector(); }
-          // A physically disconnected track can leave VAD marked as listening.
-          // Reset it before reacquiring a device instead of pretending it resumed.
-          else if (!this.stream?.active) await this.vad.pause();
-          await this.vad?.start();
+          if (!this.stream?.active) await this.microphone();
+          if (!this.vad) await this.detector();
           this.set({ muted: false, microphone: true, notice: '' });
+          await this.reconcileDetector();
         } catch { this.set({ muted: true, microphone: false, notice: 'Microphone access is still unavailable. Check the browser permission, or type below.' }); }
       }
     } finally { this.changingMicrophone = false; }
@@ -345,7 +390,7 @@ export class VoiceSession {
   async end() {
     if (!this.alive) return;
     this.alive = false; ++this.version; this.captureVersion = -1;
-    clearInterval(this.heartbeat); window.removeEventListener('pagehide', this.pageExit);
+    clearInterval(this.heartbeat); clearTimeout(this.outputRelease); window.removeEventListener('pagehide', this.pageExit);
     this.request?.abort(); this.stopPlayback?.(); this.queue = [];
     this.stream?.getTracks().forEach(track => track.stop());
     void this.vad?.destroy().catch(() => {});

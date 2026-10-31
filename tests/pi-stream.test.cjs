@@ -35,6 +35,23 @@ test('voice object framing tolerates pretty JSON and fences without speaking par
   assert.throws(() => new VoiceAnswerStream(() => {}).feed('Here is an answer:'), /not valid JSON/);
 });
 
+test('voice framing accepts observed comma separators and arrays across every packet boundary', () => {
+  const a = { reply: 'Thanks for confirming.', evidence: [], kind: 'conversation' };
+  const b = { reply: 'What next?', evidence: [], kind: 'conversation' };
+  const sequence = JSON.stringify(a) + ' \n, ' + JSON.stringify(b);
+  for (const text of [sequence, '[' + sequence + ']', '```json\n[' + sequence + ']\n```']) {
+    for (let split = 0; split <= text.length; split++) {
+      const seen = [], parser = new VoiceAnswerStream(raw => seen.push(JSON.parse(raw)));
+      parser.feed(text.slice(0, split)); parser.feed(text.slice(split)); parser.finish();
+      assert.deepEqual(seen, [a, b]);
+    }
+  }
+  for (const text of [',' + JSON.stringify(a), JSON.stringify(a) + ',,', '[' + JSON.stringify(a) + ',]', '[' + JSON.stringify(a) + JSON.stringify(b) + ']', JSON.stringify(a) + ',']) {
+    const parser = new VoiceAnswerStream(JSON.parse);
+    assert.throws(() => { parser.feed(text); parser.finish(); });
+  }
+});
+
 test('code-zero model errors, truncation, retries, revisions and incomplete streams are not successes', () => {
   for (const reason of ['error', 'aborted', 'length', 'toolUse', 'pending']) {
     const stream = new PiTextStream(() => {});

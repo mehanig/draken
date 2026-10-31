@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AudioLines, ArrowUp, ExternalLink, Keyboard, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
+import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
 import type { SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
 import { INITIAL_CALL, VoiceSession, voiceRequest, voiceHeaders, type CallState, type CallHistory, type VoiceStatus } from '../voice/session';
@@ -163,7 +163,8 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
         <button className="btn btn-secondary" disabled={!['thinking', 'transcribing', 'speaking', 'paused'].includes(call.phase)} onClick={() => void session.current?.interrupt().catch(() => {})}><Square size={15} />Stop reply</button>
         <button className="btn btn-danger" onClick={() => void close()}><PhoneOff size={18} />{call.phase === 'ended' ? 'Close' : 'End call'}</button>
       </div>
-      <p className="voice-hint small muted">{call.phase === 'speaking' ? 'You can interrupt by speaking. Headphones help with speaker echo.' : 'Speak naturally. A short pause sends your question.'}</p>
+      <p className="voice-hint small muted">{call.phase === 'speaking' ? call.voiceInterruption ? 'Speak to interrupt. Use headphones to avoid speaker feedback.' : 'Listening pauses during replies to prevent echo. Tap Stop reply to speak.' : 'Speak naturally. A short pause sends your question.'}</p>
+      <button className="voice-keyboard-toggle" aria-pressed={call.voiceInterruption} disabled={call.phase === 'connecting' || call.phase === 'ended'} onClick={() => session.current?.setVoiceInterruption(!call.voiceInterruption)}><Headphones size={16} />Headphone mode</button>
       <button className="voice-keyboard-toggle" onClick={() => setTyping(value => !value)} aria-expanded={typing}><Keyboard size={16} />{typing ? 'Hide keyboard' : 'Type a question'}</button>
       {typing && <form className="voice-compose" onSubmit={event => { event.preventDefault(); send(); }}>
         <input className="input" aria-label="Type a question for this call" placeholder="Or ask here…" maxLength={4000} disabled={call.phase === 'connecting' || call.phase === 'ended'} value={draft} onChange={event => setDraft(event.target.value)} />

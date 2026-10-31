@@ -24,7 +24,7 @@ Only reference sources in evidence. If a detail isn't supported, say so and ask 
 Conversation items marked interrupted or failed are not completed agreements. A spoken intention to save or finish is NOT permission for a write; explain that decisions and Finish sync remain explicit page actions. Don't claim to remember anything outside this supplied sync context.`;
 
 interface Chunk { text: string; audio?: Buffer; duration?: number }
-interface Turn { id: number; controller: AbortController; chunks: Chunk[]; played: number; generated: boolean; ended: boolean; started: number }
+interface Turn { id: number; controller: AbortController; chunks: Chunk[]; played: number; generated: boolean; ended: boolean; started: number; failure?: string }
 interface Call { id: string; syncId: number; model: string; started: number; touched: number; controller: AbortController; greeting?: Buffer; turn?: Turn; recognition?: AbortController }
 const calls = new Map<string, Call>();
 let sweeper: NodeJS.Timeout | undefined;
@@ -89,7 +89,7 @@ function saveExchange(call: Call, turnId: number) {
     db.prepare('UPDATE voice_turns SET messages_saved = 1 WHERE id = ?').run(turnId);
   })();
 }
-function settle(call: Call, turn: Turn, status: string, error = '') {
+function settle(call: Call, turn: Turn, status: string, error = turn.failure || '') {
   if (turn.ended) return;
   turn.ended = true;
   getDb().prepare('UPDATE voice_turns SET status = ?, error = ?, completed_at = ? WHERE id = ?')
@@ -256,8 +256,23 @@ export async function reply(id: string, question: string, requestId: string, sig
   } catch (error) {
     const interrupted = turn.controller.signal.aborted && !speechError;
     const cause = speechError || error;
-    turn.controller.abort(); await speech;
     const message = cause instanceof Error ? cause.message : 'The call reply failed';
+    // A bad later object must not cut a previously validated sentence in half.
+    // Drain only the validated prefix, then retain a FAILED (not completed) turn
+    // with accurate playback receipts. Unknown/unvalidated text never reaches TTS.
+    if (!interrupted && !speechError && turn.chunks.length) {
+      turn.failure = message;
+      getDb().prepare('UPDATE voice_turns SET error = ? WHERE id = ?').run(cleanText(message, 500), turn.id);
+      await speech;
+      if (!speechError && !turn.controller.signal.aborted) {
+        turn.generated = true;
+        if (turn.played === turn.chunks.length) settle(call, turn, 'failed');
+        emit({ type: 'warning', id: turn.id, error: `Only the validated part of this reply will play. ${cleanText(message, 400)}` });
+        emit({ type: 'done', id: turn.id });
+        return;
+      }
+    }
+    turn.controller.abort(); await speech;
     settle(call, turn, interrupted ? 'interrupted' : 'failed', message);
     if (!signal.aborted) emit({ type: 'error', id: turn.id, error: cleanText(message, 500) });
   } finally { signal.removeEventListener('abort', abort); }
@@ -280,7 +295,7 @@ export function played(id: string, turnId: number, index: number) {
   turn.played++;
   getDb().prepare('UPDATE voice_turns SET heard_text = ? WHERE id = ?').run(turn.chunks.slice(0, turn.played).map(chunk => chunk.text).join(' '), turn.id);
   turn.chunks[index].audio = undefined;
-  if (turn.generated && turn.played === turn.chunks.length) settle(call, turn, 'completed');
+  if (turn.generated && turn.played === turn.chunks.length) settle(call, turn, turn.failure ? 'failed' : 'completed');
 }
 export function callHistory(syncId: number) {
   getSync(syncId);

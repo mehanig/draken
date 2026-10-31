@@ -62,7 +62,12 @@ process.stdin.on('end', () => {
     if (value.user_question === 'BAD_JSON') return emit('not JSON');
     const ref = (value.evidence || []).find(item => /tests/i.test(item.text))?.ref || value.evidence?.[0]?.ref;
     const sentences = ['The targeted export tests passed.', 'Deployment is not confirmed by this evidence.'].map(reply => JSON.stringify({ reply, evidence: ref ? [ref] : [], kind: ref ? 'grounded' : 'conversation' }, null, control.prettyVoice ? 2 : undefined)).join('\n') + '\n';
-    emit(control.repeatVoice ? sentences + sentences : sentences);
+    let output = control.repeatVoice ? sentences + sentences : sentences;
+    if (control.voiceCommas) output = output.trim().split('\n').join(',\n');
+    if (control.voiceArray) output = '[' + output + ']';
+    if (control.voiceBadTail) output += '\nThis is not a JSON object.';
+    if (control.voiceBadCitationTail) output += '\n' + JSON.stringify({ reply: 'An invented result.', kind: 'grounded', evidence: ['E999999'] });
+    emit(output);
   } else if (value.task === 'final_verdict') {
     if (value.user_question === 'SHOW MEMORY') return emit(JSON.stringify(value.previous_sync_memory));
     if (value.user_question === 'INVALID_CITATION') return emit('Invented outcome [E9999999]');
