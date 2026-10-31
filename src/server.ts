@@ -1,9 +1,13 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
+import fs from 'fs';
+import https from 'https';
 import { getDb, closeDb } from './db/schema';
 import { authMiddleware, isLoopbackHost, isNoAuthMode, validateAuthConfig } from './auth/middleware';
 import authRouter from './routes/auth';
 import syncRouter from './routes/sync';
+import voiceRouter from './routes/voice';
+import { recoverVoiceCalls, stopVoiceCalls } from './voice/calls';
 import { HttpError, recoverInterruptedRuns } from './sync/store';
 import { stopManagerProcesses } from './sync/manager';
 
@@ -28,6 +32,7 @@ export function createApp(options: { staticDir?: string } = {}) {
     next();
   });
   app.use('/api/auth', authRouter);
+  app.use('/api/voice', authMiddleware, voiceRouter);
   app.use('/api', authMiddleware, syncRouter);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found' }));
   app.use(express.static(staticDir));
@@ -48,14 +53,22 @@ export function startServer(): void {
   if (isNoAuthMode() && !isLoopbackHost(host)) {
     throw new Error('No-auth mode may only bind to loopback. Configure authentication before exposing Draken.');
   }
+  const httpsPort = Number(process.env.DRAKEN_HTTPS_PORT || 0);
+  if (!Number.isInteger(httpsPort) || httpsPort < 0 || httpsPort > 65535 || (httpsPort !== 0 && httpsPort === port)) throw new Error('DRAKEN_HTTPS_PORT must be a different valid port');
+  const tls = httpsPort ? { cert: fs.readFileSync(process.env.DRAKEN_TLS_CERT || ''), key: fs.readFileSync(process.env.DRAKEN_TLS_KEY || '') } : null;
   getDb();
   recoverInterruptedRuns();
-  const server = createApp().listen(port, host, () => {
+  recoverVoiceCalls();
+  const app = createApp();
+  const secureServer = tls ? https.createServer(tls, app).listen(httpsPort, host, () => console.log(`Draken voice page: https://${host}:${httpsPort}`)) : null;
+  const server = app.listen(port, host, () => {
     console.log(`Draken sync running at http://${host}:${port}`);
     console.log('Session indexing is local. Model requests happen only when you ask for a briefing or reply.');
   });
   const shutdown = () => {
+    stopVoiceCalls();
     stopManagerProcesses();
+    secureServer?.close();
     server.close(() => { closeDb(); process.exit(0); });
     setTimeout(() => process.exit(0), 3000).unref();
   };

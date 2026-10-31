@@ -125,6 +125,34 @@ export function initSchema(database: Database.Database): void {
       completed_at TEXT
     );
     CREATE INDEX IF NOT EXISTS sync_runs_sync ON sync_runs(sync_id, id);
+    CREATE TABLE IF NOT EXISTS voice_calls (
+      id TEXT PRIMARY KEY,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      status TEXT NOT NULL DEFAULT 'active',
+      model TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      end_reason TEXT NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS one_voice_call ON voice_calls(status) WHERE status = 'active';
+    CREATE TABLE IF NOT EXISTS voice_turns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      call_id TEXT NOT NULL REFERENCES voice_calls(id),
+      request_id TEXT NOT NULL,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL DEFAULT '',
+      evidence_json TEXT NOT NULL DEFAULT '[]',
+      heard_text TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'thinking',
+      error TEXT NOT NULL DEFAULT '',
+      messages_saved INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      model_ms INTEGER,
+      first_audio_ms INTEGER,
+      UNIQUE(call_id, request_id)
+    );
+    CREATE INDEX IF NOT EXISTS voice_turns_call ON voice_turns(call_id, id);
     CREATE TABLE IF NOT EXISTS sync_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sync_id INTEGER NOT NULL REFERENCES syncs(id),

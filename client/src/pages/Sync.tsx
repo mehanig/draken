@@ -4,6 +4,7 @@ import { api } from '../api';
 import type { Overview, SyncDetail } from '../types';
 import { CitedText, EvidenceList } from '../components/EvidenceList';
 import { SummaryTree } from '../components/SummaryTree';
+import { VoiceCall } from '../components/VoiceCall';
 
 const date = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -11,6 +12,7 @@ export function Sync() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [sync, setSync] = useState<SyncDetail | null>(null);
   const [work, setWork] = useState('');
+  const [voiceActive, setVoiceActive] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -68,7 +70,7 @@ export function Sync() {
     return () => { alive = false; clearTimeout(timer); };
   }, [sync?.id, sync?.busy]);
 
-  const disabled = Boolean(work || sync?.busy);
+  const disabled = Boolean(work || sync?.busy || voiceActive);
   const open = sync?.status === 'open';
   const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward));
   const canGenerate = sync?.snapshot_version === 2;
@@ -155,7 +157,7 @@ export function Sync() {
       {error && <div className="alert error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
       {notice && <div className="alert success" role="status">{notice}</div>}
       {warnings.length > 0 && <details className="alert warning"><summary>{warnings.length} indexing warning{warnings.length !== 1 ? 's' : ''}</summary><ul>{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
-      {disabled && <div className="working" role="status"><span className="spinner" />{work || 'A reply is being generated. You can leave and resume this sync.'}</div>}
+      {(work || sync?.busy) && <div className="working" role="status"><span className="spinner" />{work || 'A reply is being generated. You can leave and resume this sync.'}</div>}
 
       {!sync && <section className="card welcome">
         <div className="welcome-symbol"><MessageSquare size={32} /></div><h2>What happened since we last talked?</h2>
@@ -166,6 +168,9 @@ export function Sync() {
       </section>}
 
       {sync && <>
+        <VoiceCall key={`voice-${sync.id}`} sync={sync} disabled={disabled} onActiveChange={setVoiceActive}
+          beforeStart={async () => { if (dirty) showSync(await api.notes(sync.id, decisions, carry)); }}
+          onClosed={async () => { await run('Saving call transcript', async () => { showSync(await api.sync(sync.id)); await refresh(); }); }} />
         <section className="card briefing-card">
           <div className="section-heading"><h2>Sync #{sync.id} <span className={`status ${sync.status}`}>{sync.status}</span></h2><span className="muted small">Snapshot · {date(sync.snapshot_at)}</span></div>
           <p className="muted small">{sync.items.length} new evidence entries · {new Set(sync.items.map(item => item.session_id)).size} sessions. Activity arriving after this snapshot belongs to a later sync.</p>

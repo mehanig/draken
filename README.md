@@ -4,7 +4,7 @@
 
 A local-first engineering sync across your **pi coding sessions**.
 
-> This branch is a prototype of a new direction. It replaces the old Docker/Claude task dashboard; it does not launch coding workers, schedule tasks, or support voice yet.
+> This branch is a prototype of a new direction. It replaces the old Docker/Claude task dashboard; it does not launch coding workers or schedule tasks. An optional local-audio **voice-call prototype** now uses the same pi login; see [VOICE.md](VOICE.md).
 >
 > **Large histories now use a cached summary tree:** cheaper-model parsing and reconciliation, followed by a stronger-model verdict. The old raw-evidence snapshot cutoff is removed. This is still lossy model compression, not independent verification. See [ROADMAP.md](ROADMAP.md) for remaining quality evaluation and community research.
 
@@ -28,17 +28,17 @@ Open **http://127.0.0.1:40333**. A normal loopback launch needs **no dashboard l
 1. **Scan local sessions.** This only reads files and updates Draken's local SQLite index.
 2. Select the sessions to include. Sources are grouped by their recorded working directory, which is not necessarily a repository boundary.
 3. Choose the first-sync history window (**last 24 hours**, **last 7 days**, or **all indexed history**) and **Start sync**. This sets a fixed baseline, not a rolling time filter. Draken rescans and freezes a snapshot. An existing open sync is resumed instead of creating a duplicate.
-4. Inspect the evidence. Click **Generate briefing**, **Resume generation**, or ask a question directly. Model defaults are configured server-side; there are no model settings or extra permission checkboxes in the sync page. Watch progress and inspect source-linked summary nodes; generation can be cancelled or resumed after failure.
+4. Inspect the evidence. Click **Generate briefing**, **Resume generation**, or ask a question directly. Once the briefing is ready, **Call Draken** offers hands-free discussion if local speech is installed. Model defaults are configured server-side; there are no model settings or extra permission checkboxes in the sync page. Watch progress and inspect source-linked summary nodes; generation can be cancelled or resumed after failure.
 5. Edit **Decisions** and **Carry into the next sync**. Save notes whenever you want.
 6. Confirm you reviewed the snapshot and **Finish sync**. Only its evidence is marked covered. New activity remains for the next sync.
 
-Closing the browser preserves the running job; reloading reconnects to progress. Restarting the server preserves the snapshot and completed summary nodes, but interrupts an active model call; retry to resume from cache. Discarding a sync leaves its evidence uncovered and retains the conversation in history. Failed model calls do not save a partial exchange or mark anything reviewed.
+Closing the browser preserves the running job; reloading reconnects to progress. Restarting the server preserves the snapshot and completed summary nodes, but interrupts an active model call; retry to resume from cache. Discarding a sync leaves its evidence uncovered and retains the conversation in history. Failed ordinary text-model calls do not save a partial exchange or mark anything reviewed. Voice calls instead preserve questions and explicitly marked partial/playback-confirmed replies; reload ends the call and never resumes microphone capture automatically.
 
 An old capped snapshot must be explicitly **expanded to full history** before generating another briefing. Expansion rescans, preserves decisions/discussion and existing citation IDs, archives the obsolete briefing, and establishes a new snapshot time. It does not invoke models or advance coverage.
 
 ### Model integration
 
-Draken invokes `pi --print` with all tools, extensions, MCP, skills, templates, context-file discovery, and session persistence disabled. It runs outside project checkouts and never resumes or writes to your coding sessions. Credentials stay with your configured pi installation; Draken does not copy auth files.
+Draken invokes `pi --print` (or `--mode json` for streaming voice text) with all tools, extensions, MCP, skills, templates, context-file discovery, and session persistence disabled. It runs outside project checkouts and never resumes or writes to your coding sessions. Credentials stay with your configured pi installation; Draken does not copy auth files.
 
 - **Summary model:** defaults to `openai/gpt-6-luna`. Override with `DRAKEN_PI_SUMMARY_MODEL`; there is no automatic fallback to the stronger model.
 - **Final model:** defaults to `openai/gpt-6-astra`. Override with `DRAKEN_PI_FINAL_MODEL` or the legacy `DRAKEN_PI_MODEL`.
@@ -102,11 +102,11 @@ Current limits: discovery is eight directories deep; each scan reads up to 32 Mi
 
 Session logs can contain private source code, prompts, command output, and credentials.
 
-- **Model calls happen when you click Generate, Resume, or Ask.** There is no separate permission checkbox or API flag. Scanning and reading evidence stay local.
+- **Model calls happen when you click Generate, Resume, or Ask, or submit speech/text during a voice call.** There is no separate permission checkbox or API flag. Scanning and reading evidence stay local.
 - Thinking blocks, system prompts, images, and opaque signatures are not indexed. Tool-call arguments are minimized; common secret patterns are redacted. **This is best-effort, not a guarantee that the remaining text is safe to share.** Inspect evidence and exclude sensitive sessions before calling a provider.
 - SQLite contains excerpts, cached summaries, run metadata, decisions, and conversations. It lives outside the checkout in `~/.draken/draken.db` by default. Protect/back up the directory as private data. Deleting original pi files does not erase historical Draken snapshots. There is no in-app retention/purge UI yet.
 - The server defaults to loopback with **no dashboard login**. Explicitly configured credentials (or `DRAKEN_NO_AUTH=false`) retain authentication even on loopback. Local API access still rejects cross-origin requests and unexpected Host headers.
-- A LAN bind is different from loopback: other devices can reach the server, read session history, and trigger model usage. Non-loopback bindings require authentication. Configure credentials, set `DRAKEN_HOST`, and use an HTTPS reverse proxy preserving Host/Origin. No-auth mode remains loopback-only.
+- A LAN bind is different from loopback: other devices can reach the server, read session history, and trigger model usage. Non-loopback bindings require authentication. Configure credentials, set `DRAKEN_HOST`, and use an HTTPS reverse proxy preserving Host/Origin or the optional built-in TLS listener. [VOICE.md](VOICE.md) covers trusted LAN microphone access. No-auth mode remains loopback-only.
 - No telemetry, update checks, remote fonts, or third-party browser scripts.
 
 ### Configuration
@@ -130,6 +130,8 @@ Environment variables are read from the process environment; `.env` is **not** a
 | `DRAKEN_PI_MAX_INVOCATIONS` | `120`, bounded to 1–500; server-side default |
 | `DRAKEN_PI_TIMEOUT_MS` | `180000` per invocation, bounded to 1–600 seconds |
 
+Optional speech installation, voice-model defaults and TLS environment settings are documented in [VOICE.md](VOICE.md). No new paid voice service is required.
+
 ## Visual identity
 
 Draken shares GifGun's blocky Bauhaus style: concrete-gray surfaces, square black borders, hard purple shadows, bold headings, and restrained primary-color accents. The dragon logo stays Draken's own. See [DESIGN.md](DESIGN.md) for the shared palette and rules.
@@ -145,7 +147,7 @@ npm run test:ui                  # Browser workflow test, desktop + mobile
 
 For frontend development, run the backend above and `npm run dev:client` in another terminal. Vite proxies `/api` to port 40333.
 
-Tests never read your real session store or call a model provider. Test sessions are constructed in temporary directories, not copied from private transcripts.
+These normal test commands never read your real session store or call a model provider. Test sessions are constructed in temporary directories, not copied from private transcripts. The separate opt-in `tests/voice-real.cjs --allow-provider` smoke test uses one real pi call with synthetic evidence and local speech; it is never included in `npm test`.
 
 ### Code map
 
@@ -158,6 +160,12 @@ src/sync/tree.ts         structured summaries, hierarchical merges, cache
 src/sync/references.ts   short model labels ↔ canonical provenance
 src/sync/manager.ts      background runs, retrieval, final verdict and conversation
 src/routes/sync.ts      authenticated sync API
+src/routes/voice.ts      authenticated calls, WAV transport, receipts and history
+src/voice/              call lifecycle, validated sentence streaming, local worker queue
+voice/                  private-runtime installer, local Python speech worker, TLS setup
+client/src/voice/        microphone/VAD, playback, interruption and cleanup
+client/src/components/VoiceCall.tsx
+                        call interface, source inspection and transcript history
 src/db/schema.ts        additive SQLite schema
 client/src/pages/Sync.tsx
                         sources, progress, briefing, discussion, notes

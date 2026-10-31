@@ -4,12 +4,15 @@ import path from 'path';
 import { getDataDir } from '../db/schema';
 import { cleanText } from './normalize';
 import { HttpError } from './store';
+import { PiTextStream } from './pi-stream';
 
 export interface PiRequest {
   system: string;
   model?: string;
   signal?: AbortSignal;
   thinking?: 'off' | 'low' | 'medium';
+  timeoutMs?: number;
+  onText?: (delta: string) => void;
 }
 
 const children = new Set<ChildProcess>();
@@ -24,7 +27,7 @@ export async function invokePi(prompt: string, request: PiRequest): Promise<stri
   const cwd = path.join(getDataDir(), 'manager');
   fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
   const args = [
-    '--print', '--no-session', '--no-tools', '--no-extensions', '--no-mcp', '--no-skills',
+    ...(request.onText ? ['--mode', 'json'] : ['--print']), '--no-session', '--no-tools', '--no-extensions', '--no-mcp', '--no-skills',
     '--no-prompt-templates', '--no-themes', '--no-context-files', '--no-approve', '--offline',
     '--thinking', request.thinking || 'low', '--system-prompt', request.system,
   ];
@@ -36,6 +39,7 @@ export async function invokePi(prompt: string, request: PiRequest): Promise<stri
     const child = spawn(process.env.DRAKEN_PI_BIN || 'pi', args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
     children.add(child);
     let stdout = '';
+    const stream = request.onText ? new PiTextStream(request.onText) : undefined;
     let stderr = '';
     let failure = '';
     let killTimer: NodeJS.Timeout | undefined;
@@ -46,11 +50,11 @@ export async function invokePi(prompt: string, request: PiRequest): Promise<stri
       killTimer = setTimeout(() => child.kill('SIGKILL'), 1500);
       killTimer.unref();
     };
-    const abort = () => terminate('Generation cancelled. Completed summaries were cached; coverage did not advance.');
+    const abort = () => terminate(stream ? 'Voice reply interrupted. Only confirmed playback is retained.' : 'Generation cancelled. Completed summaries were cached; coverage did not advance.');
     request.signal?.addEventListener('abort', abort, { once: true });
     if (request.signal?.aborted) abort();
-    const configured = Number(process.env.DRAKEN_PI_TIMEOUT_MS || 180000);
-    const timeout = setTimeout(() => terminate('pi timed out. Retry to reuse completed summaries.'),
+    const configured = Number(request.timeoutMs ?? process.env.DRAKEN_PI_TIMEOUT_MS ?? 180000);
+    const timeout = setTimeout(() => terminate(stream ? 'The voice reply timed out. You can ask again.' : 'pi timed out. Retry to reuse completed summaries.'),
       Number.isFinite(configured) ? Math.max(1000, Math.min(configured, 600000)) : 180000);
     const cleanup = () => {
       clearTimeout(timeout);
@@ -62,8 +66,12 @@ export async function invokePi(prompt: string, request: PiRequest): Promise<stri
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       if (failure) return;
-      if (stdout.length + chunk.length > 64000) return terminate('pi produced too much output. No incomplete result was saved.');
-      stdout += chunk;
+      if (stream) {
+        try { stream.feed(chunk); } catch (error) { terminate(cleanText(error instanceof Error ? error.message : 'Invalid pi event stream', 500)); }
+      } else {
+        if (stdout.length + chunk.length > 64000) return terminate('pi produced too much output. No incomplete result was saved.');
+        stdout += chunk;
+      }
     });
     child.stderr.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4000); });
     child.on('error', error => {
@@ -74,6 +82,9 @@ export async function invokePi(prompt: string, request: PiRequest): Promise<stri
       cleanup();
       if (failure) return reject(new HttpError(502, failure));
       if (code !== 0) return reject(new HttpError(502, `pi failed (${code ?? 'signal'}). ${cleanText(stderr, 1500) || 'Check model access and pi login.'}`));
+      if (stream) {
+        try { stdout = stream.finish(); } catch (error) { return reject(new HttpError(502, error instanceof Error ? error.message : 'Incomplete pi event stream')); }
+      }
       if (!stdout.trim()) return reject(new HttpError(502, 'pi returned no response. Coverage did not advance.'));
       resolve(stdout.trim());
     });

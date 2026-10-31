@@ -18,6 +18,12 @@ The UI focuses on briefing, discussion, notes, and progress, with node inspectio
 
 **Important limits:** a processed entry is not proof that all its facts survived lossy compression. Valid source references do not establish semantic support for every claim. Invocation counts are not token/dollar accounting. There is no background inference, semantic search, or durable incremental project-state rollup yet.
 
+## Implemented: local-audio voice-call prototype
+
+The current sync can now be discussed in an on-page call using local Whisper/Kokoro speech and the existing pi text-model login. Browser VAD supports hands-free turns and spoken interruption; validated sentence streaming overlaps speech generation, with mute, typed fallback, failure recovery, source inspection, and durable playback-aware transcripts. Local speech setup and optional authenticated LAN TLS setup are included. Calls never run compression, save decisions, finish syncs or advance coverage. See [VOICE.md](VOICE.md) for installation, privacy, limits and measured latency.
+
+Next voice evaluation: actual microphones/headphones/speaker echo, diverse accents, physical mobile browsers, long-call behavior, latency distributions and richer evidence retrieval. The automated synthetic browser round trip is not proof of naturalness in a real room. Native Realtime integration, multilingual speech and automatic voice-note approval are not implemented.
+
 ## Next priority: measure and improve briefing quality
 
 - Compare full-history tree results against raw-evidence baselines on synthetic and explicitly approved local samples.
@@ -47,7 +53,6 @@ Pi's compaction/branch summaries remain useful background, not independent proof
 ## Later
 
 - A dedicated settings UI for models and budgets, rather than putting configuration in every sync.
-- Voice input/output using the same persisted sync workflow.
 - Searchable full sync history, retention/purge controls, and baseline management.
 - Optional read-only Git/CI evidence to verify transcript claims.
 - Only after briefing quality is established: proposed tasks and separately approved worker execution.

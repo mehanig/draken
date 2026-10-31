@@ -15,11 +15,18 @@
     "start": "node dist/server.js",
     "dev": "tsc -w",
     "dev:client": "cd client && npm run dev",
+    "voice:setup": "node voice/setup.mjs",
+    "voice:tls": "node voice/tls.mjs",
     "prepublishOnly": "npm run build"
   },
   "files": [
     "dist/",
-    "public/"
+    "public/",
+    "voice/worker.py",
+    "voice/requirements.txt",
+    "voice/setup.mjs",
+    "voice/tls.mjs",
+    "VOICE.md"
   ],
   "keywords": [
     "pi",

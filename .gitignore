@@ -4,6 +4,8 @@ node_modules/
 # Build output
 dist/
 public/assets/
+public/voice-assets/
+client/public/voice-assets/
 public/index.html
 
 # Database
@@ -13,6 +15,19 @@ public/index.html
 data/
 .draken/
 .test-artifacts/
+
+# Local speech runtimes/models and TLS private material
+__pycache__/
+*.pyc
+*.key
+*.pem
+*.p12
+*.crt
+*.csr
+*.srl
+voice/models/
+voice/venv/
+voice/uv-*/
 
 # Environment
 .env

@@ -235,6 +235,62 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .login-error { display: flex; gap: 9px; align-items: center; color: var(--ink); background: var(--danger-surface); border-left: 4px solid var(--red); padding: 12px; font-size: 12px; margin-bottom: 20px; }
 .login-error svg { flex-shrink: 0; }
 
+/* Voice is a focused call surface, not another settings dashboard. */
+.voice-entry { padding: 20px 24px; }
+.voice-entry-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.voice-entry-main > div:nth-child(2) { flex: 1; min-width: 180px; }
+.voice-entry-main h2 { font-size: 18px; margin: 0; }
+.voice-entry-main p { margin: 8px 0 0; }
+.voice-entry-main > .btn { text-decoration: none; }
+.voice-entry-icon { width: 46px; height: 46px; flex-shrink: 0; display: grid; place-items: center; border: 2px solid var(--line); background: var(--yellow); }
+.voice-history { margin-top: 18px; font-size: 12px; }
+.voice-history > summary { color: var(--muted); }
+.voice-history-call { border-top: 1px solid var(--rule); margin-top: 14px; padding-top: 12px; }
+.voice-history-turn { border-left: 3px solid var(--accent); padding-left: 14px; margin: 20px 0; }
+.voice-history-turn > p { margin-top: 8px; }
+.voice-reconnect { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.voice-dialog { width: min(720px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 26px; color: var(--ink); background: var(--panel); border: 2px solid var(--line); box-shadow: 8px 8px 0 var(--accent); overscroll-behavior: contain; }
+.voice-dialog::backdrop { background: rgb(17 17 17 / 70%); }
+.voice-dialog-header { display: flex; align-items: center; gap: 14px; padding-bottom: 18px; border-bottom: 2px solid var(--line); }
+.voice-dialog-header > div { flex: 1; }
+.voice-dialog-header h2 { margin: 12px 0 0; font-size: 18px; }
+.voice-clock { font: 14px ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.voice-stage { padding: 26px 4px 16px; text-align: center; }
+.voice-signal { width: 92px; height: 92px; margin: 0 auto 22px; background: var(--accent); border: 2px solid var(--line); box-shadow: 5px 5px 0 var(--ink); display: flex; align-items: center; justify-content: center; gap: 5px; }
+.voice-signal span { display: block; width: 7px; height: 32px; background: var(--panel); transform: scaleY(calc(.2 + var(--voice-level, 0) * .8)); }
+.voice-signal span:nth-child(2), .voice-signal span:nth-child(4) { height: 48px; }
+.voice-signal span:nth-child(3) { height: 60px; }
+.phase-speaking .voice-signal span { animation: voice-talk .7s ease-in-out infinite alternate; }
+.phase-speaking .voice-signal span:nth-child(even) { animation-delay: -.35s; }
+.phase-hearing .voice-signal { background: var(--blue); }
+.phase-thinking .voice-signal, .phase-transcribing .voice-signal { background: var(--yellow); }
+.phase-thinking .voice-signal span, .phase-transcribing .voice-signal span { background: var(--ink); }
+.phase-ended .voice-signal { background: var(--surface-muted); box-shadow: none; }
+@keyframes voice-talk { from { transform: scaleY(.3); } to { transform: scaleY(.9); } }
+.voice-stage h3 { font-size: 13px; letter-spacing: .06em; margin: 0 0 18px; }
+.voice-answer { font-size: clamp(17px, 2.1vw, 22px); line-height: 1.55; margin: 14px auto; max-width: 46ch; max-height: 26dvh; overflow-y: auto; overflow-wrap: anywhere; }
+.voice-heard { color: var(--muted); font-size: 12px; line-height: 1.6; max-height: 70px; overflow-y: auto; overflow-wrap: anywhere; }
+.voice-heard > span { font-weight: 900; text-transform: uppercase; margin-right: 6px; }
+.voice-sources { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+.voice-notice { padding: 10px 12px; border: 1px solid var(--rule); }
+.voice-source { border: 2px solid var(--line); padding: 14px; margin: 14px 0; font-size: 12px; overflow-wrap: anywhere; }
+.voice-source pre { max-height: 180px; }
+.voice-controls { display: flex; align-items: stretch; justify-content: center; gap: 12px; margin-top: 18px; }
+.voice-controls .btn { min-width: 0; }
+.btn-danger { color: var(--ink); background: var(--red); border-color: var(--line); box-shadow: 3px 3px 0 var(--ink); }
+.btn-danger:hover:not(:disabled) { background: var(--danger-surface); }
+.is-muted { background: var(--yellow); }
+.voice-hint { text-align: center; margin: 18px 0; }
+.voice-keyboard-toggle { display: flex; align-items: center; gap: 8px; margin: auto; padding: 8px; border: 0; background: transparent; color: var(--muted); font-size: 12px; }
+.voice-compose { display: flex; gap: 10px; margin-top: 12px; }
+.voice-compose .input { flex: 1; }
+.voice-compose .btn { padding: 10px; flex-shrink: 0; }
+.voice-transcript { font-size: 12px; border-top: 1px solid var(--rule); margin-top: 20px; padding-top: 16px; }
+.voice-transcript > div { margin-top: 18px; overflow-wrap: anywhere; }
+.voice-transcript p { white-space: pre-wrap; }
+.voice-footer { display: flex; justify-content: center; align-items: center; gap: 7px; margin-top: 20px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.voice-footer svg { flex-shrink: 0; }
+
 /* Responsive surfaces: keep shadows inside the available gutters */
 @media (max-width: 1100px) {
   .sync-main { padding: 32px 26px 70px; }
@@ -270,10 +326,20 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
   .role-label { display: none; }
   .initial-window select { display: block; margin: 12px 0 0; width: 100%; }
   .login-card { padding: 28px 22px; }
+  .voice-entry { padding: 18px; }
+  .voice-entry-main { gap: 12px; }
+  .voice-entry-main > .btn { width: 100%; }
+  .voice-dialog { padding: 18px; }
+  .voice-dialog-header { gap: 10px; }
+  .voice-dialog-header .eyebrow { font-size: 8px; }
+  .voice-controls { gap: 8px; }
+  .voice-controls .btn { flex: 1; flex-direction: column; padding: 10px 6px; font-size: 10px; }
+  .voice-stage { padding-top: 22px; }
+  .voice-signal { width: 72px; height: 72px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
-  .spinner { animation: none; }
+  .spinner, .voice-signal span { animation: none; }
 }
 @media (forced-colors: active) {
   body { background-image: none; }

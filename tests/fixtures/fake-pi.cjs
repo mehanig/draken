@@ -21,7 +21,18 @@ process.stdin.on('end', () => {
     console.error('provider unavailable'); process.exit(1);
   }
   if (value.user_question === 'TIMEOUT') { setTimeout(() => console.log('too late'), 10000); return; }
-  const emit = result => setTimeout(() => console.log(typeof result === 'string' ? result : JSON.stringify(result)), control.delay || 20);
+  const emit = result => setTimeout(() => {
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    if (!args.includes('--mode')) { console.log(text); return; }
+    const event = value => console.log(JSON.stringify(value));
+    event({ type: 'message_start', message: { role: 'assistant' } });
+    const pieces = text.match(/[\s\S]{1,24}/g) || [];
+    pieces.forEach((delta, index) => setTimeout(() => event({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta } }), index * (control.streamDelay || 1)));
+    setTimeout(() => {
+      event({ type: 'message_end', message: { role: 'assistant', stopReason: control.streamFailure ? 'error' : 'stop', content: [{ type: 'text', text }] } });
+      event({ type: 'agent_settled', aborted: false });
+    }, pieces.length * (control.streamDelay || 1));
+  }, control.delay || 20);
   if (value.task === 'summarize') {
     let observations;
     if (value.stage === 'chunk') {
@@ -46,6 +57,12 @@ process.stdin.on('end', () => {
     const result = [...groups.values()];
     if (control.invalidGroups) result[0].members.pop();
     emit({ groups: result });
+  } else if (value.task === 'voice_reply') {
+    if (value.user_question === 'INVALID_CITATION') return emit({ reply: 'Invented outcome.', evidence: ['E999999'], kind: 'grounded' });
+    if (value.user_question === 'BAD_JSON') return emit('not JSON');
+    const ref = (value.evidence || []).find(item => /tests/i.test(item.text))?.ref || value.evidence?.[0]?.ref;
+    const sentences = ['The targeted export tests passed.', 'Deployment is not confirmed by this evidence.'].map(reply => JSON.stringify({ reply, evidence: ref ? [ref] : [], kind: ref ? 'grounded' : 'conversation' }, null, control.prettyVoice ? 2 : undefined)).join('\n') + '\n';
+    emit(control.repeatVoice ? sentences + sentences : sentences);
   } else if (value.task === 'final_verdict') {
     if (value.user_question === 'SHOW MEMORY') return emit(JSON.stringify(value.previous_sync_memory));
     if (value.user_question === 'INVALID_CITATION') return emit('Invented outcome [E9999999]');

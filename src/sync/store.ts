@@ -8,6 +8,7 @@ export class HttpError extends Error {
 }
 
 export const busySyncs = new Set<number>();
+export const activeVoiceSyncs = new Set<number>();
 const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.briefing, s.decisions, s.carry_forward,
   s.remaining_count, s.snapshot_version, s.snapshot_at,
   (SELECT COUNT(*) FROM sync_items i WHERE i.sync_id = s.id) AS item_count FROM syncs s`;
@@ -89,6 +90,7 @@ export function requireOpen(id: number, allowBusy = false): SyncDetail {
   const sync = getSync(id);
   if (sync.status !== 'open') throw new HttpError(409, 'This sync is already closed');
   if (!allowBusy && sync.busy) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
+  if (!allowBusy && activeVoiceSyncs.has(id)) throw new HttpError(409, 'End the voice call before changing this sync.');
   return sync;
 }
 
