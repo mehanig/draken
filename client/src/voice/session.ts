@@ -229,7 +229,7 @@ export class VoiceSession {
     this.request?.abort(); this.request = undefined;
     this.stopPlayback?.(); this.stopPlayback = undefined;
     this.queue = []; this.generationDone = false; this.releaseOutput();
-    if (listening && this.alive) this.set({ phase: 'listening' });
+    if (listening && this.alive) this.set({ phase: 'listening', notice: '' });
     if (this.id && this.alive) {
       this.barrier = this.barrier.catch(() => {}).then(() => this.receipt.catch(() => {}))
         .then(() => this.confirmPlayback())
@@ -267,7 +267,7 @@ export class VoiceSession {
   private failed(error: unknown, version: number) {
     if (!this.valid(version) || (error instanceof DOMException && error.name === 'AbortError')) return;
     ++this.version; this.stopPlayback?.(); this.queue = []; this.generationDone = true; this.releaseOutput();
-    this.set({ phase: 'listening', error: error instanceof Error ? error.message : 'The reply failed. Please try again.' });
+    this.set({ phase: 'listening', notice: '', error: error instanceof Error ? error.message : 'The reply failed. Please try again.' });
   }
   private async beginReply(question: string, version: number, controller: AbortController) {
     this.set({ phase: 'thinking', question, answer: '', evidence: [], error: '', notice: '' });
@@ -291,16 +291,16 @@ export class VoiceSession {
           if (!this.valid(version)) return;
           if (event.type === 'turn') this.set({ turnId: event.id });
           if (event.type === 'answer') {
-            this.set({ answer: event.text, evidence: event.evidence, modelMs: event.modelMs });
+            this.set({ answer: event.text, evidence: event.evidence, modelMs: event.modelMs, notice: '' });
             this.options.onTurn(question, event.text, event.evidence, event.id);
           }
           if (event.type === 'audio') { this.beginOutput(); this.queue.push({ turnId: event.id, index: event.index, text: event.text, version }); void this.pump(); }
-          if (event.type === 'warning') this.set({ notice: event.error });
+          if (event.type === 'stage') this.set({ notice: event.message });
           if (event.type === 'done') { done = true; this.generationDone = true; this.finishOutput(); }
           if (event.type === 'error') {
             done = true; ++this.version; this.generationDone = true;
             this.stopPlayback?.(); this.queue = []; this.releaseOutput();
-            this.set({ phase: 'listening', error: event.error });
+            this.set({ phase: 'listening', notice: '', error: event.error });
           }
         }
       }

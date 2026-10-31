@@ -151,11 +151,12 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
         <div className="voice-signal" ref={meter} aria-hidden="true"><span /><span /><span /><span /><span /></div>
         <h3 role="status" aria-live="polite">{call.muted && call.phase === 'listening' ? 'Microphone muted' : labels[call.phase]}</h3>
         {call.question && <p className="voice-heard"><span>You</span> {call.question}</p>}
-        <p className="voice-answer">{call.answer || (call.phase === 'connecting' ? 'Preparing local speech. Your microphone is only used for this call.' : call.phase === 'ended' ? 'Your call transcript stays with this sync.' : 'Ask about progress, blockers, or what to do next.')}</p>
+        <p className="voice-answer">{call.answer || (call.phase === 'connecting' ? 'Preparing local speech. Your microphone is only used for this call.' : call.phase === 'ended' ? 'Your call transcript stays with this sync.' : call.error ? 'Retry this question, or ask another. The call is still open.' : call.phase === 'thinking' ? 'Preparing your reply…' : 'Ask about progress, blockers, or what to do next.')}</p>
         {call.evidence.length > 0 && <div className="voice-sources">{call.evidence.map(ref => <button className="citation" key={ref} onClick={() => setSource(source === ref ? '' : ref)}>Source {ref}</button>)}</div>}
       </div>
       {call.notice && <p className="small muted voice-notice">{call.notice}</p>}
       {call.error && <div className="alert error" role="alert">{call.error}</div>}
+      {call.error && call.question && call.phase === 'listening' && <button className="btn btn-primary" onClick={() => void session.current?.sendText(call.question)}>Retry question</button>}
       {call.phase === 'paused' && <button className="btn btn-primary" onClick={() => void session.current?.resumeSound()}>Resume sound</button>}
       {selected && <section className="voice-source"><div className="section-heading"><strong>{selected.ref} · {selected.session_name || selected.cwd}</strong><button className="icon-button" aria-label="Close source" onClick={() => setSource('')}><X size={16} /></button></div><pre>{selected.text}</pre></section>}
       <div className="voice-controls">

@@ -132,21 +132,24 @@ test('bad references and malformed answers are never spoken; a provider failure 
     assert.equal(events.some(event => event.type === 'audio'), false);
   }
   assert.equal(audioJobs().filter(job => job.op === 'synthesize').length, 1);
+  assert.equal(calls().length, 5, 'at most one format repair; provider errors are not retried');
   assert.ok(voice.callHistory(syncId)[0].turns.every(turn => turn.status === 'failed'));
   await completeTurn(call);
   assert.equal(voice.callHistory(syncId)[0].turns.at(-1).status, 'completed');
 });
 
-test('validated first sentences can be spoken before the model finishes the rest', async () => {
-  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ streamDelay: 50 }));
+test('the complete reply is validated before any synthesis, including authoritative final revisions', async () => {
+  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ streamDelay: 50, provisionalText: 'Incomplete provisional prose, not JSON.' }));
   const call = await voice.startCall(syncId);
   await completeTurn(call);
   const turn = voice.callHistory(syncId)[0].turns[0];
   assert.equal(turn.status, 'completed');
-  assert.ok(turn.first_audio_ms < turn.model_ms, `${turn.first_audio_ms} should precede ${turn.model_ms}`);
+  assert.ok(turn.first_audio_ms >= turn.model_ms);
+  assert.equal(calls().length, 1);
+  assert.equal(audioJobs().some(job => /provisional/.test(job.text || '')), false);
 });
 
-test('pretty-printed and repeated complete JSON sentences are validated and spoken only once', async () => {
+test('repeated or comma-separated objects are repaired once into a single validated reply', async () => {
   fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ prettyVoice: true, repeatVoice: true }));
   const call = await voice.startCall(syncId);
   const events = await completeTurn(call);
@@ -167,25 +170,61 @@ test('comma-separated replies keep citations and do not interrupt playback', asy
   }
 });
 
-test('invalid tails never truncate already validated audio or masquerade as completed replies', async () => {
+test('plain-prose overviews and malformed tails receive one bounded repair with original evidence', async () => {
   const call = await voice.startCall(syncId);
-  for (const control of [{ voiceBadTail: true }, { voiceBadCitationTail: true }]) {
+  const overview = 'Can you explain me what was done yesterday and what were the blockers in general?';
+  for (const control of [{ voiceText: true }, { voiceBadTail: true }, { voiceBadCitationTail: true }]) {
     fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify(control));
-    const events = [];
-    await voice.reply(call.id, question, randomUUID(), new AbortController().signal, event => events.push(event));
+    const before = calls().length, events = await completeTurn(call, overview);
     assert.equal(events.at(-1).type, 'done');
-    assert.ok(events.some(event => event.type === 'warning'));
-    assert.equal(events.some(event => event.type === 'error'), false);
-    const audio = events.filter(event => event.type === 'audio'); assert.equal(audio.length, 2);
-    for (const event of audio) {
-      assert.ok(voice.getAudio(call.id, event.id, event.index).length > 44, 'audio remains fetchable after stream completion');
-      voice.played(call.id, event.id, event.index);
-    }
+    assert.ok(events.findIndex(event => event.type === 'stage') < events.findIndex(event => event.type === 'audio'));
+    assert.equal(events.filter(event => event.type === 'audio').length, 2);
+    assert.equal(calls().length - before, 2);
+    const repair = calls().at(-1);
+    assert.equal(repair.model, 'test/cheap'); assert.equal(repair.original.user_question, overview);
+    assert.ok(repair.original.evidence.some(item => item.ref === 'E2'));
+    assert.ok(repair.repair.rejected && repair.repair.problem);
     const turn = voice.callHistory(syncId)[0].turns.at(-1);
-    assert.equal(turn.status, 'failed'); assert.equal(turn.heard_text, turn.answer);
+    assert.equal(turn.status, 'completed'); assert.equal(turn.heard_text, turn.answer);
     assert.doesNotMatch(turn.heard_text, /invented result|not a JSON/);
-    assert.match(store.getSync(syncId).messages.at(-1).content, /Voice reply failed/);
   }
+});
+
+test('unsuccessful formatting repair never speaks even a valid-looking prefix and the call remains usable', async () => {
+  const call = await voice.startCall(syncId);
+  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ voiceBadTail: true, alwaysBadVoice: true }));
+  const events = await completeTurn(call);
+  assert.equal(events.at(-1).type, 'error'); assert.equal(calls().length, 2);
+  assert.equal(events.some(event => ['answer', 'audio'].includes(event.type)), false);
+  assert.equal(audioJobs().filter(job => job.op === 'synthesize').length, 1);
+  assert.equal(voice.callHistory(syncId)[0].turns[0].status, 'failed');
+  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, '{}');
+  await completeTurn(call); assert.equal(voice.callHistory(syncId)[0].turns[1].status, 'completed');
+});
+
+test('cancellation between attempts prevents the formatting invocation', async () => {
+  const call = await voice.startCall(syncId);
+  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ voiceText: true }));
+  await voice.reply(call.id, question, randomUUID(), new AbortController().signal, event => {
+    if (event.type === 'stage') voice.interruptCall(call.id);
+  });
+  assert.equal(calls().length, 1); assert.equal(voice.callHistory(syncId)[0].turns[0].status, 'interrupted');
+  assert.equal(audioJobs().filter(job => job.op === 'synthesize').length, 1);
+});
+
+test('formatting repair shares the original deadline and never retries provider stream failures', async () => {
+  const call = await voice.startCall(syncId), now = Date.now;
+  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ voiceText: true }));
+  try {
+    await voice.reply(call.id, question, randomUUID(), new AbortController().signal, event => {
+      if (event.type === 'stage') Date.now = () => now() + 60001;
+    });
+  } finally { Date.now = now; }
+  assert.equal(calls().length, 1); assert.match(voice.callHistory(syncId)[0].turns[0].error, /timed out/);
+  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ streamFailure: true }));
+  await completeTurn(call);
+  assert.equal(calls().length, 2); assert.equal(voice.callHistory(syncId)[0].turns[1].status, 'failed');
+  assert.equal(audioJobs().filter(job => job.op === 'synthesize').length, 1);
 });
 
 test('time and turn limits close calls without advancing coverage or making another invocation', async () => {
@@ -247,6 +286,7 @@ test('restart conservatively saves interrupted call text without changing notes 
 test('voice JSON and bounded speech chunks preserve Unicode and do not speak citation markers', () => {
   assert.deepEqual(voice.validateVoiceAnswer('{"reply":"Done [E2].","evidence":["E2","E2"],"kind":"grounded"}', new Set(['E2'])), { reply: 'Done .', evidence: ['E2'], kind: 'grounded' });
   assert.throws(() => voice.validateVoiceAnswer('{"reply":"Done.","evidence":[],"kind":"grounded"}',new Set()), /linked safely/);
+  assert.throws(() => voice.validateVoiceAnswer('{"reply":"Done [E999].","evidence":["E2"],"kind":"grounded"}', new Set(['E2'])), /linked safely/);
   const chunks = voice.speechChunks('A sentence. Another sentence? ' + 'Long words '.repeat(100));
   assert.ok(chunks.every(chunk => chunk.length <= 320));
   assert.equal(chunks.join(' ').replace(/\s+/g,' ').trim(), ('A sentence. Another sentence? ' + 'Long words '.repeat(100)).trim());

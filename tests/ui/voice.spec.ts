@@ -163,18 +163,42 @@ test('speaker-safe playback ignores microphone feedback and listens again after 
   expect(history[0].turns.map((turn: any) => turn.status)).toEqual(['completed', 'completed']);
 });
 
-test('a later format error cannot stop a valid sentence after its first second', async ({ page }) => {
+test('a plain-prose overview is reformatted before speech without leaving the call stuck', async ({ page }) => {
   const { syncId, root } = await prepare(page);
-  fs.writeFileSync(path.join(root, 'sessions/fake-control.json'), JSON.stringify({ voiceCommas: true, voiceBadTail: true, streamDelay: 20 }));
+  fs.writeFileSync(path.join(root, 'sessions/fake-control.json'), JSON.stringify({ voiceText: true, streamDelay: 80 }));
   fs.writeFileSync(path.join(root, 'audio/audio-control.json'), JSON.stringify({ seconds: 3 }));
   await virtualMicrophone(page); await openCall(page);
-  await typeQuestion(page, 'Did the export tests pass?');
+  await typeQuestion(page, 'Can you explain me what was done yesterday and what were the blockers in general?');
+  await expect(page.locator('.voice-notice')).toContainText('Preparing the spoken reply');
   await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
-  await expect(page.locator('.voice-notice')).toContainText('validated part');
+  await expect(page.locator('.voice-notice')).not.toBeVisible();
   await expect(dialog(page).getByRole('status')).toHaveText('Your turn', { timeout: 10000 });
   const history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
-  expect(history[0].turns[0].status).toBe('failed');
+  expect(history[0].turns[0].status).toBe('completed');
   expect(history[0].turns[0].heard_text).toBe('The targeted export tests passed. Deployment is not confirmed by this evidence.');
+  await page.getByRole('button', { name: 'End call', exact: true }).click();
+  await expect(dialog(page)).not.toBeVisible();
+});
+
+test('an unrepaired response returns to listening with a working Retry question action', async ({ page }) => {
+  const { syncId, root } = await prepare(page);
+  const control = path.join(root, 'sessions/fake-control.json');
+  fs.writeFileSync(control, JSON.stringify({ voiceText: true, alwaysBadVoice: true }));
+  await virtualMicrophone(page); await openCall(page);
+  const question = 'What was done yesterday and what were the blockers?';
+  await typeQuestion(page, question);
+  await expect(dialog(page).getByRole('alert')).toContainText('reliable spoken reply');
+  await expect(dialog(page).getByRole('status')).toHaveText('Your turn');
+  await expect(page.getByRole('button', { name: 'Stop reply', exact: true })).toBeDisabled();
+  await expect(page.locator('.voice-notice')).not.toBeVisible();
+  fs.writeFileSync(control, '{}');
+  await page.getByRole('button', { name: 'Retry question', exact: true }).click();
+  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
+  await expect(dialog(page).getByRole('status')).toHaveText('Your turn');
+  const history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
+  expect(history[0].turns.map((turn: any) => turn.status)).toEqual(['failed', 'completed']);
+  expect(history[0].turns.every((turn: any) => turn.question === question)).toBe(true);
+  expect(history[0].turns[0].heard_text).toBe('');
   await page.getByRole('button', { name: 'End call', exact: true }).click();
   await expect(dialog(page)).not.toBeVisible();
 });

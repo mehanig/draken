@@ -13,6 +13,8 @@ export interface PiRequest {
   thinking?: 'off' | 'low' | 'medium';
   timeoutMs?: number;
   onText?: (delta: string) => void;
+  /** Use pi's JSON event protocol without exposing deltas; does not constrain model formatting. */
+  jsonOutput?: boolean;
 }
 
 const children = new Set<ChildProcess>();
@@ -27,7 +29,7 @@ export async function invokePi(prompt: string, request: PiRequest): Promise<stri
   const cwd = path.join(getDataDir(), 'manager');
   fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
   const args = [
-    ...(request.onText ? ['--mode', 'json'] : ['--print']), '--no-session', '--no-tools', '--no-extensions', '--no-mcp', '--no-skills',
+    ...(request.onText || request.jsonOutput ? ['--mode', 'json'] : ['--print']), '--no-session', '--no-tools', '--no-extensions', '--no-mcp', '--no-skills',
     '--no-prompt-templates', '--no-themes', '--no-context-files', '--no-approve', '--offline',
     '--thinking', request.thinking || 'low', '--system-prompt', request.system,
   ];
@@ -39,7 +41,7 @@ export async function invokePi(prompt: string, request: PiRequest): Promise<stri
     const child = spawn(process.env.DRAKEN_PI_BIN || 'pi', args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
     children.add(child);
     let stdout = '';
-    const stream = request.onText ? new PiTextStream(request.onText) : undefined;
+    const stream = request.onText || request.jsonOutput ? new PiTextStream(request.onText) : undefined;
     let stderr = '';
     let failure = '';
     let killTimer: NodeJS.Timeout | undefined;

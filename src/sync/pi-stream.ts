@@ -6,7 +6,7 @@ export class PiTextStream {
   private final = false;
   private settled = false;
   text = '';
-  constructor(private onText: (delta: string) => void) {}
+  constructor(private onText?: (delta: string) => void) {}
 
   feed(chunk: string): void {
     this.total += chunk.length;
@@ -26,13 +26,20 @@ export class PiTextStream {
         if (!this.started || this.final) throw new Error('Invalid pi text stream order');
         const delta = event.assistantMessageEvent.delta;
         if (typeof delta !== 'string' || this.text.length + delta.length > 64000) throw new Error('pi produced too much text');
-        this.text += delta; this.onText(delta);
+        this.text += delta; this.onText?.(delta);
       }
       if (event.type === 'message_end' && event.message?.role === 'assistant') {
         if (event.message.stopReason !== 'stop') throw new Error(`pi did not finish the voice reply successfully${typeof event.message.errorMessage === 'string' ? ': ' + event.message.errorMessage.slice(0, 1500) : ''}`);
-        const authoritative = event.message.content.filter((block: any) => block.type === 'text').map((block: any) => block.text).join('');
-        if (this.text && authoritative !== this.text) throw new Error('pi revised text that was already streamed');
-        if (!this.text) { this.text = authoritative; this.onText(authoritative); }
+        if (!this.started || this.final || !Array.isArray(event.message.content)) throw new Error('Invalid pi final message');
+        const blocks = event.message.content.filter((block: any) => block.type === 'text');
+        if (blocks.some((block: any) => typeof block.text !== 'string')) throw new Error('Invalid pi final text');
+        const authoritative = blocks.map((block: any) => block.text).join('');
+        if (authoritative.length > 64000) throw new Error('pi produced too much text');
+        if (this.onText && this.text && authoritative !== this.text) throw new Error('pi revised text that was already streamed');
+        if (!this.text) this.onText?.(authoritative);
+        // Buffered consumers have exposed nothing yet; use the authoritative final
+        // assistant message, not provisional deltas, and still require settlement.
+        this.text = authoritative;
         this.final = true;
       }
       if (event.type === 'agent_settled') {

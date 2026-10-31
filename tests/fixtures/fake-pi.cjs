@@ -15,7 +15,7 @@ process.stdin.on('end', () => {
   if (process.env.DRAKEN_TEST_CALL_LOG) fs.appendFileSync(process.env.DRAKEN_TEST_CALL_LOG, JSON.stringify({
     task: value.task, stage: value.stage, model, input: value.input, snapshot: value.snapshot,
     verification_evidence: value.verification_evidence, retrieved_evidence: value.retrieved_evidence,
-    allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair,
+    allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair, original: value.original,
   }) + '\n');
   if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage)) {
     console.error('provider unavailable'); process.exit(1);
@@ -26,7 +26,7 @@ process.stdin.on('end', () => {
     if (!args.includes('--mode')) { console.log(text); return; }
     const event = value => console.log(JSON.stringify(value));
     event({ type: 'message_start', message: { role: 'assistant' } });
-    const pieces = text.match(/[\s\S]{1,24}/g) || [];
+    const pieces = (control.provisionalText || text).match(/[\s\S]{1,24}/g) || [];
     pieces.forEach((delta, index) => setTimeout(() => event({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta } }), index * (control.streamDelay || 1)));
     setTimeout(() => {
       event({ type: 'message_end', message: { role: 'assistant', stopReason: control.streamFailure ? 'error' : 'stop', content: [{ type: 'text', text }] } });
@@ -58,15 +58,19 @@ process.stdin.on('end', () => {
     if (control.invalidGroups) result[0].members.pop();
     emit({ groups: result });
   } else if (value.task === 'voice_reply') {
-    if (value.user_question === 'INVALID_CITATION') return emit({ reply: 'Invented outcome.', evidence: ['E999999'], kind: 'grounded' });
-    if (value.user_question === 'BAD_JSON') return emit('not JSON');
-    const ref = (value.evidence || []).find(item => /tests/i.test(item.text))?.ref || value.evidence?.[0]?.ref;
-    const sentences = ['The targeted export tests passed.', 'Deployment is not confirmed by this evidence.'].map(reply => JSON.stringify({ reply, evidence: ref ? [ref] : [], kind: ref ? 'grounded' : 'conversation' }, null, control.prettyVoice ? 2 : undefined)).join('\n') + '\n';
-    let output = control.repeatVoice ? sentences + sentences : sentences;
-    if (control.voiceCommas) output = output.trim().split('\n').join(',\n');
-    if (control.voiceArray) output = '[' + output + ']';
-    if (control.voiceBadTail) output += '\nThis is not a JSON object.';
-    if (control.voiceBadCitationTail) output += '\n' + JSON.stringify({ reply: 'An invented result.', kind: 'grounded', evidence: ['E999999'] });
+    const original = value.original || value;
+    if (original.user_question === 'INVALID_CITATION') return emit({ reply: 'Invented outcome.', evidence: ['E999999'], kind: 'grounded' });
+    if (original.user_question === 'BAD_JSON') return emit('not JSON');
+    const ref = (original.evidence || []).find(item => /tests/i.test(item.text))?.ref || original.evidence?.[0]?.ref;
+    let output = JSON.stringify({ reply: 'The targeted export tests passed. Deployment is not confirmed by this evidence.', evidence: ref ? [ref] : [], kind: ref ? 'grounded' : 'conversation' }, null, control.prettyVoice ? 2 : undefined);
+    if (!value.repair || control.alwaysBadVoice) {
+      if (control.repeatVoice) output += '\n' + output;
+      if (control.voiceCommas) output += ',\n' + output;
+      if (control.voiceArray) output = '[' + output + ']';
+      if (control.voiceBadTail) output += '\nThis is not a JSON object.';
+      if (control.voiceBadCitationTail) output += '\n' + JSON.stringify({ reply: 'An invented result.', kind: 'grounded', evidence: ['E999999'] });
+      if (control.voiceText) output = 'Yesterday, the export tests passed. Deployment is not confirmed. ' + JSON.stringify(ref ? [ref] : []);
+    }
     emit(output);
   } else if (value.task === 'final_verdict') {
     if (value.user_question === 'SHOW MEMORY') return emit(JSON.stringify(value.previous_sync_memory));

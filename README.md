@@ -38,7 +38,7 @@ An old capped snapshot must be explicitly **expanded to full history** before ge
 
 ### Model integration
 
-Draken invokes `pi --print` (or `--mode json` for streaming voice text) with all tools, extensions, MCP, skills, templates, context-file discovery, and session persistence disabled. It runs outside project checkouts and never resumes or writes to your coding sessions. Credentials stay with your configured pi installation; Draken does not copy auth files.
+Draken invokes `pi --print` (or `--mode json` to validate settled voice replies) with all tools, extensions, MCP, skills, templates, context-file discovery, and session persistence disabled. It runs outside project checkouts and never resumes or writes to your coding sessions. Credentials stay with your configured pi installation; Draken does not copy auth files.
 
 - **Summary model:** defaults to `openai/gpt-6-luna`. Override with `DRAKEN_PI_SUMMARY_MODEL`; there is no automatic fallback to the stronger model.
 - **Final model:** defaults to `openai/gpt-6-astra`. Override with `DRAKEN_PI_FINAL_MODEL` or the legacy `DRAKEN_PI_MODEL`.
@@ -147,7 +147,7 @@ npm run test:ui                  # Browser workflow test, desktop + mobile
 
 For frontend development, run the backend above and `npm run dev:client` in another terminal. Vite proxies `/api` to port 40333.
 
-These normal test commands never read your real session store or call a model provider. Test sessions are constructed in temporary directories, not copied from private transcripts. The separate opt-in `tests/voice-real.cjs --allow-provider` smoke test uses one real pi call with synthetic evidence and local speech; it is never included in `npm test`.
+These normal test commands never read your real session store or call a model provider. Test sessions are constructed in temporary directories, not copied from private transcripts. The separate opt-in `tests/voice-real.cjs --allow-provider` smoke test uses one real voice turn (up to two pi invocations) with synthetic evidence and local speech; it is never included in `npm test`.
 
 ### Code map
 
@@ -161,7 +161,7 @@ src/sync/references.ts   short model labels ↔ canonical provenance
 src/sync/manager.ts      background runs, retrieval, final verdict and conversation
 src/routes/sync.ts      authenticated sync API
 src/routes/voice.ts      authenticated calls, WAV transport, receipts and history
-src/voice/              call lifecycle, validated sentence streaming, local worker queue
+src/voice/              call lifecycle, whole-reply validation/repair, local worker queue
 voice/                  private-runtime installer, local Python speech worker, TLS setup
 client/src/voice/        microphone/VAD, playback, interruption and cleanup
 client/src/components/VoiceCall.tsx
