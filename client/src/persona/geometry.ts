@@ -60,29 +60,29 @@ function random(seed: number) { return () => { seed = Math.imul(seed, 1664525) +
 export function createMaterials(a: StudioAssets) {
   const wood = (base: string, grain: string) => {
     const c = canvas(); const rand = random(81); c.ctx.fillStyle = base; c.ctx.fillRect(0, 0, 512, 512);
-    for (let i = 0; i < 950; i++) {
-      const y = rand() * 512; c.ctx.strokeStyle = grain; c.ctx.globalAlpha = 0.04 + rand() * 0.12; c.ctx.lineWidth = 0.3 + rand() * 1.1;
+    for (let i = 0; i < 180; i++) {
+      const y = rand() * 512; c.ctx.strokeStyle = grain; c.ctx.globalAlpha = 0.02 + rand() * 0.05; c.ctx.lineWidth = 0.8 + rand() * 1.5;
       c.ctx.beginPath(); c.ctx.moveTo(0, y); c.ctx.bezierCurveTo(120, y + rand() * 12, 350, y - rand() * 8, 512, y + rand() * 4); c.ctx.stroke();
     }
     return a.texture(c.canvas);
   };
   const knit = canvas(256); knit.ctx.fillStyle = '#bf9a52'; knit.ctx.fillRect(0, 0, 256, 256);
   for (let y = -16; y < 272; y += 16) for (let x = 0; x < 256; x += 16) {
-    knit.ctx.lineCap = 'round'; knit.ctx.strokeStyle = '#8b6e3b'; knit.ctx.lineWidth = 5;
+    knit.ctx.lineCap = 'round'; knit.ctx.strokeStyle = '#ab8849'; knit.ctx.lineWidth = 5;
     knit.ctx.beginPath(); knit.ctx.moveTo(x + 3, y + 2); knit.ctx.lineTo(x + 8, y + 14); knit.ctx.lineTo(x + 13, y + 2); knit.ctx.stroke();
-    knit.ctx.strokeStyle = '#e3c888'; knit.ctx.lineWidth = 2;
+    knit.ctx.strokeStyle = '#cdae6d'; knit.ctx.lineWidth = 2;
     knit.ctx.beginPath(); knit.ctx.moveTo(x + 4, y + 2); knit.ctx.lineTo(x + 8, y + 12); knit.ctx.lineTo(x + 12, y + 2); knit.ctx.stroke();
   }
   const weave = a.texture(knit.canvas, 2.5);
   const plaster = canvas(); const rand = random(71); plaster.ctx.fillStyle = '#7b8a7d'; plaster.ctx.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 16000; i++) { plaster.ctx.fillStyle = rand() > 0.5 ? '#d3d3be' : '#6d8176'; plaster.ctx.globalAlpha = 0.1; plaster.ctx.fillRect(rand() * 512, rand() * 512, 1.5, 1.5); }
+  for (let i = 0; i < 4000; i++) { plaster.ctx.fillStyle = rand() > 0.5 ? '#d3d3be' : '#6d8176'; plaster.ctx.globalAlpha = 0.025; plaster.ctx.fillRect(rand() * 512, rand() * 512, 1.5, 1.5); }
   const oak = wood('#9c754b', '#352818'), redWood = wood('#934b39', '#331b12');
-  const blue = a.material({ color: '#486872', metalness: 0.5, roughness: 0.36, clearcoat: 0.3, clearcoatRoughness: 0.3 });
+  const blue = a.material({ color: '#486872', metalness: 0.35, roughness: 0.46, clearcoat: 0.18, clearcoatRoughness: 0.3 });
   return {
     blue, darkBlue: a.material({ color: '#273e48', metalness: 0.4, roughness: 0.43 }),
-    red: a.material({ map: redWood, bumpMap: redWood, bumpScale: 0.007, roughness: 0.5, clearcoat: 0.15 }),
-    oak: a.material({ map: oak, bumpMap: oak, bumpScale: 0.006, roughness: 0.52, clearcoat: 0.12 }),
-    knit: a.material({ map: weave, bumpMap: weave, bumpScale: 0.035, roughness: 0.94, sheen: 0.55, sheenColor: '#dac594' }),
+    red: a.material({ map: redWood, bumpMap: redWood, bumpScale: 0.0025, roughness: 0.65 }),
+    oak: a.material({ map: oak, bumpMap: oak, bumpScale: 0.001, roughness: 0.72 }),
+    knit: a.material({ map: weave, bumpMap: weave, bumpScale: 0.008, roughness: 0.94, sheen: 0.55, sheenColor: '#dac594' }),
     brass: a.material({ color: '#ba9661', metalness: 0.77, roughness: 0.36 }),
     iron: a.material({ color: '#202b2e', metalness: 0.65, roughness: 0.46 }),
     ivory: a.material({ color: '#ede1ba', roughness: 0.43 }),

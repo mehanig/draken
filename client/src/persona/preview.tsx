@@ -29,7 +29,7 @@ function PersonaPreview() {
   };
   return <main className="dp-preview">
     <header className="dp-preview-heading"><div><span className="eyebrow">DRAKEN / PERSONA STUDIO</span><h1>A little warmth.<br />A clear head.</h1></div><a className="btn btn-secondary" href="/">Back to Draken</a></header>
-    <div className="dp-preview-scene"><PersonaStage mode={mode} playback={cue} /></div>
+    <div className="dp-preview-scene"><PersonaStage mode={mode} playback={cue} studioControls /></div>
     <section className="dp-preview-controls" aria-label="Persona preview controls">
       {(['idle', 'listening', 'thinking'] as const).map(state => <button key={state} className="btn btn-secondary" aria-pressed={mode === state} onClick={() => { stop(); setMode(state); }}>{state}</button>)}
       <button className="btn btn-primary" onClick={() => void sample()}>Play speech sample</button>

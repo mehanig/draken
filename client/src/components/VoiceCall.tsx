@@ -154,7 +154,7 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
       <div className="voice-call-body">
         <div className="voice-scene">{open && call.phase !== 'ended' ? <PersonaStage playback={playback}
           mode={call.phase === 'speaking' ? 'speaking' : call.phase === 'hearing' ? 'listening' : ['connecting', 'thinking', 'transcribing'].includes(call.phase) ? 'thinking' : 'idle'} />
-          : <img loading="lazy" className="voice-scene-poster" src="/persona/studio-poster.webp" alt="Draken’s workshop" />}</div>
+          : <img loading="lazy" className="voice-scene-poster" src="/persona/call-poster.webp" alt="Draken’s workshop" />}</div>
         <div className="voice-call-details">
       <div className={`voice-stage phase-${call.phase}`}>
         <div className="voice-signal" ref={meter} aria-hidden="true"><span /><span /><span /><span /><span /></div>

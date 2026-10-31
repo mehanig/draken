@@ -18,7 +18,7 @@ Headphones are recommended. Echo cancellation and noise suppression are requeste
 
 Calls now show a local 3D interpretation of the homepage’s mechanical dragon, seated in a warm workshop. The jaw follows decoded speech energy and approximate English text shapes on the actual playback clock; interruption and silence stop it. Idle/listening/thinking poses are procedural, not model-generated emotions. This is an animated illustration, **not a webcam or native video service**.
 
-**Pause animation**, OS reduced-motion preferences and a static WebGL-failure fallback leave audio working. Known software renderers automatically use reduced detail/frame rate. No new permissions, model calls or external assets are required. Try the independent `/persona.html` preview without a microphone or sync. See [PERSONA.md](PERSONA.md) for the modular interface, limitations and tests.
+The call image has no captions or animation controls. Closer portrait framing, a clear desk and a softly blurred background keep attention on the dragon. OS reduced-motion preferences and a static WebGL-failure fallback leave audio working; **Pause animation** and retry controls remain in the standalone preview. Known software renderers automatically use reduced detail/frame rate. No new permissions, model calls or external assets are required. Try the independent `/persona.html` preview without a microphone or sync. See [PERSONA.md](PERSONA.md) for the modular interface, limitations and tests.
 
 ## Local speech installation
 

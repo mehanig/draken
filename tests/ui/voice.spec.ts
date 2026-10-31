@@ -81,6 +81,9 @@ test('call playback, mute, source inspection, interruption, failure recovery and
   const noteWrites: string[] = []; page.on('request', request => { if (request.method() === 'PATCH' && /\/notes$/.test(request.url())) noteWrites.push(request.url()); });
   await openCall(page);
   await expect(page.locator('.dp-stage')).toHaveAttribute('data-renderer', 'webgl', { timeout: 20000 });
+  await expect(page.locator('.dp-stage button, .dp-stage figcaption')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Pause animation', exact: true })).toHaveCount(0);
+  await expect(page.locator('.dp-canvas')).toHaveAttribute('data-background', 'blurred');
   await page.getByRole('button', { name: 'Mute', exact: true }).click();
   expect(await stoppedTracks(page)).toBe(true);
   await page.getByRole('button', { name: 'Unmute', exact: true }).click();
@@ -247,6 +250,8 @@ test('unavailable WebGL leaves the real call lifecycle and audio fully usable', 
   });
   await openCall(page);
   await expect(page.locator('.dp-stage')).toHaveAttribute('data-renderer', 'fallback');
+  await expect(page.locator('.dp-stage button, .dp-stage figcaption, .dp-stage .dp-fallback')).toHaveCount(0);
+  expect(await page.locator('.dp-poster').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
   await typeQuestion(page, 'Did the export tests pass?');
   await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
   await expect(dialog(page).getByRole('status')).toHaveText('Your turn');

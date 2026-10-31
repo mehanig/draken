@@ -5,11 +5,13 @@ import './persona.css';
 
 export interface PersonaStageProps {
   mode: PersonaMode;
+  /** Preview-only chrome; calls remain an uninterrupted image. */
+  studioControls?: boolean;
   /** Read-only pull interface avoids React updates on every audio/animation frame. */
   playback: { readonly current: PlaybackCue | null };
 }
 
-export function PersonaStage({ mode, playback }: PersonaStageProps) {
+export function PersonaStage({ mode, playback, studioControls = false }: PersonaStageProps) {
   const canvas = useRef<HTMLCanvasElement>(null), host = useRef<HTMLElement>(null);
   const input = useRef({ mode, playback }); input.current = { mode, playback };
   const [ready, setReady] = useState(false), [failed, setFailed] = useState(false);
@@ -77,13 +79,13 @@ export function PersonaStage({ mode, playback }: PersonaStageProps) {
 
   return <figure className="dp-stage" ref={host} data-renderer={failed ? 'fallback' : ready ? 'webgl' : 'loading'} data-motion={motion ? 'on' : 'off'} data-mode={mode}
     aria-label="Draken, a friendly mechanical dragon in a mustard beanie, seated at a wooden desk in a warmly lit workshop. Animated 3D illustration, not camera video.">
-    <img className="dp-poster" src="/persona/studio-poster.webp" alt="" onError={event => { if (!event.currentTarget.src.endsWith('/persona/reference.jpg')) event.currentTarget.src = '/persona/reference.jpg'; }} />
+    <img className="dp-poster" src="/persona/call-poster.webp" alt="" onError={event => { if (!event.currentTarget.src.endsWith('/persona/reference.jpg')) event.currentTarget.src = '/persona/reference.jpg'; }} />
     <canvas key={retry} ref={canvas} className={`dp-canvas ${ready ? 'is-ready' : ''}`} aria-hidden="true" />
-    <figcaption className="dp-caption"><span className="dp-dot" />DRAKEN’S WORKSHOP<span className="dp-caption-sub">LOCAL 3D · NO CAMERA</span></figcaption>
+    {studioControls && <><figcaption className="dp-caption"><span className="dp-dot" />DRAKEN’S WORKSHOP<span className="dp-caption-sub">LOCAL 3D · NO CAMERA</span></figcaption>
     <div className="dp-tools">
       {failed ? <button type="button" onClick={() => setRetry(n => n + 1)}>Retry 3D scene</button> :
         <button type="button" disabled={reduced} aria-pressed={paused} onClick={() => setPaused(value => !value)}>{reduced ? 'Reduced motion' : paused ? 'Resume animation' : 'Pause animation'}</button>}
-    </div>
-    {failed && <p className="dp-fallback">3D is unavailable. Your audio call is unaffected.</p>}
+    </div></>}
+    {failed && <p className={studioControls ? 'dp-fallback' : 'sr-only'}>3D is unavailable. Your audio call is unaffected.</p>}
   </figure>;
 }

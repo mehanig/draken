@@ -16,6 +16,10 @@ test('standalone 3D persona renders locally, follows actual playback and stops o
   const stage = page.locator('.dp-stage'), canvas = page.locator('.dp-canvas');
   await expect(stage).toHaveAttribute('data-renderer', 'webgl', { timeout: 20000 });
   await expect(canvas).toHaveAttribute('data-mouth', '0');
+  await expect(canvas).toHaveAttribute('data-background', 'blurred');
+  const cached = await canvas.getAttribute('data-background-renders');
+  await page.waitForTimeout(400); // Several animated foreground frames must reuse the cached room.
+  await expect(canvas).toHaveAttribute('data-background-renders', cached!);
   await page.getByRole('button', { name: 'Play speech sample', exact: true }).click();
   await expect(stage).toHaveAttribute('data-mode', 'speaking');
   await expect.poll(async () => Number(await canvas.getAttribute('data-mouth'))).toBeGreaterThan(3);
@@ -28,10 +32,34 @@ test('standalone 3D persona renders locally, follows actual playback and stops o
   await page.screenshot({ path: '.test-artifacts/persona-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(stage).toHaveAttribute('data-renderer', 'webgl');
+  await expect.poll(async () => Number(await canvas.getAttribute('data-background-renders'))).toBeGreaterThan(Number(cached));
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '.test-artifacts/persona-mobile.png', fullPage: true });
   expect(await page.evaluate(() => (window as any).__micRequests)).toBe(0);
   expect(external).toEqual([]); expect(api).toEqual([]); expect(errors).toEqual([]);
+});
+
+test('hardware-quality compositing renders without shader errors and preserves static reduced motion', async ({ page }) => {
+  // Exercise the high-quality branch on CI's software GL too; this does not
+  // claim verification on a physical hardware GPU.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    const original = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function (parameter: number) {
+      return parameter === 37446 ? 'Hardware-profile test' : original.call(this, parameter);
+    };
+  });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.goto('/persona.html');
+  const canvas = page.locator('.dp-canvas');
+  await expect(canvas).toHaveAttribute('data-background', 'blurred', { timeout: 20000 });
+  await expect(canvas).toHaveAttribute('data-quality', 'full');
+  await expect(canvas).toHaveAttribute('data-mouth', '0');
+  await page.waitForTimeout(300);
+  await expect(canvas).toHaveAttribute('data-background-renders', '1');
+  expect(errors).toEqual([]);
 });
 
 test('reduced motion renders a static scene and context loss has a recoverable local fallback', async ({ page }) => {
