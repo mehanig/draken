@@ -7,6 +7,8 @@ public/assets/
 public/voice-assets/
 client/public/voice-assets/
 public/index.html
+public/persona.html
+public/persona/
 
 # Database
 *.db

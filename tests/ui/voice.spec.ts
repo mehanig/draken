@@ -68,9 +68,19 @@ async function stoppedTracks(page: Page) {
 test('call playback, mute, source inspection, interruption, failure recovery and mobile layout', async ({ page }) => {
   const { syncId } = await prepare(page);
   await virtualMicrophone(page);
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    (window as any).__personaContexts = [];
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, ...args: any[]) {
+      const context = (original as any).apply(this, args);
+      if (args[0] === 'webgl2' && context) (window as any).__personaContexts.push(context);
+      return context;
+    } as typeof original;
+  });
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const noteWrites: string[] = []; page.on('request', request => { if (request.method() === 'PATCH' && /\/notes$/.test(request.url())) noteWrites.push(request.url()); });
   await openCall(page);
+  await expect(page.locator('.dp-stage')).toHaveAttribute('data-renderer', 'webgl', { timeout: 20000 });
   await page.getByRole('button', { name: 'Mute', exact: true }).click();
   expect(await stoppedTracks(page)).toBe(true);
   await page.getByRole('button', { name: 'Unmute', exact: true }).click();
@@ -112,6 +122,8 @@ test('call playback, mute, source inspection, interruption, failure recovery and
   const sync = await (await page.request.get(`/api/syncs/${syncId}`)).json();
   expect(sync.status).toBe('open'); expect(sync.messages).toHaveLength(8);
   expect(errors).toEqual([]); expect(noteWrites).toEqual([]);
+  await expect(page.locator('.dp-canvas')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as any).__personaContexts.every((context: WebGL2RenderingContext) => context.isContextLost()))).toBe(true);
 });
 
 test('headphone mode supports hands-free speech and spoken interruption', async ({ page }) => {
@@ -222,6 +234,26 @@ test('an unrepaired response returns to listening with a working Retry question 
   expect(history[0].turns[0].heard_text).toBe('');
   await page.getByRole('button', { name: 'End call', exact: true }).click();
   await expect(dialog(page)).not.toBeVisible();
+});
+
+test('unavailable WebGL leaves the real call lifecycle and audio fully usable', async ({ page }) => {
+  const { syncId } = await prepare(page);
+  await virtualMicrophone(page);
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, ...args: any[]) {
+      return String(args[0]).startsWith('webgl') ? null : (original as any).apply(this, args);
+    } as typeof original;
+  });
+  await openCall(page);
+  await expect(page.locator('.dp-stage')).toHaveAttribute('data-renderer', 'fallback');
+  await typeQuestion(page, 'Did the export tests pass?');
+  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
+  await expect(dialog(page).getByRole('status')).toHaveText('Your turn');
+  const history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
+  expect(history[0].turns[0].status).toBe('completed');
+  await page.getByRole('button', { name: 'End call', exact: true }).click();
+  await expect(dialog(page)).not.toBeVisible(); expect(await stoppedTracks(page)).toBe(true);
 });
 
 test('microphone denial keeps a usable typed call with local spoken replies', async ({ page }) => {

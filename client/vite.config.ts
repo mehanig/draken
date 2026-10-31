@@ -21,5 +21,6 @@ export default defineConfig({
   build: {
     outDir: '../public',
     emptyOutDir: true,
+    rollupOptions: { input: { index: path.resolve(__dirname, 'index.html'), persona: path.resolve(__dirname, 'persona.html') } },
   },
 });

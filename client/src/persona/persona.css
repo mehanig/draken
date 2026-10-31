@@ -1,0 +1,15 @@
+.dp-stage { position: relative; isolation: isolate; margin: 0; width: 100%; height: 100%; min-height: 280px; overflow: hidden; border: 2px solid var(--ink, #111); background: #707c72; }
+.dp-poster, .dp-canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.dp-canvas { opacity: 0; }
+.dp-canvas.is-ready { opacity: 1; }
+.dp-caption { position: absolute; bottom: 15px; left: 15px; padding: 9px 11px; background: #172923ed; color: #fff5dc; font: 800 10px/1.4 "Avenir Next", Arial, sans-serif; letter-spacing: .12em; pointer-events: none; }
+.dp-caption-sub { display: block; margin-top: 3px; color: #d2d9cc; font-size: 8px; letter-spacing: .08em; }
+.dp-dot { display: inline-block; width: 6px; height: 6px; margin-right: 7px; background: #e5bc63; border-radius: 50%; vertical-align: middle; }
+.dp-tools { position: absolute; right: 15px; top: 15px; }
+.dp-tools button { padding: 8px 10px; border: 1px solid #c5b995; color: #fff5dc; background: #172923ed; font: 700 10px/1.3 "Avenir Next", Arial, sans-serif; cursor: pointer; }
+.dp-tools button:hover:not(:disabled) { background: #30483b; }
+.dp-tools button:focus-visible { outline: 3px solid #f2c230; outline-offset: 3px; }
+.dp-tools button:disabled { cursor: default; }
+.dp-fallback { position: absolute; left: 12px; right: 12px; top: 60px; color: #fff5dc; background: #172923ed; padding: 8px 12px; font-size: 12px; line-height: 1.5; }
+@media (max-width: 760px) { .dp-stage { min-height: 190px; } .dp-caption { left: 10px; bottom: 10px; padding: 7px 9px; font-size: 9px; } .dp-tools { right: 10px; top: 10px; } }
+@media (forced-colors: active) { .dp-caption, .dp-tools button, .dp-fallback { color: CanvasText; background: Canvas; border: 1px solid CanvasText; } .dp-caption-sub { color: CanvasText; } }

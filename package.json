@@ -26,7 +26,8 @@
     "voice/requirements.txt",
     "voice/setup.mjs",
     "voice/tls.mjs",
-    "VOICE.md"
+    "VOICE.md",
+    "PERSONA.md"
   ],
   "keywords": [
     "pi",

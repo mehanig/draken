@@ -4,7 +4,7 @@
 
 A local-first engineering sync across your **pi coding sessions**.
 
-> This branch is a prototype of a new direction. It replaces the old Docker/Claude task dashboard; it does not launch coding workers or schedule tasks. An optional local-audio **voice-call prototype** now uses the same pi login; see [VOICE.md](VOICE.md).
+> This branch is a prototype of a new direction. It replaces the old Docker/Claude task dashboard; it does not launch coding workers or schedule tasks. An optional local-audio **voice-call prototype** now uses the same pi login; see [VOICE.md](VOICE.md). Calls include a local animated **3D dragon persona**, with a standalone `/persona.html` preview; see [PERSONA.md](PERSONA.md).
 >
 > **Large histories now use a cached summary tree:** cheaper-model parsing and reconciliation, followed by a stronger-model verdict. The old raw-evidence snapshot cutoff is removed. This is still lossy model compression, not independent verification. See [ROADMAP.md](ROADMAP.md) for remaining quality evaluation and community research.
 

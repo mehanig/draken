@@ -14,6 +14,12 @@ A short greeting is generated locally without a model request. Recognized speech
 
 Headphones are recommended. Echo cancellation and noise suppression are requested, but real speaker/microphone feedback, background conversations, accents, Bluetooth routing and mobile browser behavior still need hands-on evaluation. The current speech models are English-only. Chromium on Linux is the tested browser/server combination; other platforms are not claimed verified.
 
+## Animated call persona
+
+Calls now show a local 3D interpretation of the homepage’s mechanical dragon, seated in a warm workshop. The jaw follows decoded speech energy and approximate English text shapes on the actual playback clock; interruption and silence stop it. Idle/listening/thinking poses are procedural, not model-generated emotions. This is an animated illustration, **not a webcam or native video service**.
+
+**Pause animation**, OS reduced-motion preferences and a static WebGL-failure fallback leave audio working. Known software renderers automatically use reduced detail/frame rate. No new permissions, model calls or external assets are required. Try the independent `/persona.html` preview without a microphone or sync. See [PERSONA.md](PERSONA.md) for the modular interface, limitations and tests.
+
 ## Local speech installation
 
 ```bash

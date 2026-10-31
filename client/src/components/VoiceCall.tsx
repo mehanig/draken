@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
 import type { SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
+import { PersonaStage } from '../persona/PersonaStage';
+import type { PlaybackCue } from '../audio/playback';
 import { INITIAL_CALL, VoiceSession, voiceRequest, voiceHeaders, type CallState, type CallHistory, type VoiceStatus } from '../voice/session';
 
 const labels = {
@@ -26,6 +28,7 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
   const [source, setSource] = useState('');
   const dialog = useRef<HTMLDialogElement>(null);
   const meter = useRef<HTMLDivElement>(null);
+  const playback = useRef<PlaybackCue | null>(null);
   const session = useRef<VoiceSession | null>(null);
   const mounted = useRef(true);
   const closing = useRef(false);
@@ -62,6 +65,7 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
       const controller = new VoiceSession({
         onState: state => { if (mounted.current) { setCall(state); if (!state.microphone && state.muted) setTyping(true); } },
         onLevel: level => { meter.current?.style.setProperty('--voice-level', String(level)); },
+        onPlayback: cue => { playback.current = cue; },
         onTurn: (question, answer, refs, id) => {
           if (mounted.current) setTranscript(old => old.some(turn => turn.id === id)
             ? old.map(turn => turn.id === id ? { id, question, answer, refs } : turn)
@@ -147,6 +151,11 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
         <span className="voice-clock" aria-label="Call duration">{clock(elapsed)}</span>
         <button className="icon-button" aria-label="Close call" onClick={() => void close()}><X size={18} /></button>
       </div>
+      <div className="voice-call-body">
+        <div className="voice-scene">{open && call.phase !== 'ended' ? <PersonaStage playback={playback}
+          mode={call.phase === 'speaking' ? 'speaking' : call.phase === 'hearing' ? 'listening' : ['connecting', 'thinking', 'transcribing'].includes(call.phase) ? 'thinking' : 'idle'} />
+          : <img loading="lazy" className="voice-scene-poster" src="/persona/studio-poster.webp" alt="Draken’s workshop" />}</div>
+        <div className="voice-call-details">
       <div className={`voice-stage phase-${call.phase}`}>
         <div className="voice-signal" ref={meter} aria-hidden="true"><span /><span /><span /><span /><span /></div>
         <h3 role="status" aria-live="polite">{call.muted && call.phase === 'listening' ? 'Microphone muted' : labels[call.phase]}</h3>
@@ -159,14 +168,18 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
       {call.error && call.question && call.phase === 'listening' && <button className="btn btn-primary" onClick={() => void session.current?.sendText(call.question)}>Retry question</button>}
       {call.phase === 'paused' && <button className="btn btn-primary" onClick={() => void session.current?.resumeSound()}>Resume sound</button>}
       {selected && <section className="voice-source"><div className="section-heading"><strong>{selected.ref} · {selected.session_name || selected.cwd}</strong><button className="icon-button" aria-label="Close source" onClick={() => setSource('')}><X size={16} /></button></div><pre>{selected.text}</pre></section>}
+        </div>
+      </div>
       <div className="voice-controls">
         <button className={`btn btn-secondary ${call.muted ? 'is-muted' : ''}`} disabled={call.phase === 'connecting' || call.phase === 'ended'} onClick={() => void session.current?.toggleMute()}>{call.muted ? <MicOff size={18} /> : <Mic size={18} />}{call.muted ? call.microphone ? 'Unmute' : 'Enable mic' : 'Mute'}</button>
         <button className="btn btn-secondary" disabled={!['thinking', 'transcribing', 'speaking', 'paused'].includes(call.phase)} onClick={() => void session.current?.interrupt().catch(() => {})}><Square size={15} />Stop reply</button>
         <button className="btn btn-danger" onClick={() => void close()}><PhoneOff size={18} />{call.phase === 'ended' ? 'Close' : 'End call'}</button>
       </div>
       <p className="voice-hint small muted">{call.phase === 'speaking' ? call.voiceInterruption ? 'Speak to interrupt. Use headphones to avoid speaker feedback.' : 'Listening pauses during replies to prevent echo. Tap Stop reply to speak.' : 'Speak naturally. A short pause sends your question.'}</p>
+      <div className="voice-options">
       <button className="voice-keyboard-toggle" aria-pressed={call.voiceInterruption} disabled={call.phase === 'connecting' || call.phase === 'ended'} onClick={() => session.current?.setVoiceInterruption(!call.voiceInterruption)}><Headphones size={16} />Headphone mode</button>
       <button className="voice-keyboard-toggle" onClick={() => setTyping(value => !value)} aria-expanded={typing}><Keyboard size={16} />{typing ? 'Hide keyboard' : 'Type a question'}</button>
+      </div>
       {typing && <form className="voice-compose" onSubmit={event => { event.preventDefault(); send(); }}>
         <input className="input" aria-label="Type a question for this call" placeholder="Or ask here…" maxLength={4000} disabled={call.phase === 'connecting' || call.phase === 'ended'} value={draft} onChange={event => setDraft(event.target.value)} />
         <button className="btn btn-primary" aria-label="Send voice-call question" disabled={!draft.trim() || call.phase === 'connecting' || call.phase === 'ended'}><ArrowUp size={18} /></button>

@@ -1,4 +1,5 @@
 import type { MicVAD } from '@ricky0123/vad-web';
+import type { PlaybackCue } from '../audio/playback';
 
 export type CallPhase = 'connecting' | 'listening' | 'hearing' | 'transcribing' | 'thinking' | 'speaking' | 'paused' | 'ended';
 export interface VoiceStatus { installed: boolean; state: string; error: string; httpsPort: number | null; certificateAvailable: boolean; activeCall: { id: string; syncId: number } | null }
@@ -34,7 +35,7 @@ export function encodeWav(audio: Float32Array): ArrayBuffer {
   return buffer;
 }
 interface AudioChunk { turnId: number; index: number; text: string; version: number }
-interface Options { onState: (state: CallState) => void; onLevel: (level: number) => void; onTurn: (question: string, answer: string, refs: string[], turnId: number) => void }
+interface Options { onState: (state: CallState) => void; onLevel: (level: number) => void; onTurn: (question: string, answer: string, refs: string[], turnId: number) => void; onPlayback?: (cue: PlaybackCue | null) => void }
 
 /** Owns every microphone track, audio node, fetch, and heartbeat for one call. */
 export class VoiceSession {
@@ -308,6 +309,10 @@ export class VoiceSession {
     } finally { await reader.cancel().catch(() => {}); }
   }
 
+  private notifyPlayback(cue: PlaybackCue | null) {
+    // Presentation is optional and must never break audio or its receipts.
+    try { this.options.onPlayback?.(cue); } catch { /* Ignore a broken visual observer. */ }
+  }
   private confirmPlayback(): Promise<unknown> {
     const pending = this.pendingReceipt;
     if (!pending) return Promise.resolve();
@@ -335,10 +340,13 @@ export class VoiceSession {
         const complete = await new Promise<boolean>(resolve => {
           const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.context.destination);
           let settled = false;
-          const finish = (heard: boolean) => { if (settled) return; settled = true; source.onended = null; source.disconnect(); this.stopPlayback = undefined; resolve(heard); };
+          const finish = (heard: boolean) => { if (settled) return; settled = true; this.notifyPlayback(null); source.onended = null; source.disconnect(); this.stopPlayback = undefined; resolve(heard); };
           source.onended = () => finish(true);
           this.stopPlayback = () => { source.onended = null; try { source.stop(); } catch { /* Already stopped. */ } finish(false); };
-          source.start();
+          const startedAt = this.context.currentTime;
+          if (this.options.onPlayback) this.notifyPlayback({ text: chunk.text, samples: buffer.getChannelData(0).slice(), sampleRate: buffer.sampleRate,
+            duration: buffer.duration, startedAt, now: () => this.context.state === 'running' ? this.context.currentTime : NaN });
+          source.start(startedAt);
         });
         if (this.queue[0] === chunk) this.queue.shift();
         if (complete) {
@@ -347,6 +355,7 @@ export class VoiceSession {
         }
       }
     } catch (error) {
+      this.notifyPlayback(null);
       if (this.valid(playingVersion)) this.set({ phase: 'paused', error: error instanceof Error ? error.message : 'Sound playback failed. Tap Resume sound.' });
     } finally {
       this.pumping = false;
@@ -391,7 +400,7 @@ export class VoiceSession {
     if (!this.alive) return;
     this.alive = false; ++this.version; this.captureVersion = -1;
     clearInterval(this.heartbeat); clearTimeout(this.outputRelease); window.removeEventListener('pagehide', this.pageExit);
-    this.request?.abort(); this.stopPlayback?.(); this.queue = [];
+    this.request?.abort(); this.stopPlayback?.(); this.notifyPlayback(null); this.queue = [];
     this.stream?.getTracks().forEach(track => track.stop());
     void this.vad?.destroy().catch(() => {});
     void this.context.close().catch(() => {});

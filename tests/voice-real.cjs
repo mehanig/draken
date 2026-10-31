@@ -1,5 +1,5 @@
 // Opt-in only: one voice turn (at most two pi invocations), entirely synthetic context.
-// node tests/voice-real.cjs --allow-provider [--browser] [--overview] [--debug-stream]
+// node tests/voice-real.cjs --allow-provider [--browser] [--overview] [--persona] [--debug-stream]
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 if (!process.argv.includes('--allow-provider')) { console.error('This test uses a real pi voice turn (up to two model invocations). Pass --allow-provider explicitly.'); process.exit(1); }
@@ -84,7 +84,12 @@ let server, browser;
     await require('@playwright/test').expect(state).toHaveText('Your turn', { timeout: 30000 });
     await page.evaluate(() => window.__say());
     await require('@playwright/test').expect(state).toHaveText('Draken is speaking', { timeout: 65000 });
+    if (process.argv.includes('--persona')) {
+      await require('@playwright/test').expect(page.locator('.dp-stage')).toHaveAttribute('data-renderer', 'webgl');
+      await require('@playwright/test').expect.poll(async () => Number(await page.locator('.dp-canvas').getAttribute('data-mouth')), { timeout: 15000 }).toBeGreaterThan(3);
+    }
     await require('@playwright/test').expect(state).toHaveText('Your turn', { timeout: 65000 });
+    if (process.argv.includes('--persona')) await require('@playwright/test').expect(page.locator('.dp-canvas')).toHaveAttribute('data-mouth', '0');
     await page.getByRole('button', { name: 'End call', exact: true }).click();
     await require('@playwright/test').expect(page.getByRole('dialog')).not.toBeVisible();
     assert.deepEqual(errors, []);
@@ -105,7 +110,7 @@ let server, browser;
   assert.equal(turn.heard_text, turn.answer);
   assert.ok(invocations >= 1 && invocations <= 2);
   assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
-  const report = { synthetic_only: true, browser: process.argv.includes('--browser'), overview, invocations, transcription, answer: turn.answer, evidence: JSON.parse(turn.evidence_json),
+  const report = { synthetic_only: true, browser: process.argv.includes('--browser'), persona: process.argv.includes('--persona'), overview, invocations, transcription, answer: turn.answer, evidence: JSON.parse(turn.evidence_json),
     model_ms: turn.model_ms, first_audio_ms: turn.first_audio_ms, status: turn.status, artifacts: root };
   fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
