@@ -61,7 +61,9 @@ process.stdin.on('end', () => {
     const original = value.original || value;
     if (original.user_question === 'INVALID_CITATION') return emit({ reply: 'Invented outcome.', evidence: ['E999999'], kind: 'grounded' });
     if (original.user_question === 'BAD_JSON') return emit('not JSON');
-    const ref = (original.evidence || []).find(item => /tests/i.test(item.text))?.ref || original.evidence?.[0]?.ref;
+    const ref = control.voiceRefFromBriefing
+      ? [...(original.briefing || '').matchAll(/\[([EC]\d+)\]/g)].at(-1)?.[1]
+      : (original.evidence || []).find(item => /tests/i.test(item.text))?.ref || original.evidence?.[0]?.ref;
     let output = JSON.stringify({ reply: 'The targeted export tests passed. Deployment is not confirmed by this evidence.', evidence: ref ? [ref] : [], kind: ref ? 'grounded' : 'conversation' }, null, control.prettyVoice ? 2 : undefined);
     if (!value.repair || control.alwaysBadVoice) {
       if (control.repeatVoice) output += '\n' + output;

@@ -180,6 +180,27 @@ test('a plain-prose overview is reformatted before speech without leaving the ca
   await expect(dialog(page)).not.toBeVisible();
 });
 
+test('a citation-heavy real-sized briefing can answer a short summary without dropping late sources', async ({ page }) => {
+  const { syncId, root } = await prepare(page);
+  // prepare verifies this is the isolated draken-browser-* fixture directory.
+  const Database = require('better-sqlite3');
+  const db = new Database(path.join(root, 'state/draken.db'));
+  let refs: string[];
+  try { refs = require('../fixtures/voice-sources.cjs')(db, syncId); } finally { db.close(); }
+  fs.writeFileSync(path.join(root, 'sessions/fake-control.json'), JSON.stringify({ voiceText: true, voiceRefFromBriefing: true }));
+  await virtualMicrophone(page); await openCall(page);
+  await typeQuestion(page, 'Short summary from yesterday.');
+  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
+  await expect(dialog(page).getByRole('button', { name: `Source ${refs!.at(-1)}`, exact: true })).toBeVisible();
+  await expect(dialog(page).getByRole('status')).toHaveText('Your turn');
+  await expect(dialog(page).getByRole('alert')).not.toBeVisible();
+  const history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
+  expect(history[0].turns[0].status).toBe('completed');
+  expect(history[0].turns[0].heard_text).toBe(history[0].turns[0].answer);
+  await page.getByRole('button', { name: 'End call', exact: true }).click();
+  await expect(dialog(page)).not.toBeVisible();
+});
+
 test('an unrepaired response returns to listening with a working Retry question action', async ({ page }) => {
   const { syncId, root } = await prepare(page);
   const control = path.join(root, 'sessions/fake-control.json');

@@ -82,6 +82,49 @@ test('calls use the existing tool-free pi path, keep audio local, and persist on
   assert.equal(fs.readdirSync(root).some(name => name.endsWith('.wav')), false, 'microphone audio is not written to disk');
 });
 
+test('a 37-source briefing keeps every cited excerpt available through formatting repair', async () => {
+  const refs = require('./fixtures/voice-sources.cjs')(getDb(), syncId);
+  const context = voice.voiceContext(store.getSync(syncId), 'Short summary from yesterday.');
+  for (const ref of refs) {
+    assert.ok(context.refs.has(ref), `Briefing reference ${ref} was silently dropped`);
+    assert.ok(context.input.evidence.some(item => item.ref === ref && item.text));
+  }
+  assert.deepEqual(context.input.allowed_source_ids, [...context.refs]);
+  fs.writeFileSync(process.env.DRAKEN_FAKE_CONTROL, JSON.stringify({ voiceText: true, voiceRefFromBriefing: true }));
+  const call = await voice.startCall(syncId), events = await completeTurn(call, 'Short summary from yesterday.');
+  assert.equal(events.at(-1).type, 'done'); assert.equal(calls().length, 2);
+  const turn = voice.callHistory(syncId)[0].turns[0];
+  assert.equal(turn.status, 'completed'); assert.equal(turn.heard_text, turn.answer);
+  assert.deepEqual(JSON.parse(turn.evidence_json), [refs.at(-1)]);
+  assert.ok(calls().at(-1).original.allowed_source_ids.includes(refs.at(-1)));
+});
+
+test('over-budget and nonexistent input citations are explicitly unavailable, never advertised without excerpts', () => {
+  const refs = require('./fixtures/voice-sources.cjs')(getDb(), syncId, 100);
+  const sync = store.getSync(syncId);
+  sync.decisions = 'Review [E999999].'; sync.carry_forward = 'Check [E999998].';
+  sync.memory = [{ sync_id: 999, decisions: 'Earlier [E999997]', carry_forward: 'Unknown [E999996]' }];
+  sync.messages = [{ role: 'assistant', content: 'Discussed [E999995]' }];
+  sync.items.forEach(item => { item.text += ' Nested unavailable reference [E999994]. ' + 'x'.repeat(6000); });
+  const context = voice.voiceContext(sync, `Explain [${refs.at(-1)}], and what was done yesterday?`);
+  assert.equal(context.refs.size, 64); assert.ok(context.refs.has(refs.at(-1)), 'explicit requested source has priority');
+  const input = JSON.stringify(context.input);
+  assert.match(input, /source excerpt not supplied/);
+  for (const match of input.matchAll(/\[([EC]\d+)\]/g)) assert.ok(context.refs.has(match[1]), `Dangling input citation ${match[1]}`);
+  assert.ok(context.input.evidence.reduce((sum, item) => sum + item.text.length, 0) < 19000);
+  assert.throws(() => voice.validateVoiceAnswer(JSON.stringify({ reply: 'Invented claim.', kind: 'grounded', evidence: ['E999999'] }), context.refs), /absent from allowed_source_ids/);
+});
+
+test('voice validation identifies the failed constraint without logging arbitrary rejected strings', () => {
+  const valid = { reply: 'Done.', evidence: ['E2'], kind: 'grounded' }, allowed = new Set(['E2']);
+  for (const [change, error] of [[{ reply: 'x'.repeat(1601) }, /1600/], [{ kind: 'wrong' }, /kind/],
+    [{ evidence: Array(17).fill('E2') }, /more than 16/], [{ evidence: ['E999'] }, /E999/]]) {
+    assert.throws(() => voice.validateVoiceAnswer(JSON.stringify({ ...valid, ...change }), allowed), error);
+  }
+  try { voice.validateVoiceAnswer(JSON.stringify({ ...valid, evidence: ['PRIVATE_REJECTED_VALUE'] }), allowed); assert.fail(); }
+  catch (error) { assert.doesNotMatch(error.message, /PRIVATE_REJECTED_VALUE/); }
+});
+
 test('duplicate request IDs cannot double-charge a turn and playback receipts are ordered/idempotent', async () => {
   const call = await voice.startCall(syncId);
   const requestId = randomUUID();
