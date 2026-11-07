@@ -98,7 +98,7 @@ The native smoke check opens a temporary icon, updates status and checks orderly
 
 `site/` is plain HTML/CSS with a small, synthetic evidence-reference interaction. It has no account/API integration, remote fonts, analytics or microphone access. Keep demo content labelled and never use private project screenshots or histories.
 
-Merging `site/**` changes into `master` triggers `.github/workflows/web-deploy.yml`, which deploys to the existing Cloudflare R2 site and purges its cache. A feature-branch push does not deploy it. npm publication and application deployment are separate operations. Keep the release notice accurate: do not advertise the old npm package as the new application. Once the new version is published, update the site and user-doc release notices together.
+Merging `site/**` changes into `master` triggers `.github/workflows/web-deploy.yml`, which deploys to the existing Cloudflare R2 site and purges its cache. A feature-branch push does not deploy it. npm publication and application deployment are separate operations. Keep version notices and installation commands accurate. Before announcing a release on the site, verify that the npm registry serves the expected version and test a fresh production-only installation. A successful publish command can precede registry availability while npm processes the package. Update the site and user documentation to match the confirmed release.
 
 ## Keep the code lean and the boundaries explicit
 

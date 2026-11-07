@@ -32,8 +32,11 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   await page.goto(base);await page.getByRole('heading',{level:1}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.doesNotMatch(await page.locator('body').innerText(),unwantedGlyphs);
-  assert.match(await page.locator('#get-started').innerText(),/not published yet/);
-  assert.match(await page.locator('.release-note').innerText(),/0\.1\.6.*old task dashboard/);
+  assert.match(await page.locator('#get-started').innerText(),/0\.2\.0 \/ available on npm/i);
+  assert.doesNotMatch(await page.locator('#get-started').innerText(),/not published|not been published|upcoming release/i);
+  assert.equal(await page.locator('.install-command').innerText(),'npm install -g draken\ndraken');
+  assert.match(await page.locator('.release-note').innerText(),/0\.1\.6.*Back up.*old task dashboard/s);
+  assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'https://github.com/mehanig/draken/releases/tag/v0.2.0');
   assert.doesNotMatch(await page.locator('.release-note').innerText(),/draken@/i,'avoid Cloudflare treating the package version as an email address');
   assert.match(await page.locator('.findings').innerText(),/Export uploads now retry when they fail/);
   await page.getByRole('button',{name:'Inspect source E03',exact:true}).click();
