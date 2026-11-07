@@ -1,33 +1,63 @@
 {
   "name": "draken",
   "version": "0.1.6",
-  "description": "Web dashboard for running Claude Code tasks across multiple projects in Docker containers",
+  "description": "Local-first engineering sync across coding-agent sessions",
   "main": "dist/server.js",
   "bin": {
     "draken": "./dist/cli.js"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsc",
+    "typecheck": "tsc --noEmit && npm --prefix client run typecheck",
+    "lint:unused": "knip",
+    "check": "npm run typecheck && npm run lint:unused",
+    "build:server": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "test": "npm run build:server && node --test tests/*.test.cjs",
+    "test:ui": "npm run build && playwright test",
     "build:client": "cd client && npm run build",
     "start": "node dist/server.js",
     "dev": "tsc -w",
     "dev:client": "cd client && npm run dev",
+    "voice:tls": "node voice/tls.mjs",
+    "voice:realtime:setup": "node voice/realtime/setup.mjs --install",
+    "voice:realtime:login": "node voice/realtime/setup.mjs --login",
+    "voice:realtime:check": "node voice/realtime/probe.mjs --check",
+    "voice:realtime:probe": "node voice/realtime/probe.mjs",
+    "test:realtime:browser": "node --test tests/realtime-browser.cjs",
+    "test:realtime:native": "node tests/realtime-native.cjs",
+    "test:live:browser": "node --test tests/live-browser.cjs",
+    "test:live:real": "node tests/live-voice-real.cjs",
+    "test:memory:local": "node tests/memory-real.cjs",
+    "test:tray:native": "node tests/tray-native.cjs",
     "prepublishOnly": "npm run build"
   },
   "files": [
     "dist/",
     "public/",
-    "draken.dockerfile.template"
+    "tray/macos.js",
+    "tray/windows.ps1",
+    "tray/assets/*.png",
+    "tray/assets/*.ico",
+    "TRAY.md",
+    "voice/tls.mjs",
+    "runtime/pi/package.json",
+    "runtime/pi/package-lock.json",
+    "voice/realtime/",
+    "tests/fixtures/voice-question.wav",
+    "VOICE.md",
+    "PERSONA.md",
+    "MEMORY.md",
+    "SOURCES.md",
+    "SETUP.md",
+    "ACCEPTANCE.md",
+    "CONTRIBUTING.md"
   ],
   "keywords": [
-    "claude",
-    "claude-code",
+    "pi",
     "ai",
-    "agent",
-    "docker",
-    "dashboard",
-    "anthropic"
+    "sessions",
+    "sync",
+    "dashboard"
   ],
   "author": "mehanig",
   "license": "MIT",
@@ -37,25 +67,25 @@
   },
   "homepage": "https://draken.mehanig.com",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.19.0"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.3",
+    "@huggingface/tokenizers": "0.2.0",
     "better-sqlite3": "^11.7.0",
-    "dockerode": "^4.0.4",
     "express": "^4.21.2",
+    "gpt-tokenizer": "4.1.0",
     "jsonwebtoken": "^9.0.3",
-    "simple-git": "^3.30.0",
-    "ws": "^8.19.0"
+    "onnxruntime-web": "1.24.3",
+    "proper-lockfile": "4.1.2",
+    "sqlite-vec": "0.1.9"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
+    "@playwright/test": "^1.64.1",
     "@types/better-sqlite3": "^7.6.12",
-    "@types/dockerode": "^3.3.34",
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.5",
-    "@types/ws": "^8.18.1",
+    "knip": "6.44.1",
     "typescript": "^5.7.3"
   }
 }

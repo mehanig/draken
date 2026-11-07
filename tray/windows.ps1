@@ -1,0 +1,104 @@
+# Native notification-area helper. Executed as fixed packaged PowerShell code;
+# never evaluates presentation data or changes execution/application-control policy.
+$ErrorActionPreference = 'Stop'
+[Console]::Out.WriteLine('{"type":"progress","phase":"configuring-output"}')
+[Console]::Out.Flush()
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$ProgressPreference = 'SilentlyContinue'
+$PSModuleAutoLoadingPreference = 'None'
+# Load only the required system module, not user module discovery (which can
+# spend 30+ seconds scanning a fresh Windows profile before the first cmdlet).
+Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
+[Console]::Out.WriteLine('{"type":"progress","phase":"loading-frameworks"}')
+[Console]::Out.Flush()
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+if (-not [System.Windows.Forms.SystemInformation]::UserInteractive) { throw 'An interactive Windows desktop is required' }
+$statePath = $env:DRAKEN_TRAY_STATE
+$assets = $env:DRAKEN_TRAY_ASSETS
+$tray = [System.Windows.Forms.NotifyIcon]::new()
+$menu = [System.Windows.Forms.ContextMenuStrip]::new()
+$items = @{}
+$icons = @{}
+$timer = [System.Windows.Forms.Timer]::new()
+
+function Emit($value) {
+    [Console]::Out.WriteLine(($value | ConvertTo-Json -Compress))
+    [Console]::Out.Flush()
+}
+function Add-Item($id, $text, $actionable) {
+    $item = [System.Windows.Forms.ToolStripMenuItem]::new()
+    $item.Text = $text
+    $item.Tag = $id
+    $item.Enabled = $actionable
+    if ($actionable) {
+        $item.add_Click({ param($sender, $eventArgs) Emit @{type='action'; action=[string]$sender.Tag} })
+    }
+    $items[$id] = $item
+    [void]$menu.Items.Add($item)
+}
+function Update-State {
+    # Allow atomic replacement while the parent publishes the next heartbeat.
+    $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    $stream = [System.IO.FileStream]::new($statePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+    $reader = $null
+    try {
+        if ($stream.Length -gt 16384) { throw 'Invalid tray state' }
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+        $state = $reader.ReadToEnd() | ConvertFrom-Json
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() } else { $stream.Dispose() }
+    }
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($state.quit -or [Math]::Abs($now - [double]$state.updated) -gt 15000) {
+        $timer.Stop()
+        [System.Windows.Forms.Application]::ExitThread()
+        return
+    }
+    if ($state.version -ne 1 -or -not $icons.ContainsKey([string]$state.phase)) { throw 'Invalid tray state' }
+    $tray.Icon = $icons[[string]$state.phase]
+    $title = [string]$state.title
+    $tray.Text = $title.Substring(0, [Math]::Min(63, $title.Length))
+    $items.status.Text = $title
+    $items.detail.Text = if ($state.detail) { [string]$state.detail } else { 'Server connectivity only - not model readiness' }
+    $items.open.Enabled = [bool]$state.canOpen
+    $items.start.Enabled = [bool]$state.canStart
+    $items.stop.Enabled = [bool]$state.canStop
+    $items.quit.Text = if ($state.owned) { 'Quit tray and stop Draken' } else { 'Quit tray (leave server running)' }
+}
+try {
+    Emit @{type='progress'; phase='creating-menu'}
+    foreach ($phase in @('running','stopped','starting','stopping','error')) {
+        $icons[$phase] = [System.Drawing.Icon]::new([System.IO.Path]::Combine($assets, ($phase + '.ico')))
+    }
+    Add-Item 'status' 'Draken - Starting' $false
+    Add-Item 'detail' 'Checking server' $false
+    [void]$menu.Items.Add([System.Windows.Forms.ToolStripSeparator]::new())
+    Add-Item 'open' 'Open Draken' $true
+    Add-Item 'start' 'Start Draken (current settings)' $true
+    Add-Item 'stop' 'Stop Draken (ends active calls)' $true
+    [void]$menu.Items.Add([System.Windows.Forms.ToolStripSeparator]::new())
+    Add-Item 'quit' 'Quit tray' $true
+    $tray.ContextMenuStrip = $menu
+    $tray.add_DoubleClick({ if ($items.open.Enabled) { Emit @{type='action'; action='open'} } })
+    Update-State
+    Emit @{type='progress'; phase='showing-icon'}
+    $tray.Visible = $true
+    $timer.Interval = 500
+    $timer.add_Tick({
+        try { Update-State } catch {
+            $timer.Stop()
+            [System.Windows.Forms.Application]::ExitThread()
+        }
+    })
+    $timer.Start()
+    Emit @{type='ready'}
+    [System.Windows.Forms.Application]::Run()
+} finally {
+    $timer.Stop()
+    $timer.Dispose()
+    $tray.Visible = $false
+    $tray.Dispose()
+    $menu.Dispose()
+    foreach ($icon in $icons.Values) { $icon.Dispose() }
+}

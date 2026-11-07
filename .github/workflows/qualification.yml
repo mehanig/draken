@@ -1,0 +1,51 @@
+name: Application qualification
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            runtime/pi/package-lock.json
+      - run: npm ci
+      - run: npm --prefix client ci
+      - run: npm run check
+      - run: npm run build
+      - run: node --test tests/*.test.cjs
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: node --test tests/live-browser.cjs tests/realtime-browser.cjs
+      - run: npx --no-install playwright test
+      - name: Public site layout and synthetic evidence interaction
+        run: node --test tests/site-browser.cjs
+      - name: Audit application, client and separately shipped private runtime
+        run: |
+          npm audit --audit-level=low
+          npm --prefix client audit --audit-level=low
+          npm --prefix runtime/pi audit --omit=dev --audit-level=low
+      - name: Fresh production-only package and lifecycle
+        run: node tests/package-smoke.cjs
+      - name: Private runtime setup and synthetic loopback protocol
+        run: node tests/runtime-smoke.cjs
+      - name: Synthetic UI failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-ui-failure
+          path: .test-artifacts/playwright/
+          if-no-files-found: ignore
+          retention-days: 7

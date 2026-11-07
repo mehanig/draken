@@ -4,11 +4,32 @@ node_modules/
 # Build output
 dist/
 public/assets/
+public/voice-assets/
+client/public/voice-assets/
 public/index.html
+public/persona.html
+public/persona/
 
 # Database
 *.db
+*.db-wal
+*.db-shm
 data/
+.draken/
+.test-artifacts/
+
+# Local speech runtimes/models and TLS private material
+__pycache__/
+*.pyc
+*.key
+*.pem
+*.p12
+*.crt
+*.csr
+*.srl
+voice/models/
+voice/venv/
+voice/uv-*/
 
 # Environment
 .env
@@ -28,13 +49,8 @@ Thumbs.db
 *.swp
 *.swo
 
-# Docker
-*.dockerfile
-Dockerfile.draken
-!draken.dockerfile.template
-
-# Claude sessions (generated per project)
+# Session logs and local assistant state must never enter the public repository
+*.jsonl
+.pi/
 .draken-sessions/
-
-# Claude Code local settings
 .claude/

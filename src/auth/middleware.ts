@@ -8,7 +8,7 @@ export interface AuthConfig {
   tokenExpiry: string;
 }
 
-export interface JwtPayload {
+interface JwtPayload {
   username: string;
   iat: number;
   exp: number;
@@ -18,16 +18,28 @@ export interface AuthenticatedRequest extends Request {
   user?: JwtPayload;
 }
 
-// Check if auth is explicitly disabled
+export function isLoopbackHost(host: string): boolean {
+  return ['127.0.0.1', 'localhost', '::1'].includes(host);
+}
+
+// A plain local launch needs no account setup. Explicit credentials keep their
+// existing meaning, and non-loopback bindings never default to anonymous access.
 export function isNoAuthMode(): boolean {
-  return process.env.DRAKEN_NO_AUTH === 'true';
+  const override = process.env.DRAKEN_NO_AUTH;
+  if (override !== undefined) {
+    if (override === 'true') return true;
+    if (override === 'false') return false;
+    throw new Error('DRAKEN_NO_AUTH must be true or false, or unset for automatic local mode');
+  }
+  const credentialsConfigured = Boolean(process.env.DRAKEN_USERNAME || process.env.DRAKEN_PASSWORD || process.env.DRAKEN_JWT_SECRET);
+  return isLoopbackHost(process.env.DRAKEN_HOST || '127.0.0.1') && !credentialsConfigured;
 }
 
 // Get auth configuration from environment variables
 // Returns null only if NO_AUTH mode is enabled
 // Throws error if auth is required but not properly configured
 export function getAuthConfig(): AuthConfig | null {
-  // If NO_AUTH is explicitly set, disable authentication
+  // Loopback defaults to no login; an explicit override is also supported.
   if (isNoAuthMode()) {
     return null;
   }
@@ -45,7 +57,7 @@ export function getAuthConfig(): AuthConfig | null {
   if (missing.length > 0) {
     throw new Error(
       `Authentication is required. Missing environment variables: ${missing.join(', ')}\n` +
-      `Set these variables or set DRAKEN_NO_AUTH=true to disable authentication.`
+      `Set these variables for authenticated access, or use a loopback bind without credentials for local-only access.`
     );
   }
 
@@ -60,7 +72,7 @@ export function getAuthConfig(): AuthConfig | null {
 // Validate auth config on startup (call this early in server initialization)
 export function validateAuthConfig(): void {
   if (isNoAuthMode()) {
-    console.log('Warning: Authentication is DISABLED (DRAKEN_NO_AUTH=true)');
+    console.log('Local mode: no dashboard login (loopback only).');
     return;
   }
 
@@ -83,18 +95,8 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
 
   const config = getAuthConfig();
 
-  // Get token from Authorization header or query param (for SSE endpoints)
   const authHeader = req.headers.authorization;
-  const queryToken = req.query.token as string | undefined;
-
-  let token: string | null = null;
-
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7); // Remove 'Bearer ' prefix
-  } else if (queryToken) {
-    // Allow token via query param for SSE (EventSource doesn't support headers)
-    token = queryToken;
-  }
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
 
   if (!token) {
     res.status(401).json({ error: 'Authentication required', code: 'NO_TOKEN' });

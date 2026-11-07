@@ -2,84 +2,213 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { entryTable, migratePointers } from './pointer-migration';
+import { migrateSnapshotPointers } from './snapshot-pointers';
+import { renameAgentTables, migrateAgents } from './agent-migration';
 
-/**
- * Get the draken data directory
- * Uses DRAKEN_DATA_DIR env var if set, otherwise ~/.draken
- * Works cross-platform (Windows, macOS, Linux)
- */
 export function getDataDir(): string {
-  if (process.env.DRAKEN_DATA_DIR) {
-    return process.env.DRAKEN_DATA_DIR;
-  }
-  return path.join(os.homedir(), '.draken');
+  return path.resolve(process.env.DRAKEN_DATA_DIR || path.join(os.homedir(), '.draken'));
 }
-
-const DATA_DIR = getDataDir();
-const DB_PATH = path.join(DATA_DIR, 'draken.db');
 
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!db) {
-    // Ensure data directory exists
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-
-    db = new Database(DB_PATH);
+    const dir = getDataDir();
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    db = new Database(path.join(dir, 'draken.db'));
+    // Set mode before SQLite creates WAL/SHM sidecars, which inherit database permissions.
+    fs.chmodSync(path.join(dir, 'draken.db'), 0o600);
     db.pragma('journal_mode = WAL');
-    initSchema(db);
-    
-    console.log(`Database: ${DB_PATH}`);
+    db.pragma('foreign_keys = ON');
+    db.pragma('busy_timeout = 5000');
+    try { initSchema(db); } catch (error) { db.close(); db = null; throw error; }
   }
   return db;
 }
 
-function initSchema(db: Database.Database): void {
-  // Create tables
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
+export function initSchema(database: Database.Database): void {
+  database.transaction(() => {
+  renameAgentTables(database);
+  const pointerOnly = database.prepare("SELECT 1 FROM sqlite_schema WHERE name='sync_settings'").get()
+    && (database.prepare("SELECT value FROM sync_settings WHERE key='storage_schema'").get() as any)?.value === 'pointer-v2';
+  // Existing project/task tables are untouched. The explicit pointer migration
+  // below changes representation transactionally, not historical evidence.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS sync_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS agent_sessions (
+      id TEXT PRIMARY KEY,
       path TEXT NOT NULL UNIQUE,
-      dockerfile_exists INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      cwd TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      included INTEGER NOT NULL DEFAULT 1,
+      missing INTEGER NOT NULL DEFAULT 0,
+      modified_at TEXT NOT NULL,
+      file_identity TEXT NOT NULL DEFAULT '',
+      byte_offset INTEGER NOT NULL DEFAULT 0,
+      boundary_hash TEXT NOT NULL DEFAULT '',
+      prefix_hash TEXT NOT NULL DEFAULT '',
+      leaf_id TEXT
     );
-
-    CREATE TABLE IF NOT EXISTS tasks (
+    ${pointerOnly ? '' : 'CREATE TABLE IF NOT EXISTS retained_text (key TEXT PRIMARY KEY, text TEXT NOT NULL);'}
+    ${entryTable('agent_entries', !pointerOnly)};
+    CREATE INDEX IF NOT EXISTS agent_entries_pending ON agent_entries(active, is_activity, present);
+    CREATE INDEX IF NOT EXISTS agent_entries_event ON agent_entries(event_key);
+    CREATE TABLE IF NOT EXISTS syncs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER NOT NULL,
-      prompt TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      container_id TEXT,
-      logs TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      completed_at DATETIME,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'completed', 'discarded')),
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      briefing TEXT NOT NULL DEFAULT '',
+      decisions TEXT NOT NULL DEFAULT '',
+      carry_forward TEXT NOT NULL DEFAULT '',
+      context_json TEXT NOT NULL DEFAULT '[]',
+      memory_json TEXT NOT NULL DEFAULT '[]',
+      remaining_count INTEGER NOT NULL DEFAULT 0
     );
-
-    CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+    -- Snapshots can be opened independently. Inclusion is not review/coverage.
+    DROP INDEX IF EXISTS one_open_sync;
+    CREATE TABLE IF NOT EXISTS sync_items (
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      event_key TEXT NOT NULL,
+      evidence_json TEXT NOT NULL,
+      PRIMARY KEY(sync_id, event_key)
+    );
+    CREATE INDEX IF NOT EXISTS sync_items_event ON sync_items(event_key);
+    CREATE TABLE IF NOT EXISTS sync_presentations (
+      sync_id INTEGER PRIMARY KEY REFERENCES syncs(id),
+      request_id TEXT UNIQUE,
+      memory_inputs_json TEXT NOT NULL DEFAULT '[]',
+      recap TEXT NOT NULL DEFAULT '',
+      recap_hash TEXT NOT NULL DEFAULT '',
+      recap_state TEXT NOT NULL DEFAULT 'empty',
+      recap_error TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS sync_recap_cache (
+      key TEXT PRIMARY KEY,
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sync_coverage (
+      event_key TEXT PRIMARY KEY,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id)
+    );
+    CREATE TABLE IF NOT EXISTS summary_cache (
+      key TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_version TEXT NOT NULL,
+      output_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sync_tree_nodes (
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      children_json TEXT NOT NULL,
+      source_count INTEGER NOT NULL,
+      error TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY(sync_id, key)
+    );
+    CREATE TABLE IF NOT EXISTS sync_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      status TEXT NOT NULL DEFAULT 'running',
+      stage TEXT NOT NULL DEFAULT 'Planning',
+      summary_model TEXT NOT NULL,
+      final_model TEXT NOT NULL,
+      invocations INTEGER NOT NULL DEFAULT 0,
+      max_invocations INTEGER NOT NULL,
+      processed_entries INTEGER NOT NULL DEFAULT 0,
+      total_entries INTEGER NOT NULL,
+      cache_hits INTEGER NOT NULL DEFAULT 0,
+      error TEXT NOT NULL DEFAULT '',
+      question TEXT,
+      started_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS sync_runs_sync ON sync_runs(sync_id, id);
+    CREATE TABLE IF NOT EXISTS voice_calls (
+      id TEXT PRIMARY KEY,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      status TEXT NOT NULL DEFAULT 'active',
+      model TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      end_reason TEXT NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS one_voice_call ON voice_calls(status) WHERE status = 'active';
+    CREATE TABLE IF NOT EXISTS voice_turns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      call_id TEXT NOT NULL REFERENCES voice_calls(id),
+      request_id TEXT NOT NULL,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL DEFAULT '',
+      evidence_json TEXT NOT NULL DEFAULT '[]',
+      heard_text TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'thinking',
+      error TEXT NOT NULL DEFAULT '',
+      messages_saved INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      model_ms INTEGER,
+      first_audio_ms INTEGER,
+      UNIQUE(call_id, request_id)
+    );
+    CREATE INDEX IF NOT EXISTS voice_turns_call ON voice_turns(call_id, id);
+    CREATE TABLE IF NOT EXISTS live_calls (
+      id TEXT PRIMARY KEY,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      status TEXT NOT NULL DEFAULT 'active',
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      end_reason TEXT NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS one_live_call ON live_calls(status) WHERE status = 'active';
+    CREATE TABLE IF NOT EXISTS live_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      call_id TEXT NOT NULL REFERENCES live_calls(id),
+      request_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+      text TEXT NOT NULL DEFAULT '',
+      sources_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'streaming',
+      observed_audio_ms INTEGER NOT NULL DEFAULT 0,
+      first_audio_ms INTEGER,
+      started_at TEXT NOT NULL,
+      UNIQUE(call_id, request_id)
+    );
+    CREATE INDEX IF NOT EXISTS live_messages_call ON live_messages(call_id, id);
+    CREATE TABLE IF NOT EXISTS sync_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sync_id INTEGER NOT NULL REFERENCES syncs(id),
+      role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
-
-  // Migration: Add session_id column if it doesn't exist
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN session_id TEXT`);
-  } catch { /* Column already exists */ }
-
-  // Migration: Add parent_task_id column if it doesn't exist
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL`);
-  } catch { /* Column already exists */ }
-
-  // Create index on session_id (after migration ensures column exists)
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id)`);
+  const columns = new Set((database.prepare('PRAGMA table_info(syncs)').all() as { name: string }[]).map(column => column.name));
+  for (const [name, definition] of Object.entries({
+    snapshot_version: 'INTEGER NOT NULL DEFAULT 1',
+    snapshot_at: 'TEXT',
+    model_config_json: "TEXT NOT NULL DEFAULT '{}'",
+    compression_complete: 'INTEGER NOT NULL DEFAULT 0',
+  })) {
+    if (!columns.has(name)) database.exec(`ALTER TABLE syncs ADD COLUMN ${name} ${definition}`);
+  }
+  const runColumns = new Set((database.prepare('PRAGMA table_info(sync_runs)').all() as { name: string }[]).map(column => column.name));
+  if (!runColumns.has('metrics_json')) database.exec("ALTER TABLE sync_runs ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '[]'");
+  database.prepare('UPDATE syncs SET snapshot_at = created_at WHERE snapshot_at IS NULL').run();
+  migratePointers(database); migrateSnapshotPointers(database); migrateAgents(database);
+  })();
 }
 
 export function closeDb(): void {
-  if (db) {
-    db.close();
-    db = null;
-  }
+  db?.close();
+  db = null;
 }

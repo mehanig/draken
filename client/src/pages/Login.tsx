@@ -29,12 +29,12 @@ export function Login() {
         <div className="login-header">
           <img src="/favicon.png" alt="Draken" className="login-logo" />
           <h1>Draken</h1>
-          <p className="login-subtitle">Claude Code Dashboard</p>
+          <p className="login-subtitle">Your engineering sync across pi sessions</p>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
           {error && (
-            <div className="login-error">
+            <div className="login-error" role="alert">
               <AlertCircle size={16} />
               {error}
             </div>

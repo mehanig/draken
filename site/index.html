@@ -1,586 +1,117 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Draken - Async Claude Code Dashboard</title>
-  <meta name="description" content="Run Claude Code tasks across multiple projects asynchronously. Submit tasks, come back later, see results via git diff.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Alegreya+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/png" href="img/logo.png">
-  <style>
-    :root {
-      --bg-primary: #0a0a0f;
-      --bg-secondary: #12121a;
-      --bg-tertiary: #1a1a24;
-      --border-color: #2a2a3a;
-      --text-primary: #f0f0f5;
-      --text-secondary: #a0a0b0;
-      --text-muted: #606070;
-      --accent-primary: #6366f1;
-      --accent-secondary: #8b5cf6;
-      --success: #22c55e;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: 'Alegreya Sans', sans-serif;
-      background-color: var(--bg-primary);
-      color: var(--text-primary);
-      line-height: 1.6;
-      min-height: 100vh;
-    }
-
-    h1, h2, h3 {
-      font-family: 'Alegreya', Georgia, serif;
-      font-weight: 600;
-    }
-
-    code, pre {
-      font-family: 'SF Mono', Monaco, Consolas, monospace;
-    }
-
-    a {
-      color: var(--accent-primary);
-      text-decoration: none;
-    }
-
-    a:hover {
-      text-decoration: underline;
-    }
-
-    .container {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 0 24px;
-    }
-
-    /* Hero */
-    .hero {
-      position: relative;
-      padding: 100px 0 80px;
-      text-align: center;
-      overflow: hidden;
-    }
-
-    .hero::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: url('img/scene1-web.jpg') center/cover no-repeat;
-      opacity: 0.15;
-      filter: blur(2px);
-    }
-
-    .hero::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, var(--bg-primary) 0%, transparent 30%, transparent 70%, var(--bg-primary) 100%);
-    }
-
-    .hero .container {
-      position: relative;
-      z-index: 1;
-    }
-
-    .logo {
-      width: 140px;
-      height: 140px;
-      margin-bottom: 24px;
-      border-radius: 28px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    }
-
-    .hero h1 {
-      font-size: 3rem;
-      margin-bottom: 16px;
-      background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero .tagline {
-      font-size: 1.25rem;
-      color: var(--text-secondary);
-      max-width: 600px;
-      margin: 0 auto 32px;
-    }
-
-    .cta-group {
-      display: flex;
-      gap: 16px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 28px;
-      border-radius: 8px;
-      font-family: 'Alegreya Sans', sans-serif;
-      font-size: 1rem;
-      font-weight: 600;
-      text-decoration: none;
-      transition: all 0.2s ease;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
-      color: white;
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 0 30px rgba(99, 102, 241, 0.4);
-      text-decoration: none;
-    }
-
-    .btn-secondary {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-      border: 1px solid var(--border-color);
-    }
-
-    .btn-secondary:hover {
-      border-color: var(--accent-primary);
-      text-decoration: none;
-    }
-
-    /* Install */
-    .install {
-      padding: 60px 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .install-box {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 24px;
-      text-align: center;
-    }
-
-    .install-box h2 {
-      font-size: 1.5rem;
-      margin-bottom: 20px;
-    }
-
-    .install-command {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px 24px;
-      font-size: 1.1rem;
-      color: var(--success);
-    }
-
-    .install-command code {
-      color: var(--text-primary);
-    }
-
-    .copy-btn {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      padding: 4px;
-      transition: color 0.2s;
-    }
-
-    .copy-btn:hover {
-      color: var(--text-primary);
-    }
-
-    /* Why */
-    .why {
-      padding: 60px 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .why h2 {
-      font-size: 2rem;
-      margin-bottom: 24px;
-      text-align: center;
-    }
-
-    .why-content {
-      color: var(--text-secondary);
-      font-size: 1.1rem;
-      max-width: 700px;
-      margin: 0 auto;
-    }
-
-    .why-content p {
-      margin-bottom: 16px;
-    }
-
-    .why-content strong {
-      color: var(--text-primary);
-    }
-
-    /* Features */
-    .features {
-      padding: 60px 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .features h2 {
-      font-size: 2rem;
-      margin-bottom: 40px;
-      text-align: center;
-    }
-
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 24px;
-    }
-
-    .feature {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 24px;
-    }
-
-    .feature-icon {
-      font-size: 2rem;
-      margin-bottom: 12px;
-    }
-
-    .feature h3 {
-      font-size: 1.25rem;
-      margin-bottom: 8px;
-    }
-
-    .feature p {
-      color: var(--text-secondary);
-      font-size: 0.95rem;
-    }
-
-    /* Setup */
-    .setup {
-      padding: 60px 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .setup h2 {
-      font-size: 2rem;
-      margin-bottom: 40px;
-      text-align: center;
-    }
-
-    .steps {
-      max-width: 700px;
-      margin: 0 auto;
-    }
-
-    .step {
-      display: flex;
-      gap: 20px;
-      margin-bottom: 32px;
-    }
-
-    .step-number {
-      flex-shrink: 0;
-      width: 36px;
-      height: 36px;
-      background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 1rem;
-    }
-
-    .step-content h3 {
-      font-size: 1.25rem;
-      margin-bottom: 8px;
-    }
-
-    .step-content p {
-      color: var(--text-secondary);
-      margin-bottom: 12px;
-    }
-
-    .code-block {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px;
-      overflow-x: auto;
-    }
-
-    .code-block code {
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-      line-height: 1.6;
-    }
-
-    .code-block .comment {
-      color: var(--text-muted);
-    }
-
-    .code-block .cmd {
-      color: var(--success);
-    }
-
-    /* Footer */
-    footer {
-      padding: 40px 0;
-      text-align: center;
-      color: var(--text-muted);
-    }
-
-    footer a {
-      color: var(--text-secondary);
-    }
-
-    /* Mobile */
-    @media (max-width: 768px) {
-      .hero {
-        padding: 60px 0 50px;
-      }
-
-      .logo {
-        width: 100px;
-        height: 100px;
-        border-radius: 20px;
-      }
-
-      .hero h1 {
-        font-size: 2rem;
-      }
-
-      .hero .tagline {
-        font-size: 1.1rem;
-      }
-
-      .cta-group {
-        flex-direction: column;
-        align-items: center;
-      }
-
-      .btn {
-        width: 100%;
-        max-width: 280px;
-        justify-content: center;
-      }
-
-      .install-command {
-        display: flex;
-        flex-direction: row;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 8px;
-        padding: 16px;
-        font-size: 0.9rem;
-        width: 100%;
-      }
-
-      .install-command .prompt {
-        display: none;
-      }
-
-      .install-command code {
-        word-break: break-all;
-      }
-
-      .install-box {
-        padding: 16px;
-      }
-
-      .features h2, .setup h2, .why h2 {
-        font-size: 1.5rem;
-      }
-
-      .step {
-        flex-direction: column;
-        gap: 12px;
-      }
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#deddd7">
+  <title>Draken — Get caught up on your coding agents</title>
+  <meta name="description" content="A read-only engineering-sync companion. Turn your coding-agent sessions into evidence-linked briefings, discuss unresolved work, and decide what you have reviewed.">
+  <link rel="icon" href="img/logo.png" type="image/png">
+  <link rel="stylesheet" href="site.css">
+  <script src="site.js" defer></script>
 </head>
 <body>
-  <section class="hero">
-    <div class="container">
-      <img src="img/logo.png" alt="Draken" class="logo">
-      <h1>Draken</h1>
-      <p class="tagline">Async Claude Code dashboard. Submit tasks to your projects, come back later, see results via git diff.</p>
-      <div class="cta-group">
-        <a href="#install" class="btn btn-primary">Get Started</a>
-        <a href="https://github.com/mehanig/draken" class="btn btn-secondary">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          GitHub
-        </a>
-      </div>
-      </div>
-  </section>
-
-  <section class="install" id="install">
-    <div class="container">
-      <div class="install-box">
-        <h2>Quick Install</h2>
-        <div class="install-command">
-          <span class="prompt">$</span>
-          <code>npx draken</code>
-          <button class="copy-btn" onclick="copyCommand()" title="Copy to clipboard">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-          </button>
-        </div>
-      </div>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="masthead">
+    <div class="wrap nav-row">
+      <a class="brand" href="#" aria-label="Draken home"><img src="img/logo.png" width="44" height="44" alt=""><span>DRAKEN<small>Engineering sync</small></span></a>
+      <nav aria-label="Main navigation">
+        <a class="desktop-link" href="#how-it-works">How it works</a>
+        <a class="desktop-link" href="#boundaries">Your data</a>
+        <a href="https://github.com/mehanig/draken">GitHub <span aria-hidden="true">↗</span></a>
+        <a class="nav-cta" href="#get-started">Release preview <span aria-hidden="true">↗</span></a>
+      </nav>
     </div>
-  </section>
+  </header>
 
-  <section class="why">
-    <div class="container">
-      <h2>Why Draken?</h2>
-      <div class="why-content">
-        <p>I work on multiple projects simultaneously and asynchronously. Often I just want to <strong>submit a task to Claude</strong> in a private repo and return to it later.</p>
-        <p>GitHub integration with Claude lacks full machine access. Tmux sessions require SSH access, which doesn't work when commuting or at events.</p>
-        <p><strong>Draken is async by nature.</strong> Every interaction runs in a single container that completes and exits. The only artifact is visible via <code>git diff</code>. Context is preserved via sessions, so you can have multiple async conversations.</p>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="square" aria-hidden="true"></span> Your read-only engineering companion</p>
+        <h1 id="hero-title">Your agents<br>worked.<br><span>Get caught up.</span></h1>
+        <p class="lede">The work moved forward. Your context didn’t.<br>Turn coding-agent sessions into a briefing you can inspect, question, and come back to.</p>
+        <div class="actions"><a class="button primary" href="#preview">See how it works <span aria-hidden="true">↘</span></a><a class="text-link" href="#get-started">Explore the preview <span aria-hidden="true">↗</span></a></div>
+        <p class="hero-footnote">Reads your sessions. Doesn’t run commands or edit your projects.</p>
       </div>
-    </div>
-  </section>
-
-  <section class="features">
-    <div class="container">
-      <h2>Features</h2>
-      <div class="features-grid">
-        <div class="feature">
-          <div class="feature-icon">📁</div>
-          <h3>Multi-Project</h3>
-          <p>Manage multiple codebases from a single dashboard. Each project gets isolated Docker execution.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">🐳</div>
-          <h3>Docker Isolation</h3>
-          <p>Tasks run in containers. Your system stays clean, and Claude's changes are scoped to the project.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">🔄</div>
-          <h3>Session Continuity</h3>
-          <p>Follow up on previous tasks. Claude remembers the conversation context across runs.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">📡</div>
-          <h3>Real-time Logs</h3>
-          <p>Stream Claude's output live via SSE. Watch the AI work or check back later.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">🔀</div>
-          <h3>Git Integration</h3>
-          <p>See git status and diffs directly in the UI. Review what Claude changed before committing.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">🔐</div>
-          <h3>Authentication</h3>
-          <p>JWT-based auth for secure deployment. Or disable it for local development.</p>
-        </div>
+      <div class="hero-visual">
+        <figure class="companion">
+          <div class="frame-heading"><span><span class="square" aria-hidden="true"></span> Meet Draken</span><span class="mono">01 / THE CATCH-UP</span></div>
+          <img class="dragon" src="img/dragon.webp" width="1116" height="677" alt="Draken, a small mechanical dragon in a yellow sweater, sitting across the desk from you." fetchpriority="high">
+          <figcaption><span class="caption-label">A conversation, not another task queue.</span><p>“The checks passed.<br>Deployment is still unverified.”</p><span class="demo-label">Illustrative dialogue · Not a live call</span></figcaption>
+        </figure>
+        <div class="sticker" aria-hidden="true">LESS SCROLLBACK.<br>MORE CONTEXT.</div>
       </div>
+    </section>
+
+    <div class="source-strip">
+      <div class="wrap source-row"><span class="strip-label">Bring your session history</span><ul aria-label="Supported history sources"><li><span class="source-mark pi-mark" aria-hidden="true">π</span> pi</li><li><span class="source-mark" aria-hidden="true">&gt;_</span> Codex CLI <small>opt-in</small></li><li><span class="source-mark claude-mark" aria-hidden="true">✳</span> Claude Code <small>opt-in</small></li></ul><a href="https://github.com/mehanig/draken/blob/master/SOURCES.md">Supported formats <span aria-hidden="true">↗</span></a></div>
     </div>
-  </section>
 
-  <section class="setup">
-    <div class="container">
-      <h2>VPS Setup Guide</h2>
-      <div class="steps">
-        <div class="step">
-          <div class="step-number">1</div>
-          <div class="step-content">
-            <h3>Install Prerequisites</h3>
-            <p>You need Node.js 18+, Docker, and Claude CLI.</p>
-            <div class="code-block">
-<code><span class="comment"># Install Node.js (Ubuntu/Debian)</span>
-<span class="cmd">curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -</span>
-<span class="cmd">sudo apt-get install -y nodejs</span>
-
-<span class="comment"># Install Docker</span>
-<span class="cmd">curl -fsSL https://get.docker.com | sh</span>
-<span class="cmd">sudo usermod -aG docker $USER</span>
-
-<span class="comment"># Install Claude CLI</span>
-<span class="cmd">npm install -g @anthropic-ai/claude-code</span></code>
-            </div>
+    <section class="section wrap" id="preview" aria-labelledby="preview-title">
+      <div class="section-intro"><div><p class="eyebrow">01 / A briefing with receipts</p><h2 id="preview-title">The useful part.<br>Not just the last message.</h2></div><p>What changed? What was checked? What’s still open? A frozen snapshot gives you a stable conversation. The original sessions give you the evidence.</p></div>
+      <div class="demo-grid">
+        <article class="briefing" aria-labelledby="briefing-title">
+          <div class="panel-heading"><span class="eyebrow">Example engineering sync</span><span class="badge">Not reviewed</span></div>
+          <h3 id="briefing-title">Export flow</h3>
+          <p class="briefing-subtitle">A small change. Three important distinctions.</p>
+          <ol class="findings">
+            <li><span class="finding-number">01</span><div><span class="finding-label">Change reported</span><p>Bounded retries were added to export uploads. <button class="reference" data-source="E01" aria-pressed="false" aria-controls="source-detail" aria-label="Inspect source E01">E01 ↗</button></p></div></li>
+            <li><span class="finding-number">02</span><div><span class="finding-label">Checks recorded</span><p>The session records five passing checks. <button class="reference" data-source="E02" aria-pressed="true" aria-controls="source-detail" aria-label="Inspect source E02">E02 ↗</button></p></div></li>
+            <li><span class="finding-number">03</span><div><span class="finding-label">Still unresolved</span><p>Production deployment has not been verified. <button class="reference" data-source="E03" aria-pressed="false" aria-controls="source-detail" aria-label="Inspect source E03">E03 ↗</button></p></div></li>
+          </ol>
+          <div class="briefing-footer"><span class="small-square" aria-hidden="true"></span> A generated briefing is not a review. You decide when you’re done.</div>
+        </article>
+        <aside class="evidence" aria-labelledby="evidence-title">
+          <div class="evidence-heading"><p class="eyebrow">Follow the reference</p><span aria-hidden="true">↙</span></div>
+          <h3 id="evidence-title">Don’t take its<br>word for it.</h3>
+          <p class="evidence-intro">Select a reference in the briefing to see what it actually supports.</p>
+          <div class="source-detail" id="source-detail" aria-live="polite" aria-atomic="true">
+            <div class="source-meta"><span id="source-id">E02</span><span id="source-role">pi · tool result</span></div>
+            <blockquote id="source-quote">Tests: 5 passed, 0 failed.</blockquote>
+            <p id="source-qualification">Recorded test output, not an independent test run by Draken. This says nothing about deployment.</p>
           </div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">2</div>
-          <div class="step-content">
-            <h3>Authenticate Claude</h3>
-            <p>Log in with your Anthropic account or set an API key.</p>
-            <div class="code-block">
-<code><span class="comment"># Option 1: OAuth (recommended)</span>
-<span class="cmd">claude login</span>
-
-<span class="comment"># Option 2: API key</span>
-<span class="cmd">export ANTHROPIC_API_KEY=your-key</span></code>
-            </div>
-          </div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">3</div>
-          <div class="step-content">
-            <h3>Run Draken</h3>
-            <p>Set authentication and start the server.</p>
-            <div class="code-block">
-<code><span class="comment"># Set credentials</span>
-<span class="cmd">export DRAKEN_USERNAME=admin</span>
-<span class="cmd">export DRAKEN_PASSWORD=your-secure-password</span>
-<span class="cmd">export DRAKEN_JWT_SECRET=random-32-char-string</span>
-
-<span class="comment"># Run Draken</span>
-<span class="cmd">npx draken</span></code>
-            </div>
-          </div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">4</div>
-          <div class="step-content">
-            <h3>Reverse Proxy (Optional)</h3>
-            <p>For HTTPS, put Draken behind nginx or Caddy.</p>
-            <div class="code-block">
-<code><span class="comment"># Caddy (automatic HTTPS)</span>
-<span class="cmd">sudo caddy reverse-proxy --from draken.yourdomain.com --to localhost:40333</span></code>
-            </div>
-          </div>
-        </div>
+          <p class="demo-disclosure">Interactive illustration · All example content is synthetic. No project, account or microphone access.</p>
+          <noscript><p>The references need JavaScript to switch this illustration. The test-output example is shown above.</p></noscript>
+        </aside>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <footer>
-    <div class="container">
-      <p>Built by <a href="https://github.com/mehanig">@mehanig</a> &middot; <a href="https://github.com/mehanig/draken">Source on GitHub</a></p>
-    </div>
-  </footer>
+    <section class="workflow-band" id="how-it-works" aria-labelledby="workflow-title">
+      <div class="wrap section">
+        <div class="section-intro"><div><p class="eyebrow">02 / Find your place again</p><h2 id="workflow-title">From scattered sessions<br>to a useful next conversation.</h2></div></div>
+        <ol class="steps">
+          <li><span class="step-index">01<span aria-hidden="true">↗</span></span><h3>Choose your history.</h3><p>Select the sessions you want to include. Codex and Claude imports are separate opt-ins, not a scan of everything on your machine.</p></li>
+          <li><span class="step-index">02<span aria-hidden="true">↗</span></span><h3>Talk it through.</h3><p>Read the briefing. Ask what changed, check a reference, or discuss what’s unresolved. Use text, or add optional ChatGPT voice.</p></li>
+          <li><span class="step-index">03<span aria-hidden="true">✓</span></span><h3>Close the loop.</h3><p>Save your decisions and carry-forward notes. Mark a snapshot reviewed when you’re ready. Reading or listening never does that for you.</p></li>
+        </ol>
+      </div>
+    </section>
 
-  <script>
-    function copyCommand() {
-      navigator.clipboard.writeText('npx draken');
-      const btn = document.querySelector('.copy-btn');
-      btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
-      setTimeout(() => {
-        btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
-      }, 2000);
-    }
-  </script>
+    <section class="section wrap boundaries" id="boundaries" aria-labelledby="boundaries-title">
+      <div><p class="eyebrow">03 / Clear boundaries</p><h2 id="boundaries-title">A companion.<br>Not another agent<br>at the controls.</h2><p class="boundary-lede">Draken helps you understand the work.<br>It doesn’t take over the work.</p><a class="text-link" href="https://github.com/mehanig/draken/blob/master/ARCHITECTURE.md">Read the architecture <span aria-hidden="true">↗</span></a></div>
+      <div class="boundary-list">
+        <article><span class="boundary-symbol" aria-hidden="true">↗</span><div><h3>Reads history. Doesn’t execute work.</h3><p>No project editing, command execution, task delegation or Git mutations.</p></div></article>
+        <article><span class="boundary-symbol" aria-hidden="true">≡</span><div><h3>The originals stay the originals.</h3><p>Evidence points back to your agent logs. Missing or changed originals are reported—not replaced with a hidden text archive.</p></div></article>
+        <article><span class="boundary-symbol" aria-hidden="true">↔</span><div><h3>Local-first isn’t “nothing leaves.”</h3><p>Import and search run locally. Briefing and text-discussion content goes to your configured model provider through pi. Optional voice sends audio and context to OpenAI.</p></div></article>
+        <article><span class="boundary-symbol" aria-hidden="true">□</span><div><h3>Your review belongs to you.</h3><p>Included, summarized, heard and agreed are different things. Only your explicit review advances coverage.</p></div></article>
+      </div>
+    </section>
+
+    <section class="wrap get-started" id="get-started" aria-labelledby="start-title">
+      <div class="release-card">
+        <div class="release-copy"><p class="eyebrow"><span class="square" aria-hidden="true"></span> New Draken / Release preview</p><h2 id="start-title">Less catching up.<br>More moving forward.</h2><p>The engineering-sync rewrite is available on GitHub. The new npm release is not published yet.</p><a class="button dark" href="https://github.com/mehanig/draken">Explore the source <span aria-hidden="true">↗</span></a></div>
+        <div class="setup-card"><h3>Before you start</h3><dl><div><dt>Runtime</dt><dd>Node.js 22.19+ and npm</dd></div><div><dt>Briefings &amp; text</dt><dd>pi setup and provider sign-in</dd></div><div><dt>Voice · optional</dt><dd>Separate native ChatGPT sign-in</dd></div><div><dt>Desktop tray · preview</dt><dd>macOS and Windows</dd></div></dl><a class="text-link" href="https://github.com/mehanig/draken/blob/master/SETUP.md">Read setup instructions <span aria-hidden="true">↗</span></a><p class="release-note"><strong>Heads up:</strong> npm <code>draken@0.1.6</code> is still the old task dashboard, not the app shown here.</p></div>
+      </div>
+    </section>
+
+    <section class="section wrap faq" aria-labelledby="faq-title"><div><p class="eyebrow">A few practical questions</p><h2 id="faq-title">Good to know.</h2></div><div class="faq-list">
+      <details><summary>Do I have to use voice?<span aria-hidden="true">+</span></summary><p>No. Briefings, text discussion, source inspection and explicit notes work without a microphone. ChatGPT voice is an optional, separately configured interface.</p></details>
+      <details><summary>Does “complete history” mean perfect recall?<span aria-hidden="true">+</span></summary><p>No. Briefing preparation accounts for the eligible evidence in your frozen snapshot, within supported source formats and safety limits. Summaries are lossy, retrieval is selective, and model claims still need review. A missing search result is not proof that something never happened.</p></details>
+      <details><summary>Does opening the page start anything?<span aria-hidden="true">+</span></summary><p>This website is a static demonstration. In the app, opening Settings or checking setup does not scan transcripts, generate a briefing or acquire a microphone. Optional background indexing is a separate permission and runs only while the server is running.</p></details>
+      <details><summary>What should I back up?<span aria-hidden="true">+</span></summary><p>Both your original agent logs and private Draken state. Originals remain the evidence archive, including for frozen snapshots. Back up before migrating an existing installation; launching an old binary is not a safe rollback.</p></details>
+    </div></section>
+  </main>
+
+  <footer class="footer"><div class="wrap footer-row"><a class="footer-brand" href="#">DRAKEN<span>A little less lost between sessions.</span></a><div><a href="https://github.com/mehanig/draken/pull/17">Release progress ↗</a><a href="https://github.com/mehanig">Built by @mehanig ↗</a><span>Open source · MIT</span></div></div><div class="wrap footer-note">No analytics, remote fonts, autoplay audio or account access.</div></footer>
 </body>
 </html>

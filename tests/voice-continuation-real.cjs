@@ -1,0 +1,90 @@
+// Opt-in end-to-end continuation proof: real ChatGPT audio, controlled synthetic lookup.
+// No production DB, real microphone, local speech engine or second answer model.
+if (!process.argv.includes('--allow-provider')) throw Error('Pass --allow-provider for synthetic native voice qualification.');
+process.umask(0o077);
+require('./fixtures/fake-memory.cjs');
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+const { chromium, expect } = require('@playwright/test');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-continuation-real-'));
+Object.assign(process.env, { DRAKEN_DATA_DIR: root, DRAKEN_HOST: '127.0.0.1', DRAKEN_NO_AUTH: 'true', DRAKEN_VOICE_MODE: 'native', DRAKEN_PI_SUMMARY_MODEL: 'test/cheap' });
+delete process.env.DRAKEN_CODEX_BIN; delete process.env.DRAKEN_CODEX_HOME;
+process.env.DRAKEN_PI_BIN = path.join(root, 'fake-pi');
+fs.copyFileSync(path.join(__dirname, 'fixtures/fake-pi.cjs'), process.env.DRAKEN_PI_BIN); fs.chmodSync(process.env.DRAKEN_PI_BIN, 0o700);
+const schema = require('../dist/db/schema'), live = require('../dist/voice/live');
+const memory = require('../dist/memory/context'), originalLookup = memory.historyContext;
+const { NativeVoice } = require('../voice/realtime/native.mjs');
+const originalOpen = NativeVoice.prototype.open, originalContinue = NativeVoice.prototype.continueAnswer;
+let release, cues = 0, lookups = 0, server, browser, page, timer;
+const errors = [], checks = {};
+const check = (name, condition) => { checks[name] = Boolean(condition); if (!condition) throw Error('Synthetic qualification failed: ' + name); };
+const ref = 'H0123456789abcdef01234567';
+const data = JSON.stringify({ type: 'read_only_history', sources: [{ ref, role: 'toolResult', scope: 'synthetic export test record', recorded_at: new Date().toISOString(), text: 'Targeted export tests: 5 passed and 0 failed. Deployment was NOT checked. Synthetic qualification data only.' }], limitations: 'Observed tests are not deployment verification or agreement.' });
+const delayed = new Promise(resolve => { release = () => resolve({ text: data, refs: [ref] }); });
+memory.historyContext = async () => { lookups++; return delayed; };
+NativeVoice.prototype.open = function(sdp, options) {
+  return originalOpen.call(this, sdp, { ...options, prompt: options.prompt + '\nSynthetic timing qualification: on the first export-test question, say only “I will check the recorded test result.” Then wait for the application’s lookup completion before answering with the supplied results. Do not treat that acknowledgement as the answer.' });
+};
+NativeVoice.prototype.continueAnswer = function(question) { cues++; return originalContinue.call(this, question); };
+(async () => {
+  const db = schema.getDb(), now = new Date().toISOString();
+  const syncId = Number(db.prepare('INSERT INTO syncs(created_at,snapshot_at,snapshot_version,briefing,compression_complete) VALUES (?,?,2,?,1)').run(now, now, 'The export-test result is not included in this briefing. Read-only retrieval is available.').lastInsertRowid);
+  server = require('../dist/server').createApp({ staticDir: process.env.DRAKEN_TEST_STATIC_DIR || path.join(__dirname, '../public') }).listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  browser = await chromium.launch(); page = await browser.newPage(); page.on('pageerror', error => errors.push(error.name));
+  timer = setTimeout(() => void browser.close(), 110000);
+  await page.addInitScript(wav => {
+    window.__peers = 0; window.__tracks = []; window.__contexts = [];
+    const Peer = RTCPeerConnection; window.RTCPeerConnection = class extends Peer { constructor(...args) { super(...args); window.__peers++; } };
+    navigator.mediaDevices.getUserMedia = async () => {
+      const audio = new AudioContext(); await audio.resume(); window.__contexts.push(audio);
+      const destination = audio.createMediaStreamDestination(), silence = audio.createConstantSource(); silence.offset.value = 0; silence.connect(destination); silence.start();
+      const bytes = Uint8Array.from(atob(wav), c => c.charCodeAt(0)); const clip = await audio.decodeAudioData(bytes.buffer);
+      window.__speak = () => new Promise(resolve => { const source = audio.createBufferSource(); source.buffer = clip; source.connect(destination); source.onended = resolve; source.start(); });
+      window.__tracks.push(...destination.stream.getTracks()); return destination.stream;
+    };
+  }, fs.readFileSync(path.join(__dirname, 'fixtures/voice-question.wav')).toString('base64'));
+  await page.goto(`http://127.0.0.1:${server.address().port}/syncs/${syncId}`);
+  await page.getByRole('button', { name: 'Call Draken', exact: true }).click();
+  const dialog = page.getByRole('dialog'), status = dialog.getByRole('status');
+  await expect(status).toHaveText('Your turn', { timeout: 45000 });
+  await page.evaluate(() => window.__speak());
+  const messages = () => db.prepare('SELECT * FROM live_messages ORDER BY id').all();
+  await expect.poll(() => messages().filter(x => x.role === 'assistant' && x.status === 'generated').length, { timeout: 30000 }).toBeGreaterThanOrEqual(1);
+  check('spokenTestQuestionRecognized', /export.*test/i.test(messages().find(x => x.role === 'user')?.text || ''));
+  const callId = db.prepare('SELECT id FROM live_calls').get().id;
+  check('initialAcknowledgement', live.liveEvents(callId, 0).events.filter(x => x.type === 'answer_pending').at(-1)?.pending === true);
+  check('lookupPendingBeforeCue', lookups === 1 && cues === 0);
+  await expect(dialog.locator('.voice-notice')).toContainText('continue automatically');
+  const started = Date.now(); release();
+  const answers = () => messages().filter(x => x.role === 'assistant' && x.status === 'generated' && /pass/i.test(x.text) && /deploy/i.test(x.text));
+  await expect.poll(() => answers().length, { timeout: 45000 }).toBeGreaterThanOrEqual(1);
+  const answer = answers().at(-1);
+  check('substantiveAnswer', /pass/i.test(answer.text) && /deploy/i.test(answer.text));
+  check('negativeQualification', /unverified|not.{0,20}(?:check|verif)|(?:wasn.t|hasn.t|haven.t).{0,20}(?:check|verif)|deploy.{0,40}(?:unknown|unchecked)/i.test(answer.text));
+  check('controlNotSpoken', !/DRAKEN_LOOKUP_READY|application control|pending question/i.test(answer.text));
+  check('oneOriginalQuestion', messages().filter(x => x.role === 'user').length === 1);
+  check('boundedAutomaticCue', cues <= 1);
+  check('suppliedHistorySource', JSON.parse(answer.sources_json).includes(ref));
+  await expect.poll(() => db.prepare('SELECT observed_audio_ms FROM live_messages WHERE id=?').get(answer.id).observed_audio_ms, { timeout: 15000 }).toBeGreaterThan(0);
+  check('receivedAnswerAudio', true);
+  const completionMs = Date.now() - started;
+  await page.getByRole('button', { name: 'End call', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect.poll(() => require('../dist/sync/store').busySyncs.size).toBe(0);
+  check('coverageUnchanged', db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n === 0);
+  check('decisionsUnchanged', db.prepare('SELECT decisions FROM syncs WHERE id=?').get(syncId).decisions === '');
+  check('onePeer', await page.evaluate(() => window.__peers === 1));
+  check('tracksStopped', await page.evaluate(() => window.__tracks.every(x => x.readyState === 'ended')));
+  check('helperCleanupConfirmed', !(await live.liveStatus()).activeCall);
+  check('noBrowserErrors', errors.length === 0);
+  await page.evaluate(() => Promise.all(window.__contexts.map(x => x.close())));
+  const report = { at: new Date().toISOString(), syntheticOnly: true, realChatGPTSpeech: true, controlledDelayedRetrieval: true, physicalMicrophone: false, completionMs, automaticCues: cues, checks };
+  fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify({ root, ...report }));
+})().catch(error => {
+  fs.writeFileSync(path.join(root, 'failure.json'), JSON.stringify({ checks, errorType: error.name }, null, 2));
+  console.error(JSON.stringify({ root, checks, errorType: error.name })); process.exitCode = 1;
+}).finally(async () => {
+  clearTimeout(timer); release(); await browser?.close(); await live.stopLiveCalls();
+  if (server) await new Promise(resolve => server.close(resolve));
+  schema.closeDb(); memory.historyContext = originalLookup; NativeVoice.prototype.open = originalOpen; NativeVoice.prototype.continueAnswer = originalContinue;
+});
