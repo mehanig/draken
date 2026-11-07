@@ -30,6 +30,8 @@ jobs:
       - run: npx --no-install playwright install --with-deps chromium
       - run: node --test tests/live-browser.cjs tests/realtime-browser.cjs
       - run: npx --no-install playwright test
+      - name: Public site layout and synthetic evidence interaction
+        run: node --test tests/site-browser.cjs
       - name: Audit application, client and separately shipped private runtime
         run: |
           npm audit --audit-level=low
