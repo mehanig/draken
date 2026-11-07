@@ -205,6 +205,10 @@ The server (`src/`) and React UI (`client/src/`) are TypeScript. Native voice/in
 - Static analysis is not runtime proof. HTTP routes, dynamic imports, setup/probe scripts, generated assets and JS declaration/runtime pairs require tracing their callers. CSS needs separate inspection. Keep error/cancellation/security branches even if ordinary use rarely reaches them.
 - Reachable code is not automatically wanted functionality. Product-boundary tests in `tests/voice-boundary.test.cjs` enforce ChatGPT-only voice, absent retired routes/dependencies, and preserved historical records. Old-data support is not a second engine.
 
+### Qualification and approval
+
+See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist, focused high-risk review areas, and separate release/deployment decisions. General PR CI includes backend/controller/UI tests, fresh package installation, and the separately shipped pi lock audit; platform checks include synthetic private runtime setup without real accounts or provider calls.
+
 ### Code map
 
 ```text
@@ -227,7 +231,7 @@ voice/realtime/         pinned native helper, text-only evidence adapter, WebRTC
 client/src/voice/        ChatGPT capture/playback, interruption and cleanup
 client/src/components/VoiceCall.tsx
                         call interface, source inspection and transcript history
-src/db/                SQLite schema, shared bodies and transactional pointer migration
+src/db/                SQLite schema, source-only evidence and transactional migrations
 client/src/pages/Home.tsx
                         one-click sync, compact history, source selection
 client/src/pages/Sync.tsx
