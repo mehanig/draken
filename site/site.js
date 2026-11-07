@@ -5,18 +5,18 @@
 const examples = {
   E01: {
     role: 'pi · assistant',
-    quote: 'Implemented a bounded retry for export uploads.',
-    qualification: 'An agent-reported implementation. It is not a fresh inspection of the code or a production check by Draken.',
+    quote: 'I added retries for failed export uploads.',
+    qualification: 'This is what the agent said it changed. Draken hasn’t checked the code itself.',
   },
   E02: {
-    role: 'pi · tool result',
+    role: 'pi · test output',
     quote: 'Tests: 5 passed, 0 failed.',
-    qualification: 'Recorded test output, not an independent test run by Draken. This says nothing about deployment.',
+    qualification: 'These results came from the session log. Draken hasn’t run the tests or checked the live site.',
   },
   E03: {
     role: 'pi · assistant',
-    quote: 'Deployment has not been checked. Verify the production export path before treating this as complete.',
-    qualification: 'The qualification belongs in the briefing too. Passing checks are not evidence of a verified deployment.',
+    quote: 'I haven’t checked the live site yet. Try an export there before calling this done.',
+    qualification: 'The tests passed, but the agent still left something for you to check.',
   },
 };
 

@@ -5,6 +5,10 @@ const {chromium}=require('@playwright/test');
 const root=path.join(__dirname,'../site');
 const files=new Set(['/index.html','/site.css','/site.js','/img/logo.png','/img/dragon.webp']);
 const types={'.html':'text/html','.css':'text/css','.js':'text/javascript','.png':'image/png','.webp':'image/webp'};
+const unwantedGlyphs=/[\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u20E3\u2190-\u21FF\u2713\u2261\u25A1]/u;
+test('public assets use text and CSS instead of emoji and decorative text icons',()=>{
+ for(const file of ['index.html','site.css','site.js'])assert.doesNotMatch(fs.readFileSync(path.join(root,file),'utf8'),unwantedGlyphs,file);
+});
 let server,browser,base;
 before(async()=>{
  server=http.createServer((req,res)=>{
@@ -27,15 +31,21 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   await page.addInitScript(()=>{window.__captures=0;navigator.mediaDevices.getUserMedia=async()=>{window.__captures++;throw Error('No capture allowed');};});
   await page.goto(base);await page.getByRole('heading',{level:1}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  assert.doesNotMatch(await page.locator('body').innerText(),unwantedGlyphs);
   assert.match(await page.locator('#get-started').innerText(),/not published yet/);
   assert.match(await page.locator('.release-note').innerText(),/0\.1\.6.*old task dashboard/);
+  assert.doesNotMatch(await page.locator('.release-note').innerText(),/draken@/i,'avoid Cloudflare treating the package version as an email address');
+  assert.match(await page.locator('.findings').innerText(),/Export uploads now retry when they fail/);
   await page.getByRole('button',{name:'Inspect source E03',exact:true}).click();
-  assert.match(await page.locator('#source-quote').innerText(),/Deployment has not been checked/);
+  assert.match(await page.locator('#source-quote').innerText(),/I haven’t checked the live site yet/);
   assert.equal(await page.getByRole('button',{name:'Inspect source E03',exact:true}).getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'Inspect source E01',exact:true}).focus();await page.keyboard.press('Enter');
-  assert.match(await page.locator('#source-quote').innerText(),/bounded retry/);
+  assert.match(await page.locator('#source-quote').innerText(),/retries for failed export uploads/);
+  assert.match(await page.locator('#source-qualification').innerText(),/hasn’t checked the code itself/);
   await page.getByText('Do I have to use voice?',{exact:false}).click();
   assert.match(await page.locator('.faq details[open]').innerText(),/without a microphone/);
+  await page.locator('.faq details[open] summary').press('Enter');
+  assert.equal(await page.locator('.faq details[open]').count(),0);
   assert.equal(await page.evaluate(()=>window.__captures),0);
   assert.deepEqual(external,[]);assert.deepEqual(errors,[]);assert.deepEqual(failed,[]);
  }finally{await page.close();}

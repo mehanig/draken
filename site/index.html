@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#deddd7">
   <title>Draken — Get caught up on your coding agents</title>
-  <meta name="description" content="A read-only engineering-sync companion. Turn your coding-agent sessions into evidence-linked briefings, discuss unresolved work, and decide what you have reviewed.">
+  <meta name="description" content="Catch up on what your coding agents did. Read a summary, ask questions, and check the original conversations.">
   <link rel="icon" href="img/logo.png" type="image/png">
   <link rel="stylesheet" href="site.css">
   <script src="site.js" defer></script>
@@ -18,8 +18,8 @@
       <nav aria-label="Main navigation">
         <a class="desktop-link" href="#how-it-works">How it works</a>
         <a class="desktop-link" href="#boundaries">Your data</a>
-        <a href="https://github.com/mehanig/draken">GitHub <span aria-hidden="true">↗</span></a>
-        <a class="nav-cta" href="#get-started">Release preview <span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/mehanig/draken">GitHub</a>
+        <a class="nav-cta" href="#get-started">Get started</a>
       </nav>
     </div>
   </header>
@@ -27,91 +27,91 @@
   <main id="main">
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow"><span class="square" aria-hidden="true"></span> Your read-only engineering companion</p>
+        <p class="eyebrow"><span class="square" aria-hidden="true"></span> Catch up with your coding agents</p>
         <h1 id="hero-title">Your agents<br>worked.<br><span>Get caught up.</span></h1>
-        <p class="lede">The work moved forward. Your context didn’t.<br>Turn coding-agent sessions into a briefing you can inspect, question, and come back to.</p>
-        <div class="actions"><a class="button primary" href="#preview">See how it works <span aria-hidden="true">↘</span></a><a class="text-link" href="#get-started">Explore the preview <span aria-hidden="true">↗</span></a></div>
-        <p class="hero-footnote">Reads your sessions. Doesn’t run commands or edit your projects.</p>
+        <p class="lede">Pick up where you left off without rereading every chat. Draken sums up what changed and helps you work out what to do next.</p>
+        <div class="actions"><a class="button primary" href="#preview">See how it works</a><a class="text-link" href="#get-started">How to get it</a></div>
+        <p class="hero-footnote">Reads your agent history. Doesn’t edit your code.</p>
       </div>
       <div class="hero-visual">
         <figure class="companion">
           <div class="frame-heading"><span><span class="square" aria-hidden="true"></span> Meet Draken</span><span class="mono">01 / THE CATCH-UP</span></div>
           <img class="dragon" src="img/dragon.webp" width="1116" height="677" alt="Draken, a small mechanical dragon in a yellow sweater, sitting across the desk from you." fetchpriority="high">
-          <figcaption><span class="caption-label">A conversation, not another task queue.</span><p>“The checks passed.<br>Deployment is still unverified.”</p><span class="demo-label">Illustrative dialogue · Not a live call</span></figcaption>
+          <figcaption><span class="caption-label">Ask what happened. Talk about what’s next.</span><p>“The tests passed.<br>I’d check the live site next.”</p><span class="demo-label">Example conversation · Not a live call</span></figcaption>
         </figure>
-        <div class="sticker" aria-hidden="true">LESS SCROLLBACK.<br>MORE CONTEXT.</div>
+        <div class="sticker" aria-hidden="true">WHAT CHANGED?<br>WHAT’S NEXT?</div>
       </div>
     </section>
 
     <div class="source-strip">
-      <div class="wrap source-row"><span class="strip-label">Bring your session history</span><ul aria-label="Supported history sources"><li><span class="source-mark pi-mark" aria-hidden="true">π</span> pi</li><li><span class="source-mark" aria-hidden="true">&gt;_</span> Codex CLI <small>opt-in</small></li><li><span class="source-mark claude-mark" aria-hidden="true">✳</span> Claude Code <small>opt-in</small></li></ul><a href="https://github.com/mehanig/draken/blob/master/SOURCES.md">Supported formats <span aria-hidden="true">↗</span></a></div>
+      <div class="wrap source-row"><span class="strip-label">Reads your saved sessions</span><ul aria-label="Supported history sources"><li>pi</li><li>Codex CLI <small>opt-in</small></li><li>Claude Code <small>opt-in</small></li></ul><a href="https://github.com/mehanig/draken/blob/master/SOURCES.md">Supported formats</a></div>
     </div>
 
     <section class="section wrap" id="preview" aria-labelledby="preview-title">
-      <div class="section-intro"><div><p class="eyebrow">01 / A briefing with receipts</p><h2 id="preview-title">The useful part.<br>Not just the last message.</h2></div><p>What changed? What was checked? What’s still open? A frozen snapshot gives you a stable conversation. The original sessions give you the evidence.</p></div>
+      <div class="section-intro"><div><p class="eyebrow">01 / Here’s an example</p><h2 id="preview-title">See what changed.<br>Check the original chat.</h2></div><p>Draken reads the sessions you choose and sums up the work. You can follow each reference back to the original message.</p></div>
       <div class="demo-grid">
         <article class="briefing" aria-labelledby="briefing-title">
-          <div class="panel-heading"><span class="eyebrow">Example engineering sync</span><span class="badge">Not reviewed</span></div>
-          <h3 id="briefing-title">Export flow</h3>
-          <p class="briefing-subtitle">A small change. Three important distinctions.</p>
+          <div class="panel-heading"><span class="eyebrow">Example summary</span><span class="badge">Not reviewed</span></div>
+          <h3 id="briefing-title">Export uploads</h3>
+          <p class="briefing-subtitle">Here’s where things stand.</p>
           <ol class="findings">
-            <li><span class="finding-number">01</span><div><span class="finding-label">Change reported</span><p>Bounded retries were added to export uploads. <button class="reference" data-source="E01" aria-pressed="false" aria-controls="source-detail" aria-label="Inspect source E01">E01 ↗</button></p></div></li>
-            <li><span class="finding-number">02</span><div><span class="finding-label">Checks recorded</span><p>The session records five passing checks. <button class="reference" data-source="E02" aria-pressed="true" aria-controls="source-detail" aria-label="Inspect source E02">E02 ↗</button></p></div></li>
-            <li><span class="finding-number">03</span><div><span class="finding-label">Still unresolved</span><p>Production deployment has not been verified. <button class="reference" data-source="E03" aria-pressed="false" aria-controls="source-detail" aria-label="Inspect source E03">E03 ↗</button></p></div></li>
+            <li><span class="finding-number">01</span><div><span class="finding-label">What changed</span><p>Export uploads now retry when they fail. <button class="reference" data-source="E01" aria-pressed="false" aria-controls="source-detail" aria-label="Inspect source E01">E01</button></p></div></li>
+            <li><span class="finding-number">02</span><div><span class="finding-label">Tests</span><p>All five tests passed. <button class="reference" data-source="E02" aria-pressed="true" aria-controls="source-detail" aria-label="Inspect source E02">E02</button></p></div></li>
+            <li><span class="finding-number">03</span><div><span class="finding-label">Still to do</span><p>The live site still needs checking. <button class="reference" data-source="E03" aria-pressed="false" aria-controls="source-detail" aria-label="Inspect source E03">E03</button></p></div></li>
           </ol>
-          <div class="briefing-footer"><span class="small-square" aria-hidden="true"></span> A generated briefing is not a review. You decide when you’re done.</div>
+          <div class="briefing-footer"><span class="small-square" aria-hidden="true"></span> Reading this doesn’t mark the work reviewed. That’s up to you.</div>
         </article>
         <aside class="evidence" aria-labelledby="evidence-title">
-          <div class="evidence-heading"><p class="eyebrow">Follow the reference</p><span aria-hidden="true">↙</span></div>
+          <div class="evidence-heading"><p class="eyebrow">Check the source</p></div>
           <h3 id="evidence-title">Don’t take its<br>word for it.</h3>
-          <p class="evidence-intro">Select a reference in the briefing to see what it actually supports.</p>
+          <p class="evidence-intro">Click E01, E02 or E03 to read the message behind that part of the summary.</p>
           <div class="source-detail" id="source-detail" aria-live="polite" aria-atomic="true">
-            <div class="source-meta"><span id="source-id">E02</span><span id="source-role">pi · tool result</span></div>
+            <div class="source-meta"><span id="source-id">E02</span><span id="source-role">pi · test output</span></div>
             <blockquote id="source-quote">Tests: 5 passed, 0 failed.</blockquote>
-            <p id="source-qualification">Recorded test output, not an independent test run by Draken. This says nothing about deployment.</p>
+            <p id="source-qualification">These results came from the session log. Draken hasn’t run the tests or checked the live site.</p>
           </div>
-          <p class="demo-disclosure">Interactive illustration · All example content is synthetic. No project, account or microphone access.</p>
-          <noscript><p>The references need JavaScript to switch this illustration. The test-output example is shown above.</p></noscript>
+          <p class="demo-disclosure">This is a made-up example. It doesn’t use your files, accounts or microphone.</p>
+          <noscript><p>Turn on JavaScript to try the other references. The test result is shown above.</p></noscript>
         </aside>
       </div>
     </section>
 
     <section class="workflow-band" id="how-it-works" aria-labelledby="workflow-title">
       <div class="wrap section">
-        <div class="section-intro"><div><p class="eyebrow">02 / Find your place again</p><h2 id="workflow-title">From scattered sessions<br>to a useful next conversation.</h2></div></div>
+        <div class="section-intro"><div><p class="eyebrow">02 / Find your place again</p><h2 id="workflow-title">Read the summary.<br>Ask a few questions.</h2></div></div>
         <ol class="steps">
-          <li><span class="step-index">01<span aria-hidden="true">↗</span></span><h3>Choose your history.</h3><p>Select the sessions you want to include. Codex and Claude imports are separate opt-ins, not a scan of everything on your machine.</p></li>
-          <li><span class="step-index">02<span aria-hidden="true">↗</span></span><h3>Talk it through.</h3><p>Read the briefing. Ask what changed, check a reference, or discuss what’s unresolved. Use text, or add optional ChatGPT voice.</p></li>
-          <li><span class="step-index">03<span aria-hidden="true">✓</span></span><h3>Close the loop.</h3><p>Save your decisions and carry-forward notes. Mark a snapshot reviewed when you’re ready. Reading or listening never does that for you.</p></li>
+          <li><span class="step-index">01</span><h3>Choose your sessions.</h3><p>Pick the sessions you want Draken to read. It won’t read Codex or Claude histories unless you turn those sources on.</p></li>
+          <li><span class="step-index">02</span><h3>Ask about the work.</h3><p>What changed? Why did the agent do that? What’s left? Ask in text, or talk to Draken with ChatGPT voice.</p></li>
+          <li><span class="step-index">03</span><h3>Decide what’s next.</h3><p>Save your decisions and what to do next. Mark the sync reviewed when you’re ready. Simply reading or listening won’t mark it done.</p></li>
         </ol>
       </div>
     </section>
 
     <section class="section wrap boundaries" id="boundaries" aria-labelledby="boundaries-title">
-      <div><p class="eyebrow">03 / Clear boundaries</p><h2 id="boundaries-title">A companion.<br>Not another agent<br>at the controls.</h2><p class="boundary-lede">Draken helps you understand the work.<br>It doesn’t take over the work.</p><a class="text-link" href="https://github.com/mehanig/draken/blob/master/ARCHITECTURE.md">Read the architecture <span aria-hidden="true">↗</span></a></div>
+      <div><p class="eyebrow">03 / What it does—and doesn’t</p><h2 id="boundaries-title">It reads your chats.<br>It doesn’t change<br>your code.</h2><p class="boundary-lede">You still choose what to do,<br>what to trust, and what to review.</p><a class="text-link" href="https://github.com/mehanig/draken/blob/master/ARCHITECTURE.md">How it’s built</a></div>
       <div class="boundary-list">
-        <article><span class="boundary-symbol" aria-hidden="true">↗</span><div><h3>Reads history. Doesn’t execute work.</h3><p>No project editing, command execution, task delegation or Git mutations.</p></div></article>
-        <article><span class="boundary-symbol" aria-hidden="true">≡</span><div><h3>The originals stay the originals.</h3><p>Evidence points back to your agent logs. Missing or changed originals are reported—not replaced with a hidden text archive.</p></div></article>
-        <article><span class="boundary-symbol" aria-hidden="true">↔</span><div><h3>Local-first isn’t “nothing leaves.”</h3><p>Import and search run locally. Briefing and text-discussion content goes to your configured model provider through pi. Optional voice sends audio and context to OpenAI.</p></div></article>
-        <article><span class="boundary-symbol" aria-hidden="true">□</span><div><h3>Your review belongs to you.</h3><p>Included, summarized, heard and agreed are different things. Only your explicit review advances coverage.</p></div></article>
+        <article><span class="boundary-number" aria-hidden="true">01</span><div><h3>It won’t change your projects.</h3><p>It doesn’t run project commands, edit your code, start coding agents or make Git changes.</p></div></article>
+        <article><span class="boundary-number" aria-hidden="true">02</span><div><h3>Keep your original logs.</h3><p>Links in the summary lead back to your agent logs. If a file is missing or changed, Draken tells you. It doesn’t keep a hidden copy of the original text.</p></div></article>
+        <article><span class="boundary-number" aria-hidden="true">03</span><div><h3>Some content leaves your computer.</h3><p>Reading and searching logs happen locally. For summaries and text replies, pi sends content to the model provider you use. If you use voice, your audio and some history go to OpenAI.</p></div></article>
+        <article><span class="boundary-number" aria-hidden="true">04</span><div><h3>Reading isn’t reviewing.</h3><p>Draken won’t treat an AI suggestion as your decision, or mark work reviewed for you.</p></div></article>
       </div>
     </section>
 
     <section class="wrap get-started" id="get-started" aria-labelledby="start-title">
       <div class="release-card">
-        <div class="release-copy"><p class="eyebrow"><span class="square" aria-hidden="true"></span> New Draken / Release preview</p><h2 id="start-title">Less catching up.<br>More moving forward.</h2><p>The engineering-sync rewrite is available on GitHub. The new npm release is not published yet.</p><a class="button dark" href="https://github.com/mehanig/draken">Explore the source <span aria-hidden="true">↗</span></a></div>
-        <div class="setup-card"><h3>Before you start</h3><dl><div><dt>Runtime</dt><dd>Node.js 22.19+ and npm</dd></div><div><dt>Briefings &amp; text</dt><dd>pi setup and provider sign-in</dd></div><div><dt>Voice · optional</dt><dd>Separate native ChatGPT sign-in</dd></div><div><dt>Desktop tray · preview</dt><dd>macOS and Windows</dd></div></dl><a class="text-link" href="https://github.com/mehanig/draken/blob/master/SETUP.md">Read setup instructions <span aria-hidden="true">↗</span></a><p class="release-note"><strong>Heads up:</strong> npm <code>draken@0.1.6</code> is still the old task dashboard, not the app shown here.</p></div>
+        <div class="release-copy"><p class="eyebrow"><span class="square" aria-hidden="true"></span> New version / Preview</p><h2 id="start-title">Want to try<br>Draken?</h2><p>The new version is on GitHub. The npm release is not published yet.</p><a class="button dark" href="https://github.com/mehanig/draken">View on GitHub</a></div>
+        <div class="setup-card"><h3>Before you start</h3><dl><div><dt>You’ll need</dt><dd>Node.js 22.19+ and npm</dd></div><div><dt>Summaries &amp; chat</dt><dd>Set up pi and sign in</dd></div><div><dt>Voice (optional)</dt><dd>A separate ChatGPT sign-in</dd></div><div><dt>Tray icon (preview)</dt><dd>macOS and Windows</dd></div></dl><a class="text-link" href="https://github.com/mehanig/draken/blob/master/SETUP.md">Read setup instructions</a><p class="release-note"><strong>Heads up:</strong> Draken <code>0.1.6</code> on npm is still the old task dashboard, not the app shown here.</p></div>
       </div>
     </section>
 
     <section class="section wrap faq" aria-labelledby="faq-title"><div><p class="eyebrow">A few practical questions</p><h2 id="faq-title">Good to know.</h2></div><div class="faq-list">
-      <details><summary>Do I have to use voice?<span aria-hidden="true">+</span></summary><p>No. Briefings, text discussion, source inspection and explicit notes work without a microphone. ChatGPT voice is an optional, separately configured interface.</p></details>
-      <details><summary>Does “complete history” mean perfect recall?<span aria-hidden="true">+</span></summary><p>No. Briefing preparation accounts for the eligible evidence in your frozen snapshot, within supported source formats and safety limits. Summaries are lossy, retrieval is selective, and model claims still need review. A missing search result is not proof that something never happened.</p></details>
-      <details><summary>Does opening the page start anything?<span aria-hidden="true">+</span></summary><p>This website is a static demonstration. In the app, opening Settings or checking setup does not scan transcripts, generate a briefing or acquire a microphone. Optional background indexing is a separate permission and runs only while the server is running.</p></details>
-      <details><summary>What should I back up?<span aria-hidden="true">+</span></summary><p>Both your original agent logs and private Draken state. Originals remain the evidence archive, including for frozen snapshots. Back up before migrating an existing installation; launching an old binary is not a safe rollback.</p></details>
+      <details><summary>Do I have to use voice?</summary><p>No. You can read summaries, ask questions, check the original messages and save notes without a microphone. Voice is optional and has its own setup.</p></details>
+      <details><summary>Will it remember everything?</summary><p>No. It can only use logs it supports and sessions you’ve included. Summaries leave details out, and search can miss things. If something matters, check the original message.</p></details>
+      <details><summary>Does opening the page start anything?</summary><p>This page is just a demo. In Draken, opening Settings or checking setup doesn’t read your chat logs, start a summary or turn on your microphone. If you turn on background indexing, it can update search while the server runs.</p></details>
+      <details><summary>What should I back up?</summary><p>Your original agent logs and Draken’s saved data. Old summaries still need the original logs when you open their sources. Back up both before an upgrade. Don’t try to undo a database change by running an older version of Draken.</p></details>
     </div></section>
   </main>
 
-  <footer class="footer"><div class="wrap footer-row"><a class="footer-brand" href="#">DRAKEN<span>A little less lost between sessions.</span></a><div><a href="https://github.com/mehanig/draken/pull/17">Release progress ↗</a><a href="https://github.com/mehanig">Built by @mehanig ↗</a><span>Open source · MIT</span></div></div><div class="wrap footer-note">No analytics, remote fonts, autoplay audio or account access.</div></footer>
+  <footer class="footer"><div class="wrap footer-row"><a class="footer-brand" href="#">DRAKEN<span>A little less lost between sessions.</span></a><div><a href="https://github.com/mehanig/draken/pull/17">Release progress</a><a href="https://github.com/mehanig">Built by @mehanig</a><span>Open source · MIT</span></div></div><div class="wrap footer-note">No analytics, remote fonts, autoplay audio or account access.</div></footer>
 </body>
 </html>
