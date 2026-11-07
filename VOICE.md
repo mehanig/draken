@@ -6,19 +6,20 @@ The former Whisper → pi → Kokoro engine has been removed, including its Pyth
 
 ## Setup
 
+After [installing Draken](SETUP.md#install-and-start), run:
+
 ```sh
-npm run voice:realtime:setup
-npm run voice:realtime:login        # Complete the official ChatGPT device sign-in
-npm run voice:realtime:check        # Local prerequisites only; not an audio test
-npm run voice:realtime:probe -- --allow-provider  # Explicit provider use, synthetic audio
-npm start
+draken voice setup
+draken voice login          # Complete the official ChatGPT device sign-in
+draken voice status         # Local prerequisites only; not an audio test
+draken                     # Start the server if it is not already running
 ```
 
 No voice-mode setting is needed. An existing `DRAKEN_VOICE_MODE=native` remains accepted so installed launchers keep working. Any other value, including `local`, fails startup rather than silently changing an old privacy choice into cloud audio. Remove obsolete local speech settings from launchers; `voice:setup` no longer exists.
 
 Setup runs npm's resolved JavaScript entry under the current Node executable, without a shell or command-shim evaluation. On Windows x64/arm64, status/login/calls launch the pinned official package's `codex.exe` directly, so the owned child is the native process rather than a `.cmd`/Node wrapper. HOME and Windows profile directories are private to the voice account. Runtime installation/version checks do not qualify sign-in, refresh, WebRTC or physical audio.
 
-The helper and its credentials live under `~/.draken/realtime/`, outside the checkout. Provider credentials never enter the browser. Pi credentials are not copied or converted. Preserve the existing database, dashboard credentials and TLS configuration when updating an installation. No snapshot regeneration is needed to enable voice.
+The helper and its credentials live under `~/.draken/realtime/`, separate from the installed application. Provider credentials never enter the browser. Pi credentials are not copied or converted. Preserve the existing database, dashboard credentials and TLS configuration when updating an installation. No snapshot regeneration is needed to enable voice.
 
 This uses an experimental native interface, not a stable public embedding API. Successful setup or a connection handshake is not proof that an account can receive usable audio. The opt-in probe tests actual audio separately. Quota, idle accounting, coding-allowance impact and future compatibility are not established.
 
@@ -55,11 +56,13 @@ Live subtitles appear over the bottom of the call scene, labelled **You** or **D
 
 ## LAN microphone access
 
-Use an existing **trusted HTTPS reverse proxy** preserving Host/Origin, or the built-in TLS listener:
+Use an existing **trusted HTTPS reverse proxy** preserving Host/Origin, or the built-in TLS listener. For the latter, the globally installed npm package includes a certificate helper. It requires **OpenSSL** on PATH. In Bash or PowerShell, run:
 
 ```sh
-npm run voice:tls -- --host 192.168.1.20    # Use your actual server address
+npm --prefix "$(npm root -g)/draken" run voice:tls -- --host 192.168.1.20
 ```
+
+Use your actual server address. This runs the helper from the installed package; no repository clone or build is needed.
 
 This creates a private local certificate authority and a server certificate, then prints settings like:
 
@@ -108,23 +111,8 @@ The localhost browser exception permits microphone access; SSH encrypts the conn
 
 There are no per-call model selectors or API keys. Native helper version and native-auth checks still apply to operator overrides.
 
-## Verification
+## Verification and limits
 
-```sh
-npm run check
-npm test
-npm run test:ui
-npm run test:live:browser
-npm run test:realtime:browser
-npm run test:realtime:native
+`draken voice status` checks local helper/sign-in metadata. It does not establish provider access, usable audio, microphone quality, speaker echo, Bluetooth behavior or support for every browser/device. Test those explicitly with your intended account and device.
 
-# Explicit provider use, synthetic data/audio, isolated database:
-DRAKEN_TEST_STATIC_DIR=/path/to/staged/frontend npm run test:live:real -- --allow-provider
-
-# Focused real-voice proof with one spoken question and a controlled delayed lookup:
-DRAKEN_TEST_STATIC_DIR=/path/to/staged/frontend node tests/voice-continuation-real.cjs --allow-provider
-```
-
-Ordinary tests use temporary records, a fake native helper and real local browser peers carrying synthetic audio. They test the native-only UI, controls, drawing failure, source lookup, history, no-capture-on-reload, absent old endpoints and preservation of old records. The text-model fake is used only for sync preparation and recaps, not voice turns.
-
-The synthetic WAV fixture is not a human recording. Synthetic peers and injected audio do not establish physical microphone quality, speaker echo, Bluetooth behavior, mobile performance or other-browser support. Those still need hands-on testing. The separately opted-in real-provider test is not part of ordinary tests.
+Automated checks and optional real-provider probes are documented in [CONTRIBUTING.md](CONTRIBUTING.md#voice-qualification). They are contributor tools, not installation prerequisites. Ordinary tests use temporary synthetic records and audio; real-provider probes require explicit consent and are not part of the ordinary suite.

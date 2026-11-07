@@ -1,11 +1,9 @@
 # Desktop tray companion (macOS / Windows)
 
-The current source build adds an optional `draken tray` command. **It is not in the older public npm 0.1.6.** Node.js 22.19+ and npm are still prerequisites; this is not a standalone desktop installer.
+Use `draken tray` for an optional desktop companion after [installing Draken](SETUP.md#install-and-start). Node.js 22.19+ and npm are required; this is not a standalone desktop installer. The tray remains a desktop preview.
 
 ```sh
 draken tray
-# From a built checkout instead:
-node dist/cli.js tray
 ```
 
 Run it in the **local desktop session**, as the server's user, with the intended `DRAKEN_DATA_DIR` and server environment. Once the command reports that the tray is ready, you can close the terminal. The normal `draken` command remains a foreground server.
@@ -51,6 +49,6 @@ These are private diagnostics, not publishable reports. Files use restrictive mo
 
 Platform-independent tests exercise ownership, startup/stop/quit races, stale responses, private IPC, duplicate companions, terminal disconnection, and real isolated backend processes. They make no provider requests and do not use production data.
 
-**Native macOS/Windows rendering and menu interaction cannot be qualified on the Linux development host.** This implementation remains a desktop preview until the target-platform checks pass. `.github/workflows/tray-check.yml` runs the controller/IPC suite and `npm run test:tray:native` on macOS and Windows. The native smoke check opens a temporary icon, changes status, and checks graceful exit without starting a server, opening a browser, reading history, or accessing a provider. A workflow file is not evidence that the job has run.
+Hosted macOS and Windows checks have passed for native helper startup, status updates and graceful exit. The tray smoke check does not start a server, open a browser, read history or access a provider. These checks do **not** establish physical icon visibility, menu usability or compatibility with every desktop policy. The tray remains a desktop preview pending hands-on acceptance; see [ACCEPTANCE.md](ACCEPTANCE.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for qualification details.
 
 Before a public release, manually verify on each supported OS/architecture: visible icon and dark/light appearance, accessible status text, Open/Start/Stop/Quit, terminal closure, duplicate launches, spaces/Unicode in install paths, existing-server non-interference, logout, and application-control restrictions. No claim of physical menu usability or all-platform compatibility follows from the synthetic tests alone.

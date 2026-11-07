@@ -1,10 +1,10 @@
 <p align="center"><img src="site/img/logo.png" width="100" alt="Draken"></p>
 
-# Draken — session sync
+# Draken — engineering sync
 
 A local-first engineering sync across your **pi, Codex CLI and Claude Code sessions**. Session readers are agent-neutral; summarization still runs through pi.
 
-> This branch is a prototype of a new direction. It replaces the old Docker/Claude task dashboard; it does not launch coding workers or schedule tasks. Voice calls use only **ChatGPT live voice**, through a separate native sign-in to the same paid account. The previous local speech engine has been removed; historical call records are preserved. Voice sends audio to OpenAI; generated transcripts are not verified claims or exact playback records; see [VOICE.md](VOICE.md). Calls include a local animated **3D dragon persona**, with a standalone `/persona.html` preview; see [PERSONA.md](PERSONA.md).
+> Draken is a read-only companion, not a task runner. It replaces the old Docker/Claude dashboard and does not launch coding workers or schedule tasks. Voice calls use only **ChatGPT live voice**, through a separate native sign-in to the same paid account. The previous local speech engine has been removed; historical call records are preserved. Voice sends audio to OpenAI; generated transcripts are not verified claims or exact playback records; see [VOICE.md](VOICE.md). Calls include a local animated **3D dragon persona**, with a standalone `/persona.html` preview; see [PERSONA.md](PERSONA.md).
 >
 > **Large histories now use a cached summary tree:** cheaper-model parsing and reconciliation, followed by a stronger-model verdict. The old raw-evidence snapshot cutoff is removed. This is still lossy model compression, not independent verification. See [ROADMAP.md](ROADMAP.md) for remaining quality evaluation and community research.
 
@@ -16,29 +16,28 @@ For a plain-English guide to the code, with diagrams and reasons for the main de
 
 Draken remembers which evidence a finished sync covered, what you decided, and what remains open. Reading logs or generating a response does **not** advance that checkpoint.
 
-## Run locally
+## Install and start
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-The older published npm **0.1.6** predates this flow; the current local checkout/deployment is not a new npm release. For the current checkout:
+> **Release status:** the engineering-sync version has not been published to npm yet. Public npm **0.1.6** is the old task dashboard. The installation instructions below are for the upcoming release.
 
-```bash
-npm ci
-npm --prefix client ci
-npm run build
-npm start
+```sh
+npm install -g draken
+draken
 ```
 
 Open **http://127.0.0.1:40333**. Every launch prints the URL and setup instructions. Keep the terminal open; Ctrl+C stops the server, while closing the browser does not. A normal loopback launch needs **no dashboard login or auth setup**. No Docker or Claude installation is needed.
 
-For a checkout, use `node dist/cli.js` in place of the installed `draken` command:
+In another terminal, configure your summary runtime and, optionally, voice:
 
 ```sh
 draken setup             # Confirm private pi installation; --yes for explicit unattended consent
 draken login             # Inside pi: /login, follow prompts, then /quit
 draken doctor            # Local version/model-credential checks, not a provider request
-draken voice setup       # Pinned native helper
+draken voice setup       # Optional voice: install the pinned native helper
 draken voice login       # Separate official ChatGPT sign-in
+draken voice status      # Local prerequisites, not an audio test
 draken status            # Find the saved server address and verify its live instance
 draken tray              # Optional macOS/Windows desktop companion (preview)
 ```
@@ -180,67 +179,15 @@ Native voice setup and TLS environment settings are documented in [VOICE.md](VOI
 
 Draken shares GifGun's blocky Bauhaus style: concrete-gray surfaces, square black borders, hard purple shadows, bold headings, and restrained primary-color accents. The dragon logo stays Draken's own. See [DESIGN.md](DESIGN.md) for the shared palette and rules.
 
-## Development and verification
+## Compatibility
 
-```bash
-npm run check                    # Typecheck both apps + unused files/exports/dependencies (no build or provider calls)
-npm test                         # Backend/indexer/API tests, temporary synthetic sessions, fake pi
-npm run build                    # Typecheck and build both applications
-npx playwright install chromium --only-shell  # One-time browser setup
-npm run test:ui                  # Browser workflow test, desktop + mobile
-```
+This is not a drop-in replacement for the old Docker/Claude task dashboard or its APIs. Legacy `projects`/`tasks` tables and historical call records are retained where applicable; old task conversations are not automatically imported. Back up original agent logs and private Draken state before upgrading. Do not use an old binary as a migration rollback.
 
-For frontend development, run the backend above and `npm run dev:client` in another terminal. Vite proxies `/api` to port 40333.
+## Contributing and qualification
 
-These normal test commands never read your real session store or call a model provider. Test sessions are constructed in temporary directories, not copied from private transcripts. The separate opt-in `npm run test:live:real -- --allow-provider` check uses real ChatGPT voice with synthetic evidence/audio and an isolated database; it is never included in `npm test`.
+Source builds, development commands, test/probe instructions and the code map live in [CONTRIBUTING.md](CONTRIBUTING.md). They are not needed for normal npm installation.
 
-### Keeping the code lean
-
-The server (`src/`) and React UI (`client/src/`) are TypeScript. Native voice/installers are JavaScript modules, and tests use JS/TS. The old Python speech worker is removed. The repository is not entirely TypeScript.
-
-- Both TypeScript configurations reject unused locals and parameters.
-- `npm run lint:unused` uses pinned, development-only **Knip**. `knip.jsonc` models both packages, CLI/HTML entry points, spawned fixtures, HTTP-served voice modules and the peer declaration. It maps compiled server imports back to source; generated `dist` is not a second codebase.
-- Named client API exports allow each endpoint wrapper to be checked separately. An unused wrapper should not hide inside a live `api` object.
-- Internally called functions are not dead code merely because Knip cannot attribute a CommonJS test's namespace-property access to an individual export. Keep real test seams; check symbol references before deleting them.
-- Static analysis is not runtime proof. HTTP routes, dynamic imports, setup/probe scripts, generated assets and JS declaration/runtime pairs require tracing their callers. CSS needs separate inspection. Keep error/cancellation/security branches even if ordinary use rarely reaches them.
-- Reachable code is not automatically wanted functionality. Product-boundary tests in `tests/voice-boundary.test.cjs` enforce ChatGPT-only voice, absent retired routes/dependencies, and preserved historical records. Old-data support is not a second engine.
-
-### Qualification and approval
-
-See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist, focused high-risk review areas, and separate release/deployment decisions. General PR CI includes backend/controller/UI tests, fresh package installation, and the separately shipped pi lock audit; platform checks include synthetic private runtime setup without real accounts or provider calls.
-
-### Code map
-
-```text
-src/pi/                 private runtime selection, locked installer, pi-owned login/status
-src/sources/            agent registry and versioned pi/Codex/Claude readers
-src/sync/collector.ts    incremental read-only multi-agent collector
-src/sync/normalize.ts    minimal, bounded, best-effort-redacted evidence
-src/sync/store.ts        immutable snapshots, coverage, decisions, history
-src/sync/pi.ts           isolated tool-free, cancellable pi invocation
-src/sync/tree.ts         structured summaries, hierarchical merges, cache
-src/sync/references.ts   short model labels ↔ canonical provenance
-src/sync/recap.ts        bounded, cached conversation summaries; not saved decisions
-src/sync/manager.ts      background runs, retrieval, final verdict and conversation
-src/routes/sync.ts       authenticated sync API
-src/routes/voice.ts      authenticated voice status, certificate download and history
-src/routes/live-voice.ts native call control and ordered transcript history
-src/voice/              native lifecycle/frozen evidence; read-only old call history
-voice/                  native helper installer and TLS setup
-voice/realtime/         pinned native helper, text-only evidence adapter, WebRTC peer
-client/src/voice/        ChatGPT capture/playback, interruption and cleanup
-client/src/components/VoiceCall.tsx
-                        call interface, source inspection and transcript history
-src/db/                SQLite schema, source-only evidence and transactional migrations
-client/src/pages/Home.tsx
-                        one-click sync, compact history, source selection
-client/src/pages/Sync.tsx
-                        individual snapshot, progress, briefing, discussion, notes
-client/src/components/SummaryTree.tsx
-                        expandable nodes, structured observations, provenance
-```
-
-Legacy `projects`/`tasks` tables are left intact in existing databases; there is no automatic import of old Claude conversations. Docker, task execution, terminal streaming, mount management, and Git mutation endpoints have been removed. The published marketing site under `site/` is intentionally unchanged in this prototype branch.
+See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist and focused high-risk review areas. The public landing page lives in `site/`; merging changes there to `master` triggers the existing website deployment workflow. npm publication and application deployment are separate steps.
 
 ## License
 

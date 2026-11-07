@@ -93,20 +93,6 @@ The npm package contains code/dependencies, not downloaded weights or private in
 
 Ordinary tests use synthetic records and deterministic or empty embedding fixtures, with real FTS5/vector tests. They do not download/run the real model. Browser fixtures exercise automatic search and source reading without setup controls, plus no capture on navigation. Existing native-only and review-boundary tests remain.
 
-For real local-model qualification **from the source checkout**, after building:
+Optional real-model qualification and CPU comparison commands live in [CONTRIBUTING.md](CONTRIBUTING.md#local-model-qualification). Those are isolated test tools, not steps required to use search. Ordinary search/text/call requests prepare the index automatically; there is no separate model setup command for users.
 
-```sh
-npm run test:memory:local -- --download-model
-# Or reuse pinned test model files:
-npm run test:memory:local -- --model-dir=/private/path/to/model
-```
-
-For a synthetic CPU comparison using existing test weights:
-
-```sh
-node tests/memory-performance.cjs --model-dir=/private/path/to/model
-```
-
-This compares the previous single-session multithreaded runtime with the bounded embedding pool on 48 synthetic 800-character prose/code/log/multilingual passages, plus long-window and query-prefix compatibility checks. It reports wall time, RSS, cosine similarity and byte equality, and performs no download or production-history access. This is an embedding-throughput comparison, not a guarantee about total nightly sync time, latency on other machines or retrieval quality.
-
-The download flag controls the test harness, not the product. The test uses temporary synthetic records, fake pi/native helpers, real offline embeddings and the actual worker. Ordinary search/text/call requests must prepare themselves with no setup API or scope flag. It checks paraphrase/multilingual retrieval, an unrelated query, native context, H citations, cancellation/resume and unchanged evidence/coverage. It never opens the production database or calls OpenAI, and does not qualify physical microphones or real-provider answer quality.
+Synthetic retrieval and throughput checks do not establish exhaustive recall, real-provider answer quality or performance on every machine.

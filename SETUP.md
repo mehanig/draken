@@ -2,27 +2,18 @@
 
 Draken uses **pi for summaries, preparation recaps and text discussion**, regardless of which coding agent produced the imported history. It does not implement provider OAuth, translate another agent's credentials, or run Claude/Codex to summarize.
 
-These commands require the current read-only Draken build. The older **published npm 0.1.6** predates this onboarding flow; the local checkout/deployment is not an npm release.
+> **Release status:** the engineering-sync version has not been published to npm yet. Public npm **0.1.6** is the old task dashboard. The installation instructions below are for the upcoming release.
 
-## Start and check the server
+## Install and start
 
-With a release containing this flow installed globally:
+Install Node.js **22.19+** with npm, then run:
 
 ```sh
 npm install -g draken
 draken
 ```
 
-With a checkout, build it first and use `node dist/cli.js` in place of `draken`:
-
-```sh
-npm ci
-npm --prefix client ci
-npm run build
-node dist/cli.js
-```
-
-Node.js **22.19+** and npm are required. Installation does not launch a server or register a background service. `draken` runs in the foreground, prints its address and next steps on **every launch**, and serves the browser UI. Keep that terminal open; **Ctrl+C stops Draken**, while closing the browser does not. Run commands below in another terminal, or stop the server and restart afterward.
+Installation does not launch a server or register a background service. `draken` runs in the foreground, prints its address and next steps on **every launch**, and serves the browser UI. Keep that terminal open; **Ctrl+C stops Draken**, while closing the browser does not. Run commands below in another terminal, or stop the server and restart afterward.
 
 - `draken tray`: optional macOS/Windows desktop preview. Starts a detached tray companion with Open and owned-server Start/Stop controls, so the terminal can close after readiness. An existing server stays with its original launcher. There is no automatic login registration, setup/login, or Linux tray. See [TRAY.md](TRAY.md) for lifecycle and qualification details.
 - `draken status`: finds this data directory’s last successfully started server automatically—including LAN binds and custom ports—and checks its live instance identity. It also prints the HTTPS browser URL when available. You do not need to repeat `DRAKEN_HOST`/`DRAKEN_PORT`; explicit overrides still work. For a nondefault data directory, use the same `DRAKEN_DATA_DIR`. This is connectivity, not model/voice readiness or a process-management command.
@@ -100,7 +91,7 @@ draken voice login
 draken voice status
 ```
 
-These are packaged CLI wrappers around the existing pinned native helper installer and official ChatGPT device login. No checkout-specific npm scripts or development Playwright dependency is needed for setup/login/status. Voice keeps its existing dedicated account under `~/.draken/realtime`; **pi tokens are not copied or converted**. Status is structural helper/sign-in metadata, not a real audio/provider qualification. The separate developer audio probe still requires its documented tooling and explicit provider consent.
+These commands install the pinned native helper, open its official ChatGPT device login, and check local prerequisites. No development tools are needed. Voice keeps its existing dedicated account under `~/.draken/realtime`; **pi tokens are not copied or converted**. Status is structural helper/sign-in metadata, not a real audio/provider qualification. Optional developer audio probes are documented in [CONTRIBUTING.md](CONTRIBUTING.md) and require explicit provider consent.
 
 ## Browser instructions and history
 
@@ -117,4 +108,4 @@ Opening these instructions checks local metadata only. It does not install packa
 - Private dependency upgrades belong to a qualified Draken update and a new shipped lockfile—not an automatic `pi update`. Old runtime directories are retained until explicitly cleaned up.
 - Back up private credentials securely along with Draken state and the original source archives. Do not commit them, include them in npm packages, or paste them into diagnostics.
 
-Automated tests use fake installers/providers. A separate qualification installs the actual packed Draken production dependencies and locked pi runtime into an empty temporary home, opens/cancels pi's real login selector, and checks the browser/startup flow. It does **not** authenticate a real account, verify subscription/model access, or establish support for every OS/terminal.
+For source builds and automated qualification, see [CONTRIBUTING.md](CONTRIBUTING.md). Normal installation does not require cloning the repository or building the application.
