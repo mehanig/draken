@@ -36,6 +36,31 @@ function closedMarkers(packet) {
 }
 async function connected() { const call = await live.createLiveCall(syncId, signal()); await live.connectLiveCall(call.id, 'v=0\r\nm=audio 9 test', signal()); return call; }
 
+test('client-known reservation IDs cancel before creation and after a lost response, and cannot be reused', async () => {
+  const before = randomUUID(); await live.endLiveCall(before);
+  await assert.rejects(live.createLiveCall(syncId, signal(), before), /cancelled/);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n, 0);
+  const aborted = new AbortController(); aborted.abort();
+  await assert.rejects(live.createLiveCall(syncId, aborted.signal, randomUUID()), /cancelled/);
+  await assert.rejects(live.createLiveCall(syncId, signal(), '-'.repeat(36)), /Invalid call/);
+  const id = randomUUID(), call = await live.createLiveCall(syncId, signal(), id);
+  assert.equal(call.id, id);
+  // The caller need not have consumed the create response to release ownership.
+  await live.endLiveCall(id); await live.endLiveCall(id);
+  assert.equal((await live.liveStatus()).activeCall, null); assert.equal(store.activeVoiceSyncs.size, 0);
+  await assert.rejects(live.createLiveCall(syncId, signal(), id), /already used/);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
+});
+
+test('unknown reservation cancellations are bounded without evicting a pending cancellation', async () => {
+  const first = randomUUID(); await live.endLiveCall(first);
+  for (let i = 1; i < 1024; i++) await live.endLiveCall(randomUUID());
+  await assert.rejects(live.endLiveCall(randomUUID()), /Too many pending/);
+  await live.endLiveCall(first);
+  await assert.rejects(live.createLiveCall(syncId, signal(), first), /cancelled/);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n, 0);
+});
+
 test('native evidence packets are bounded, citation-closed and retain source roles and memory caveats', () => {
   evidence(100);
   getDb().prepare('UPDATE syncs SET briefing = ?, decisions = ? WHERE id = ?').run(Array.from({ length: 100 }, (_, i) => `Reported work [E${i + 1}]`).join(' '), 'Keep deployment unverified [E2].', syncId);

@@ -63,9 +63,12 @@ export class LiveVoiceSession {
       this.set({ notice: 'Preparing history. Your microphone is still off.' });
       // This request awaits automatic history preparation on the server. Do not
       // ask permission or acquire a microphone track while indexing is pending.
-      const call = await voiceRequest<{ id: string; startedAt: number }>('/live/calls', { method: 'POST', body: JSON.stringify({ syncId }), signal: this.life.signal });
-      if (!this.alive) { void voiceRequest(`/live/calls/${call.id}/end`, { method: 'POST', keepalive: true }).catch(() => {}); return; }
-      this.id = call.id;
+      // Own the cancellation identity BEFORE sending creation. Aborting a fetch
+      // may discard an already-committed response, including its server ID.
+      this.id = crypto.randomUUID();
+      const call = await voiceRequest<{ id: string; startedAt: number }>('/live/calls', { method: 'POST', body: JSON.stringify({ syncId, requestId: this.id }), signal: this.life.signal });
+      if (call.id !== this.id) throw new Error('The call reservation identity did not match.');
+      if (!this.alive) { void voiceRequest(`/live/calls/${this.id}/end`, { method: 'POST', keepalive: true }).catch(() => {}); return; }
       if (document.visibilityState !== 'visible') throw new Error('History is ready. Return to this page and start the call again to enable the microphone.');
       this.set({ historyReady: true, startedAt: call.startedAt, notice: 'History is ready. Waiting for microphone permission…' });
       // Keep the prepared reservation alive while the permission dialog is open.

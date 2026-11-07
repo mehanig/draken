@@ -25,7 +25,7 @@ async function fixture({ denied = false, lateMic = false, slowOffer = false, slo
         if (holdPreparation) await new Promise(resolve => releasePreparation = resolve);
         if (res.destroyed) return;
         if (failPreparation) { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Synthetic history preparation failed' })); return; }
-        value = { id: '11111111-1111-1111-1111-111111111111', startedAt: Date.now() };
+        value = { id: JSON.parse(raw).requestId, startedAt: Date.now() };
       }
       else if (url.pathname.endsWith('/connect')) {
         if (slowOffer) await new Promise(resolve => setTimeout(resolve, 400));

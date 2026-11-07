@@ -20,6 +20,13 @@ interface Message { id: number; role: 'user' | 'assistant'; text: string; final:
 interface Turn { user: Message; life: AbortController; continuation: ReplyContinuation }
 interface Call { turn?: Turn; id: string; sync: SyncDetail; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; historyLookup?: { key: string; result: Promise<{ text: string; refs: string[] }> } }
 const calls = new Map<string, Call>();
+// End can overtake creation on a second HTTP connection. Retain unknown-ID
+// cancellations for the HTTP request window, bounded independently of calls.
+const cancelledReservations = new Map<string, number>();
+const CANCEL_WINDOW_MS = 5 * 60_000;
+function pruneReservations() {
+  for (const [id, until] of cancelledReservations) if (until <= Date.now()) cancelledReservations.delete(id);
+}
 let sweepTimer: NodeJS.Timeout | undefined;
 /** Do not silently turn an old local-audio configuration into cloud audio. */
 export function validateVoiceConfig(): void {
@@ -167,14 +174,18 @@ function nativeEvent(call: Call, event: any) {
     }
   } catch { emit(call, { type: 'error', error: 'The live transcript could not be retained safely.' }); endQuietly(call.id, 'Transcript safety limit'); }
 }
-export async function createLiveCall(syncId: number, signal: AbortSignal) {
+export async function createLiveCall(syncId: number, signal: AbortSignal, reservationId: string = randomUUID()) {
   validateVoiceConfig();
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(reservationId)) throw new HttpError(400, 'Invalid call identifier');
+  pruneReservations();
+  if (signal.aborted || cancelledReservations.has(reservationId)) throw new HttpError(409, 'Call setup cancelled');
+  if (getDb().prepare('SELECT 1 FROM live_calls WHERE id=?').get(reservationId)) throw new HttpError(409, 'Call request was already used');
   sweep(); if ([...calls.values()].some(call => !call.released) || activeVoiceSyncs.size) throw new HttpError(409, 'End the existing call first.');
   const sync = requireOpen(syncId);
   assertEvidenceAvailable(sync);
   if (sync.items.length && (!sync.tree.complete || !sync.briefing)) throw new HttpError(409, 'Prepare the briefing before calling.');
   const now = Date.now();
-  const call: Call = { id: randomUUID(), sync, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController() };
+  const call: Call = { id: reservationId, sync, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController() };
   getDb().prepare('INSERT INTO live_calls(id, sync_id, started_at) VALUES (?, ?, ?)').run(call.id, syncId, new Date(now).toISOString());
   calls.set(call.id, call); activeVoiceSyncs.add(syncId);
   if (!sweepTimer) { sweepTimer = setInterval(sweep, 10000); sweepTimer.unref(); }
@@ -259,7 +270,14 @@ export function observeLiveAudio(id: string, messageId: number, milliseconds: nu
     .run(milliseconds, Date.now() - message.started, messageId);
 }
 export function endLiveCall(id: string, reason = 'Ended by user'): Promise<void> {
-  const call = calls.get(id); if (!call) return Promise.resolve(); if (call.closing) return call.closing;
+  const call = calls.get(id);
+  if (!call) {
+    pruneReservations();
+    if (!cancelledReservations.has(id) && cancelledReservations.size >= 1024) return Promise.reject(new HttpError(429, 'Too many pending call cancellations. Try again later.'));
+    cancelledReservations.set(id, Date.now() + CANCEL_WINDOW_MS);
+    return Promise.resolve();
+  }
+  if (call.closing) return call.closing;
   call.closed = true; call.touched = Date.now(); cancelTurn(call); call.historyLife.abort();
   for (const message of [call.user, call.assistant]) if (message && !message.final) finishMessage(call, message, 'interrupted');
   getDb().prepare("UPDATE live_calls SET status = 'ended', ended_at = ?, end_reason = ? WHERE id = ?").run(new Date().toISOString(), reason, id);
@@ -274,7 +292,7 @@ export function endLiveCall(id: string, reason = 'Ended by user'): Promise<void>
     call.sync.items = []; call.sync.context = []; call.sync.messages = []; call.sync.memory = [];
   }); return call.closing;
 }
-export async function stopLiveCalls() { await Promise.allSettled([...calls.values()].map(call => endLiveCall(call.id, 'Server stopped'))); clearInterval(sweepTimer); sweepTimer = undefined; calls.clear(); }
+export async function stopLiveCalls() { await Promise.allSettled([...calls.values()].map(call => endLiveCall(call.id, 'Server stopped'))); clearInterval(sweepTimer); sweepTimer = undefined; calls.clear(); cancelledReservations.clear(); }
 export function recoverLiveCalls() {
   getDb().prepare("UPDATE live_messages SET status = 'interrupted' WHERE status = 'streaming'").run();
   getDb().prepare("UPDATE live_calls SET status = 'interrupted', ended_at = ?, end_reason = 'Server restarted' WHERE status = 'active'").run(new Date().toISOString());

@@ -7,11 +7,13 @@ const id = (value: unknown) => { if (typeof value !== 'string' || !/^[a-f0-9-]{3
 const number = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) => { const n = Number(value); if (!Number.isSafeInteger(n) || n < min || n > max) throw new HttpError(400, 'Invalid live call resource'); return n; };
 async function connected(res: Response, fn: (signal: AbortSignal) => Promise<unknown>) {
   const controller = new AbortController(); const close = () => { if (!res.writableEnded) controller.abort(); }; res.on('close', close);
+  if (res.destroyed) controller.abort();
   try { return await fn(controller.signal); } finally { res.off('close', close); }
 }
 router.post('/calls', route(async (req, res) => {
-  if (Object.keys(req.body || {}).some(key => key !== 'syncId')) throw new HttpError(400, 'Unknown call option. Refresh the page.');
-  const result = await connected(res, signal => createLiveCall(number(req.body?.syncId, 1), signal)); res.status(201).json(result);
+  if (Object.keys(req.body || {}).some(key => !['syncId', 'requestId'].includes(key))) throw new HttpError(400, 'Unknown call option. Refresh the page.');
+  const requestId = req.body?.requestId === undefined ? undefined : id(req.body.requestId);
+  const result = await connected(res, signal => createLiveCall(number(req.body?.syncId, 1), signal, requestId)); res.status(201).json(result);
 }));
 router.post('/calls/:id/connect', route(async (req, res) => {
   if (typeof req.body?.sdp !== 'string' || req.body.sdp.length > 28000) throw new HttpError(400, 'Invalid audio offer');
