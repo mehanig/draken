@@ -7,59 +7,67 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g., 0.2.0)'
+        description: 'Committed stable version to publish (must match package.json)'
         required: true
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+      - name: Require source already on master
+        run: git merge-base --is-ancestor HEAD origin/master
+      - name: Validate literal version and committed manifest/lock agreement
+        id: version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node scripts/release-version.cjs
+
+  qualification:
+    needs: validate
+    uses: ./.github/workflows/qualification.yml
+
+  platforms:
+    needs: validate
+    uses: ./.github/workflows/tray-check.yml
+
   release:
-    runs-on: ubuntu-latest
-    
-    # Required for npm provenance / trusted publishing
+    needs: [validate, qualification, platforms]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write
-    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 'latest'
+          node-version: '22.23.4'
           registry-url: 'https://registry.npmjs.org'
-
-      - name: Install root dependencies
-        run: npm ci
-
-      - name: Install client dependencies
-        run: cd client && npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Update version (manual dispatch)
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          npm version ${{ inputs.version }} --no-git-tag-version --allow-same-version
-          echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
-
-      - name: Get version from tag
-        if: github.event_name == 'push'
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-      # Publish with provenance for supply chain security
-      # Uses OIDC trusted publishing - no NPM_TOKEN needed if configured on npm
-      - name: Publish to npm
+      # Trusted publishing requires npm >=11.5.1; pin a Node-compatible CLI.
+      - run: npm install --global npm@12.2.2 --ignore-scripts --no-audit --no-fund
+      - run: npm ci
+      - run: npm --prefix client ci
+      - run: npm run build
+      - name: Publish only after qualification
         run: npm publish --provenance --access public
-
       - name: Create GitHub Release
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
