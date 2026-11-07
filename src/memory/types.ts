@@ -53,7 +53,7 @@ export const historyUpdate = (stage: HistoryUpdate['stage'], fields: Partial<Omi
 export interface Embedder {
   readonly fingerprint: string;
   ready(): boolean;
-  setup(report?: ReportHistory): Promise<void>;
+  setup(report?: ReportHistory, allowDownload?: boolean): Promise<void>;
   embed(text: string, query: boolean): Promise<Float32Array>;
   embedMany?(texts: string[], parallel?: boolean): Promise<Float32Array[]>;
   readonly parallelism?: { workers: number; threads: number };

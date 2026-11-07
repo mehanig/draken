@@ -5,6 +5,7 @@ import { getSourceRoots, type RootInput } from '../sources/registry';
 import { NormalizationCache } from '../sync/jsonl';
 import { initHistoryStorage } from './storage';
 import { sourceStamps, saveSourceCheckpoint } from './stamps';
+import { historyStamp, saveHistoryReadiness } from './readiness';
 import { digest, historySources, type SourceRecord } from './sources';
 import { historyUpdate, type Embedder, type HistoryPage, type HistoryQuery, type HistoryResults, type ReportHistory } from './types';
 
@@ -67,7 +68,15 @@ export class HistoryIndex {
     report?.(historyUpdate('scanning'));
     // Scoped lookups cannot claim global background coverage. Capture the
     // candidate metadata before inference; later source changes stay pending.
-    const stamps = checkpoint ? sourceStamps(this.source, scope.before || new Date().toISOString()) : undefined;
+    const before = scope.before || new Date().toISOString();
+    const stamps = checkpoint ? sourceStamps(this.source, before) : undefined;
+    const readiness = checkpoint ? historyStamp(this.source, before, this.root) : undefined;
+    const finish = () => {
+      if (stamps && readiness) this.db.transaction(() => {
+        saveHistoryReadiness(this.db, this.source, before, readiness, this.model.fingerprint, this.root);
+        saveSourceCheckpoint(this.db, stamps);
+      })();
+    };
     this.refresh();
     const filter = this.filter(scope);
     const groups = this.db.prepare(`SELECT DISTINCT p.id FROM passages p JOIN chunk_links c ON c.passage_id=p.id JOIN records r ON r.ref=c.ref
@@ -78,7 +87,10 @@ export class HistoryIndex {
     let completed = 0, computed = 0, meanMs = 0, measured = 0;
     const notify = (stage: 'loading' | 'indexing') => report?.(historyUpdate(stage, { total, completed, reused, parallelism: this.model.parallelism,
       remaining_seconds: completed === total ? 0 : measured >= 8 ? Math.ceil((total - completed) * meanMs / 1000) : null }));
-    if (!total) { if (stamps) saveSourceCheckpoint(this.db, stamps); notify('indexing'); return; }
+    if (!total) {
+      if (reused && !this.model.ready()) { notify('loading'); await this.ensureModel(report); }
+      finish(); notify('indexing'); return;
+    }
     notify('loading'); await this.ensureModel(report);
     const getChunk = this.db.prepare('SELECT c.ref,c.offset,p.hash FROM chunk_links c JOIN passages p ON p.id=c.passage_id WHERE p.id=? ORDER BY c.id LIMIT 1');
     const saveVector = this.db.prepare('INSERT INTO passage_vectors(rowid,embedding) VALUES(?,?)');
@@ -119,10 +131,31 @@ export class HistoryIndex {
       if (pending.length >= 64 || Date.now() - lastCommit >= 1000) commit();
     }
     commit(); notify('indexing'); this.refresh(false);
-    if (stamps) saveSourceCheckpoint(this.db, stamps);
+    finish();
   }
-  private async ensureModel(report?: ReportHistory) {
-    if (!this.modelPrepared || !this.model.ready()) { await this.model.setup(report); this.modelPrepared = true; }
+  /** Voice can verify and query prepared passages, never build a missing corpus.
+   * Fresh original-byte/projection checks remain mandatory; the ready receipt
+   * only controls scheduling, not source authority. No derived writes here. */
+  private assertPrepared(scope: Partial<HistoryQuery>, report?: ReportHistory) {
+    report?.(historyUpdate('scanning'));
+    const current = new Map<string, SourceRecord>();
+    const chunks = this.db.prepare('SELECT c.offset,p.hash,p.embedded FROM chunk_links c JOIN passages p ON p.id=c.passage_id WHERE c.ref=? ORDER BY c.offset');
+    for (const record of historySources(this.source, this.root, this.normalized)) {
+      if ((scope.before && (!record.at || record.at > scope.before)) || (scope.session_id && record.session_id !== scope.session_id) || (scope.sync_id && record.sync_id !== scope.sync_id)) continue;
+      const rows = chunks.all(record.ref) as { offset: number; hash: string; embedded: number }[];
+      let count = 0;
+      for (let offset = 0; offset < record.text.length; offset += 700) {
+        const row = rows[count++], hash = digest(this.model.fingerprint + '\0' + `${record.title}\n${record.role}\n${record.text.slice(offset, offset + 800)}`);
+        if (!row || row.offset !== offset || row.hash !== hash || row.embedded !== 1) throw new Error('History needs preparation before calling.');
+        if (offset + 800 >= record.text.length) break;
+      }
+      if (rows.length !== count) throw new Error('Prepared history changed.');
+      current.set(record.ref, record);
+    }
+    this.current = current;
+  }
+  private async ensureModel(report?: ReportHistory, allowDownload = true) {
+    if (!this.modelPrepared || !this.model.ready()) { await this.model.setup(report, allowDownload); this.modelPrepared = true; }
   }
   private filter(query: Partial<HistoryQuery>) {
     const conditions: string[] = [], args: (string | number)[] = [];
@@ -131,21 +164,25 @@ export class HistoryIndex {
     if (query.before) { conditions.push('r.at IS NOT NULL AND r.at<=?'); args.push(query.before); }
     return { sql: conditions.length ? ' AND ' + conditions.join(' AND ') : '', args };
   }
-  async search(query: HistoryQuery, report?: ReportHistory): Promise<HistoryResults> {
-    await this.prepare(query, report);
+  async search(query: HistoryQuery, report?: ReportHistory, preparedOnly = false): Promise<HistoryResults> {
+    if (preparedOnly) this.assertPrepared(query, report);
+    else await this.prepare(query, report);
     report?.(historyUpdate('searching'));
     const filter = this.filter(query);
     const any = this.db.prepare(`SELECT 1 FROM chunks c JOIN records r ON r.ref=c.ref WHERE 1=1 ${filter.sql} LIMIT 1`).get(...filter.args);
     if (!any) return { mode: 'hybrid', results: [], limitations: LIMITATIONS };
-    await this.ensureModel(report);
+    if (preparedOnly && !this.model.ready()) throw new Error('Prepare the local search model before calling.');
+    await this.ensureModel(report, !preparedOnly);
     const embedding = await this.model.embed(cleanText(query.question, 2000), true);
     // Prune exclusions/edits again after inference without admitting unembedded
     // arrivals. All returned candidates have both lexical and semantic coverage.
-    this.refresh(false);
+    if (preparedOnly) this.assertPrepared(query, report);
+    else this.refresh(false);
     const scores = new Map<string, { score: number; chunk: Chunk }>();
     const add = (rows: Chunk[]) => {
       const distinct = new Set<string>();
       for (const row of rows) {
+        if (!this.current.has(row.ref)) continue; // Excluded/removed records cannot be served from stale vectors.
         const identity = this.record(row.ref).identity;
         if (distinct.has(identity)) continue; distinct.add(identity);
         const old = scores.get(identity), score = 1 / (60 + distinct.size);
@@ -170,10 +207,12 @@ export class HistoryIndex {
     if (!record) throw new Error('This historical record is no longer admitted or its text changed. Search again.');
     return record;
   }
-  read(ref: string, offset = 0): HistoryPage {
-    this.refresh(); const item = this.record(ref);
+  read(ref: string, offset = 0, preparedBefore?: string): HistoryPage {
+    if (preparedBefore) this.assertPrepared({ before: preparedBefore });
+    else this.refresh();
+    const item = this.record(ref);
     const rows = this.db.prepare(`SELECT ref FROM records WHERE group_id=? ORDER BY COALESCE(at,''),position,ref`).all(item.group) as { ref: string }[];
-    const records = rows.map(row => this.record(row.ref)), at = records.findIndex(row => row.ref === ref);
+    const records = rows.filter(row => this.current.has(row.ref)).map(row => this.record(row.ref)), at = records.findIndex(row => row.ref === ref);
     const before = records.slice(0, at).reverse().find(row => row.identity !== item.identity);
     const after = records.slice(at + 1).find(row => row.identity !== item.identity && row.identity !== before?.identity);
     const neighbors = [before, after].filter((row): row is SourceRecord => Boolean(row)).map(row => ({ ...row, text: row.text.slice(0, 600) }));

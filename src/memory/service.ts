@@ -4,6 +4,7 @@ import { getDataDir, getDb } from '../db/schema';
 import { getSourceRoots } from '../sources/registry';
 import { HttpError } from '../sync/store';
 import { historyUpdate, type HistoryPage, type HistoryProgress, type HistoryQuery, type HistoryResults, type HistoryUpdate } from './types';
+import { storedHistoryReadiness } from './readiness';
 
 // One owned CPU worker; ordinary concurrent requests wait rather than requiring
 // the user to manage an index. No model/runtime is loaded in the dashboard.
@@ -32,7 +33,7 @@ function retire() {
 }
 function watch(work: Work) {
   clearTimeout(work.timer);
-  work.timer = setTimeout(() => { if (active === work) { settle(work, failure()); retire(); } }, work.method === 'read' ? 30000 : 10 * 60000);
+  work.timer = setTimeout(() => { if (active === work) { settle(work, failure()); retire(); } }, work.method.startsWith('read') ? 30000 : 10 * 60000);
 }
 function progressValue(value: any): HistoryUpdate | undefined {
   if (!value || !['scanning', 'downloading', 'loading', 'indexing', 'searching', 'reading'].includes(value.stage)) return;
@@ -80,7 +81,7 @@ function pump() {
   active = work;
   try {
     start();
-    work.started = work.updated = Date.now(); work.progress = historyUpdate(work.method === 'read' ? 'reading' : 'scanning');
+    work.started = work.updated = Date.now(); work.progress = historyUpdate(work.method.startsWith('read') ? 'reading' : 'scanning');
     watch(work);
     // A healthy first index can exceed an interactive-query timeout. Progress
     // renews its stall deadline, but total work remains bounded to two hours.
@@ -121,9 +122,12 @@ export function validateHistoryQuery(value: unknown): HistoryQuery {
   if (query.before !== undefined && (typeof query.before !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(query.before) || !Number.isFinite(Date.parse(query.before)) || new Date(query.before).toISOString() !== query.before)) throw new HttpError(400, 'Invalid history cutoff');
   return { ...query, question: query.question.trim() } as HistoryQuery;
 }
+export const historyReadiness = () => storedHistoryReadiness(getDataDir(), getDb());
 export const prepareHistory = (before: string, signal: AbortSignal, background = false) => request<void>('prepare', { before }, signal, background);
+export const searchPreparedHistory = (query: HistoryQuery, signal?: AbortSignal) => request<HistoryResults>('search-prepared', { query: validateHistoryQuery(query) }, signal);
 export const searchHistory = (query: HistoryQuery, signal?: AbortSignal) => request<HistoryResults>('search', { query: validateHistoryQuery(query) }, signal);
-export function readHistory(ref: string, offset = 0, signal?: AbortSignal) {
+export function readHistory(ref: string, offset = 0, signal?: AbortSignal, preparedBefore?: string) {
   if (!/^H[a-f0-9]{24}$/.test(ref) || !Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) throw new HttpError(400, 'Invalid historical source or offset');
-  return request<HistoryPage>('read', { ref, offset }, signal);
+  if (preparedBefore !== undefined) validateHistoryQuery({ question: 'source', before: preparedBefore });
+  return request<HistoryPage>(preparedBefore ? 'read-prepared' : 'read', { ref, offset, before: preparedBefore }, signal);
 }

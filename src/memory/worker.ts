@@ -36,7 +36,8 @@ process.on('message', async (message: any) => {
     let value;
     if (message.method === 'prepare') { await index.prepare({ before: message.before }, report, true); value = null; }
     else if (message.method === 'search') value = await index.search(message.query, report);
-    else if (message.method === 'read') { report(historyUpdate('reading')); value = index.read(message.ref, message.offset); }
+    else if (message.method === 'search-prepared') value = await index.search(message.query, report, true);
+    else if (message.method === 'read' || message.method === 'read-prepared') { report(historyUpdate('reading')); value = index.read(message.ref, message.offset, message.method === 'read-prepared' ? message.before : undefined); }
     else throw new Error('Unknown history operation');
     process.send?.({ id: message.id, value });
   } catch {

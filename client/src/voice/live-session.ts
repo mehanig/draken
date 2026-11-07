@@ -60,9 +60,9 @@ export class LiveVoiceSession {
   async start(syncId: number, beforeStart?: () => Promise<void>) {
     try {
       await beforeStart?.(); if (!this.alive) return;
-      this.set({ notice: 'Preparing history. Your microphone is still off.' });
-      // This request awaits automatic history preparation on the server. Do not
-      // ask permission or acquire a microphone track while indexing is pending.
+      this.set({ notice: 'Connecting your call. Your microphone is still off.' });
+      // The server only accepts already-prepared history. A stale readiness
+      // check fails without starting indexing, a provider session or capture.
       // Own the cancellation identity BEFORE sending creation. Aborting a fetch
       // may discard an already-committed response, including its server ID.
       this.id = crypto.randomUUID();

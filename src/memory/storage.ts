@@ -4,6 +4,14 @@ import type Database from 'better-sqlite3';
  * `embedding_cache` are read views, not additional text/vector stores. */
 export function initHistoryStorage(db: Database.Database, fingerprint: string): void {
   const version = 'history-index-v3-contentless';
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='meta'").get()) {
+    const get = db.prepare('SELECT value FROM meta WHERE key=?');
+    // A cold prepared-only voice lookup must not perform even no-op schema
+    // writes. Real migrations/model changes still take the transactional path.
+    if ((get.get('schema') as { value: string } | undefined)?.value === version
+      && (get.get('model') as { value: string } | undefined)?.value === fingerprint
+      && (get.get('covered-tails-removed') as { value: string } | undefined)?.value === '1') return;
+  }
   db.exec("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)");
   const prior = (db.prepare("SELECT value FROM meta WHERE key='schema'").get() as any)?.value;
   if ((prior && !['history-index-v1', 'history-index-v2-pointers', version].includes(prior)) || (!prior && db.prepare("SELECT 1 FROM sqlite_schema WHERE name IN ('records','chunks','vectors','passages')").get())) throw new Error('Unknown history storage version; existing data was not reset');

@@ -62,11 +62,15 @@ test('opted-in timer scans and indexes actual synthetic pointers without creatin
   startBackgroundIndexing();t.mock.timers.tick(60000);await new Promise(r=>setTimeout(r,20));assert.equal(jobs,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);
   setAutoIndex(true);t.mock.timers.tick(60000);for(let n=0;n<200&&!autoIndexSettings().last_completed_at;n++)await new Promise(r=>setTimeout(r,10));
   assert.ok(autoIndexSettings().last_completed_at);assert.equal(jobs,1);assert.equal(embeddings,70);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_entries').get().n,70);
+  const ready=()=>require('../dist/memory/readiness').indexReadiness(cache,getDb());
+  assert.equal(ready().ready,true,'background work establishes the same call-readiness receipt');
   t.mock.timers.tick(60000);for(let n=0;n<200&&autoIndexSettings().phase==='scanning';n++)await new Promise(r=>setTimeout(r,10));assert.equal(jobs,1);assert.equal(embeddings,70);
   const tail=JSON.stringify({type:'message',id:'70',parentId:'69',timestamp:header.timestamp,message:{role:'assistant',content:'Small pending tail; deployment not checked.'}})+'\n';fs.appendFileSync(root+'/sessions/auto.jsonl',tail);
   t.mock.timers.tick(3600000);for(let n=0;n<200&&autoIndexSettings().phase==='scanning';n++)await new Promise(r=>setTimeout(r,10));
   assert.ok(autoIndexSettings().pending_records>0&&autoIndexSettings().pending_records<64);assert.equal(jobs,1);assert.equal(embeddings,70,'no automatic small-batch flush after an hour');
+  assert.equal(ready().ready,false,'a pending tail keeps Call disabled rather than indexing after click');
   await service.prepareHistory(new Date().toISOString(),new AbortController().signal);assert.equal(foregroundJobs,1);assert.equal(embeddings,71,'foreground call preparation still indexes the small tail');
+  assert.equal(ready().ready,true);
   for(const table of ['syncs','sync_items','sync_coverage','sync_runs','live_calls','summary_cache'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
   assert.equal(fs.readFileSync(root+'/sessions/auto.jsonl','utf8'),contents+tail);
  }finally{await stopBackgroundIndexing();t.mock.timers.reset();service.prepareHistory=original;cache.close();}

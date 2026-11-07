@@ -1,4 +1,4 @@
-import type { PiSetupStatus, AutoIndexSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
+import type { CallReadiness, PiSetupStatus, AutoIndexSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -33,6 +33,8 @@ export const enableAgent = (agent: string, enabled: boolean) => request<Overview
 export const include = (id: string, included: boolean) => request<Overview>(`/sessions/${encodeURIComponent(id)}`, 'PATCH', { included });
 export const sync = (id: number) => request<SyncDetail>(`/syncs/${id}`);
 export const progress = (id: number) => request<TreeProgress>(`/syncs/${id}/progress`);
+export const callReadiness = (id: number, signal?: AbortSignal) => request<CallReadiness>(`/syncs/${id}/call-readiness`, 'GET', undefined, signal);
+export const prepareCall = (id: number) => request<SyncDetail>(`/syncs/${id}/prepare-call`, 'POST');
 export const treeNode = (id: number, key: string) => request<{ label: string; output: NodeSummary | TopicGroups; refs: Record<string, string> }>(`/syncs/${id}/tree/${key}`);
 export const expand = (id: number) => request<{ sync: SyncDetail; scan: ScanResult }>(`/syncs/${id}/expand`, 'POST');
 export const cancel = (id: number) => request<TreeProgress>(`/syncs/${id}/cancel`, 'POST');

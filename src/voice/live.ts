@@ -6,7 +6,7 @@ import { SyncDetail } from '../types';
 import { invalidateRecap } from '../sync/recap';
 import { LIVE_PROMPT, liveEvidence, liveRetrievalQuestion } from './live-context';
 import { historyContext } from '../memory/context';
-import { prepareHistory } from '../memory/service';
+import { historyReadiness } from '../memory/service';
 import { ReplyContinuation } from './continuation';
 
 // Resource limits, not a subscription spending guarantee.
@@ -18,7 +18,7 @@ type Native = { subscribe(fn: (event: any) => void): () => void; open(sdp: strin
 const runtime = () => require('../../voice/realtime/native.mjs') as { nativeStatus(options?: any): Promise<any>; NativeVoice: new (options?: any) => Native };
 interface Message { id: number; role: 'user' | 'assistant'; text: string; final: boolean; interrupted?: boolean; refs: string[]; started: number }
 interface Turn { user: Message; life: AbortController; continuation: ReplyContinuation }
-interface Call { turn?: Turn; id: string; sync: SyncDetail; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; historyLookup?: { key: string; result: Promise<{ text: string; refs: string[] }> } }
+interface Call { turn?: Turn; id: string; sync: SyncDetail; historyBefore: string; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; historyLookup?: { key: string; result: Promise<{ text: string; refs: string[] }> } }
 const calls = new Map<string, Call>();
 // End can overtake creation on a second HTTP connection. Retain unknown-ID
 // cancellations for the HTTP request window, bounded independently of calls.
@@ -103,7 +103,7 @@ async function lookup(call: Call, question: string, turn: Turn) {
   const currentQuestion = turn.user.text;
   if (/\b[EC]\d+\b/.test(currentQuestion)) return liveEvidence(call.sync, question, false, currentQuestion);
   const key = `${turn.user.id}:${currentQuestion}`;
-  if (call.historyLookup?.key !== key) call.historyLookup = { key, result: historyContext(currentQuestion, new Date(call.started).toISOString(), AbortSignal.any([call.historyLife.signal, turn.life.signal])).then(packet =>
+  if (call.historyLookup?.key !== key) call.historyLookup = { key, result: historyContext(currentQuestion, call.historyBefore, AbortSignal.any([call.historyLife.signal, turn.life.signal]), 3500, true).then(packet =>
     packet.refs.length ? packet : liveEvidence(call.sync, question, false, currentQuestion, 'No matching retained historical sources were found. This is not proof an event never happened.')
   ).catch(() => ({
     text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'Archive lookup failed or is busy. No other search mode or provider was substituted. Say earlier history could not be checked; do not invent a historical answer.' }), refs: [],
@@ -183,22 +183,24 @@ export async function createLiveCall(syncId: number, signal: AbortSignal, reserv
   sweep(); if ([...calls.values()].some(call => !call.released) || activeVoiceSyncs.size) throw new HttpError(409, 'End the existing call first.');
   const sync = requireOpen(syncId);
   assertEvidenceAvailable(sync);
-  if (sync.items.length && (!sync.tree.complete || !sync.briefing)) throw new HttpError(409, 'Prepare the briefing before calling.');
+  if (!sync.tree.complete || !sync.briefing) throw new HttpError(409, 'Prepare the briefing before calling.');
+  if (!historyReadiness().ready) throw new HttpError(409, 'Prepare history before calling. No call was started.');
+  if (!(await runtime().nativeStatus(nativeOptions())).readyForProbe) throw new HttpError(503, 'Native voice needs its pinned helper and ChatGPT sign-in on the server.');
+  if (signal.aborted || cancelledReservations.has(reservationId)) throw new HttpError(409, 'Call setup cancelled');
+  if ([...calls.values()].some(call => !call.released) || activeVoiceSyncs.size) throw new HttpError(409, 'End the existing call first.');
+  if (getDb().prepare('SELECT 1 FROM live_calls WHERE id=?').get(reservationId)) throw new HttpError(409, 'Call request was already used');
+  const latest = requireOpen(syncId); assertEvidenceAvailable(latest);
+  if (!latest.tree.complete || !latest.briefing) throw new HttpError(409, 'Prepare the briefing before calling.');
+  const history = historyReadiness();
+  if (!history.ready || !history.before) throw new HttpError(409, 'History changed. Prepare history before calling. No call was started.');
   const now = Date.now();
-  const call: Call = { id: reservationId, sync, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController() };
+  const call: Call = { id: reservationId, sync: latest, historyBefore: history.before, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController() };
   getDb().prepare('INSERT INTO live_calls(id, sync_id, started_at) VALUES (?, ?, ?)').run(call.id, syncId, new Date(now).toISOString());
   calls.set(call.id, call); activeVoiceSyncs.add(syncId);
   if (!sweepTimer) { sweepTimer = setInterval(sweep, 10000); sweepTimer.unref(); }
-  // Initial download/indexing can take longer than the browser disconnect lease.
-  // Keep the owned preparation alive, but cancel it if the page/call is closed.
-  const lease = setInterval(() => { if (!call.closed) call.touched = Date.now(); }, 10000);
-  try {
-    if (!(await runtime().nativeStatus(nativeOptions())).readyForProbe) throw new HttpError(503, 'Native voice needs its pinned helper and ChatGPT sign-in on the server.');
-    await prepareHistory(new Date(call.started).toISOString(), AbortSignal.any([signal, call.historyLife.signal]));
-    if (signal.aborted || call.closed) throw new HttpError(409, 'Call setup cancelled');
-    return { id: call.id, startedAt: call.started, limits: { minutes: CALL_LIMITS.minutes, turns: CALL_LIMITS.turns, leaseSeconds: CALL_LIMITS.leaseSeconds } };
-  } catch (error) { await endLiveCall(call.id, 'Call setup failed'); throw error; }
-  finally { clearInterval(lease); }
+  // No corpus preparation, provider session or microphone is started here.
+  // Retrieval stays within the history cutoff prepared before this reservation.
+  return { id: call.id, startedAt: call.started, limits: { minutes: CALL_LIMITS.minutes, turns: CALL_LIMITS.turns, leaseSeconds: CALL_LIMITS.leaseSeconds } };
 }
 export async function connectLiveCall(id: string, sdp: string, signal: AbortSignal) {
   const call = current(id); if (call.connecting || call.connected) throw new HttpError(409, 'This call already has a connection'); call.connecting = true;

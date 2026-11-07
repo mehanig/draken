@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import * as api from '../api';
-import type { SyncDetail } from '../types';
+import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText, EvidenceList } from '../components/EvidenceList';
 import { SummaryTree } from '../components/SummaryTree';
 import { VoiceCall } from '../components/VoiceCall';
@@ -13,6 +13,7 @@ export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
   id: number; callIntent: boolean; consumeIntent: () => void; navigate: Navigate; setGuard: (guard: (() => boolean) | null) => void;
 }) {
   const [sync, setSync] = useState<SyncDetail | null>(null);
+  const [readiness, setReadiness] = useState<CallReadiness | null>(null);
   const [work, setWork] = useState(''), [error, setError] = useState('');
   const [voiceActive, setVoiceActive] = useState(false), [callAfterPreparation, setCallAfterPreparation] = useState(false);
   const [decisions, setDecisions] = useState(''), [carry, setCarry] = useState(''), [question, setQuestion] = useState('');
@@ -41,6 +42,16 @@ export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
     };
     void poll(); return () => { stopped = true; clearTimeout(timer); };
   }, [id, sync?.busy]);
+  useEffect(() => {
+    setReadiness(null);
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try { const value = await api.callReadiness(id, controller.signal); if (!controller.signal.aborted) setReadiness(value); }
+      catch { if (!controller.signal.aborted) setReadiness(null); }
+      if (!controller.signal.aborted) timer = setTimeout(() => void poll(), sync?.busy ? 1000 : 3000);
+    };
+    void poll(); return () => { controller.abort(); clearTimeout(timer); };
+  }, [id, sync?.busy, sync?.briefing, sync?.status, voiceActive]);
   const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward));
   useEffect(() => {
     const guard = () => !(dirty || voiceActive) || window.confirm(voiceActive ? 'Leave this page and end the call?' : 'Leave without saving your notes?');
@@ -59,6 +70,11 @@ export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
     if (dirty) await api.notes(id, decisions, carry);
     show(await api.brief(id));
   });
+  const prepareHistory = () => void run('Preparing history before calling…', async () => {
+    consume(); setReadiness(null);
+    if (dirty) await api.notes(id, decisions, carry);
+    show(await api.prepareCall(id));
+  });
   const discuss = (text = question) => void run('Starting discussion…', async () => {
     if (dirty) await api.notes(id, decisions, carry);
     show(await api.discuss(id, text));
@@ -66,6 +82,7 @@ export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
   const resume = () => sync?.tree.run?.question ? discuss(sync.tree.run.question) : prepare();
   const cancel = () => { consume(); void run('Stopping preparation…', async () => { await api.cancel(id); }); };
   const preparationFailed = !sync?.busy && sync?.tree.run && ['failed', 'cancelled', 'interrupted'].includes(sync.tree.run.status);
+  useEffect(() => { if (preparationFailed || readiness?.error) consume(); }, [preparationFailed, readiness?.error]);
 
   return <main className="sync-detail">
     <a className="back-link" href="/" onClick={event => linkClick(event, navigate, '/')}><ArrowLeft size={16} />All syncs</a>
@@ -79,15 +96,19 @@ export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
         }}><Check size={16} />Mark reviewed</button>}
       </div>
       {missing && <div className="alert warning" role="alert"><strong>Original session evidence unavailable.</strong><p>Restore the original session files to inspect the missing excerpts, prepare replies, call or mark this snapshot reviewed. Your conversation and saved notes are still available; Draken keeps pointers, not copies of original session text.</p></div>}
-      {(work || sync.busy) && <div className="working" role="status"><span className="spinner" />{work || (sync.recap_state === 'running' ? 'Making a short conversation recap…' : sync.tree.run?.stage || 'Preparing your conversation…')}
+      {(work || sync.busy) && <div className="working" role="status"><span className="spinner" />{work || (sync.recap_state === 'running' ? 'Making a short conversation recap…' : readiness?.preparing ? 'Preparing history before calling…' : sync.tree.run?.stage || 'Preparing your conversation…')}
         {sync.busy && <button className="btn btn-secondary" onClick={cancel}>Cancel preparation</button>}</div>}
-      <HistoryProgress enabled={Boolean(sync.busy && sync.tree.run?.question)} />
+      <HistoryProgress enabled={sync.busy} />
       {sync.busy && sync.recap_state !== 'running' && <p className="small muted">The complete new snapshot is being reconciled. Large histories can take a while. Leaving or reloading will not start your microphone.</p>}
       {preparationFailed && <div className="alert warning" role="alert"><strong>{sync.tree.run?.question ? 'Reply stopped.' : 'Preparation stopped.'}</strong><p>{sync.tree.run?.error || 'Your snapshot is retained. Nothing was marked reviewed.'}</p><button className="btn btn-primary" disabled={disabled || missing} onClick={resume}>{sync.tree.run?.question ? 'Retry reply' : 'Retry preparation & call'}</button></div>}
       {open && !sync.briefing && !sync.busy && !preparationFailed && sync.snapshot_version === 2 && <button className="btn btn-primary" disabled={disabled || missing} onClick={prepare}>Prepare &amp; call</button>}
-      <VoiceCall key={id} sync={sync} disabled={disabled || missing} onActiveChange={setVoiceActive}
+      <VoiceCall key={id} sync={sync} readiness={readiness} onPrepareHistory={prepareHistory} disabled={disabled || missing} onActiveChange={setVoiceActive}
         autoStart={(callIntent || callAfterPreparation) && !preparationFailed && !missing} onAutoStartHandled={consume}
-        beforeStart={async () => { if (dirty) show(await api.notes(id, decisions, carry)); }}
+        beforeStart={async () => {
+          if (dirty) show(await api.notes(id, decisions, carry));
+          const value = await api.callReadiness(id); setReadiness(value);
+          if (!value.ready) throw new Error('History needs preparation before calling. Use Prepare history first.');
+        }}
         onClosed={async () => { await run('Saving a short recap…', async () => { show(await api.recap(id)); }); }} />
       <section className="card recap-card"><div className="section-heading"><h2>At a glance</h2><button className="btn btn-secondary" disabled={disabled} onClick={() => void run('Summarizing the conversation…', async () => show(await api.recap(id)))}>{sync.recap ? 'Refresh recap' : 'Make recap'}</button></div>
         <p className="prose">{sync.recap || 'The call and this sync will be condensed here after you talk. The full briefing and original history remain below.'}</p>

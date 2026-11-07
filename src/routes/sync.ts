@@ -5,6 +5,7 @@ import { scanSessions } from '../sync/collector';
 import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, HttpError, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs } from '../sync/store';
 import { cancelReply, launchReply, launchRecap } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
+import { callReadiness, prepareCall } from '../voice/preparation';
 
 const router = Router();
 const route = (handler: (req: Request, res: Response) => unknown | Promise<unknown>) =>
@@ -72,6 +73,8 @@ router.post('/syncs', route(async (req, res) => {
 }));
 router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req)))));
 router.get('/syncs/:id/progress', route((req, res) => res.json(getProgress(id(req)))));
+router.get('/syncs/:id/call-readiness', route((req, res) => res.json(callReadiness(id(req)))));
+router.post('/syncs/:id/prepare-call', route((req, res) => res.status(202).json(prepareCall(id(req)))));
 router.get('/syncs/:id/tree/:key', route((req, res) => res.json(getTreeNode(id(req), String(req.params.key)))));
 router.post('/syncs/:id/expand', route(async (req, res) => {
   const scan = await scanSessions();

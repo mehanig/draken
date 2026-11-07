@@ -6,6 +6,7 @@ import { SummaryNode, SummaryTree } from './tree';
 import { recapInput, recapHash, summarizeRecap, saveRecap, invalidateRecap, memoryText, type RecapInput } from './recap';
 import { invokePi } from './pi';
 import { historyContext } from '../memory/context';
+import { prepareCallAndWait, cancelCallPreparation } from '../voice/preparation';
 export { stopManagerProcesses } from './pi';
 
 const systemPrompt = `You are Draken, a read-only engineering sync partner. You cannot execute tasks, schedule workers, change files, or inspect anything beyond the supplied evidence.
@@ -22,6 +23,7 @@ Answer questions directly rather than repeating the opening briefing.`;
 const controllers = new Map<number, AbortController>();
 export function cancelReply(id: number): void {
   getSync(id);
+  if (cancelCallPreparation(id)) return;
   const controller = controllers.get(id);
   if (!controller) throw new HttpError(409, 'No generation is running');
   controller.abort();
@@ -94,7 +96,7 @@ export async function generateReply(id: number, question?: string): Promise<Sync
   let sync = requireOpen(id);
   assertEvidenceAvailable(sync);
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand this legacy partial snapshot before generating a new briefing. Your notes and previous discussion are preserved.');
-  if (!question && sync.briefing) return sync;
+  if (!question && sync.briefing) return prepareCallAndWait(id);
   sync = configureModels(id, sync.models);
   busySyncs.add(id);
   const controller = new AbortController();
@@ -149,7 +151,7 @@ export async function generateReply(id: number, question?: string): Promise<Sync
     controllers.delete(id);
     busySyncs.delete(id);
   }
-  return getSync(id);
+  return question ? getSync(id) : prepareCallAndWait(id);
 }
 
 /** Derived call/sync recap only. Never writes notes, status, snapshot evidence or coverage. */

@@ -31,6 +31,14 @@ async function prepare(page: Page) {
   const testRef = sync.items.find((item: any) => item.cwd === '/demo/voice-export' && item.role === 'toolResult').ref;
   return { syncId, root, testRef, piLog: () => fs.readFileSync(path.join(root, 'pi-calls.jsonl'), 'utf8') };
 }
+async function pendingHistory(page: Page, root: string) {
+  const id=randomUUID(),timestamp=new Date().toISOString();
+  fs.writeFileSync(path.join(root,'sessions',`${id}.jsonl`),[
+    {type:'session',version:3,id,cwd:'/demo/call-ready',timestamp},
+    {type:'message',id:'new',parentId:null,timestamp,message:{role:'assistant',content:'New history for the next call.'}},
+  ].map(JSON.stringify).join('\n')+'\n');
+  expect((await page.request.post('/api/scan',{data:{}})).ok()).toBe(true);
+}
 const dialog = (page: Page) => page.getByRole('dialog', { name: /Sync #/ });
 async function openCall(page: Page, id: number, muted = false) {
   await page.goto(`/syncs/${id}`);
@@ -96,18 +104,60 @@ test('ChatGPT-only call: local test peer audio, dragon, controls, sources, histo
   expect(writes).toEqual([]); expect(errors).toEqual([]); expect(external).toEqual([]);
 });
 
-test('indexing gets a preparation screen, not a thinking dragon, before microphone access', async ({ page }) => {
- const {syncId}=await prepare(page);await nativePeer(page);let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);
- await page.route('**/api/voice/live/calls',async route=>{const response=await route.fetch();await held;await route.fulfill({response});});
+test('history preparation finishes outside the call before Call Draken can be enabled', async ({ page }) => {
+ const {syncId,root,piLog}=await prepare(page); await nativePeer(page);
+ await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${syncId}/call-readiness`)).json()).ready).toBe(true);
+ const control=path.join(root,'sessions/fake-control.json');await pendingHistory(page,root);
+ const before=piLog();let reservations=0;
+ page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/api/voice/live/calls'))reservations++;});
+ fs.writeFileSync(control,JSON.stringify({delay:20,historyDelay:4000}));
  await page.route('**/api/memory/progress',route=>route.fulfill({json:{active:true,background:false,queued:0,elapsed_ms:1500,updated_at:Date.now(),work:{stage:'indexing',completed:3,total:10,reused:100,remaining_seconds:10,downloaded_bytes:0,download_total_bytes:0}}}));
  try {
-  await page.goto(`/syncs/${syncId}`);await page.getByRole('button',{name:'Call Draken',exact:true}).click();
-  await expect(page.getByRole('region',{name:'Call preparation'})).toContainText('Preparing history');
-  await expect(page.getByRole('region',{name:'Call preparation'})).toContainText('3 / 10 new or changed passages ready');
-  await expect(page.locator('.voice-scene, .dp-stage, .voice-captions')).toHaveCount(0);expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
-  await page.setViewportSize({width:320,height:700});expect(await dialog(page).evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
- } finally {release();await page.unroute('**/api/memory/progress');}
- await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Your turn',{timeout:15000});await expect(page.locator('.dp-stage')).toBeVisible();expect(await page.evaluate(()=>(window as any).__captures)).toBe(1);await end(page);
+  await page.goto(`/syncs/${syncId}`);
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'Prepare history',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Local history progress'})).toContainText('3 / 10 new or changed passages ready');
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
+  await expect(dialog(page)).not.toBeVisible(); await expect(page.locator('.voice-scene, .dp-stage, .voice-captions')).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).__captures)).toBe(0); expect(reservations).toBe(0);
+  expect((await(await page.request.get('/api/voice/status')).json()).activeCall).toBeNull();
+  await page.setViewportSize({width:320,height:700});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});
+  expect(piLog()).toBe(before);expect(reservations).toBe(0);expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
+ } finally {fs.writeFileSync(control,JSON.stringify({delay:20}));await page.unroute('**/api/memory/progress');}
+ await page.getByRole('button',{name:'Call Draken',exact:true}).click();
+ await expect(dialog(page).getByRole('status',{name:'Call state'})).toHaveText('Your turn',{timeout:15000});
+ await expect(dialog(page)).not.toContainText('Preparing history');expect(reservations).toBe(1);await end(page);
+});
+
+test('cancelled history preparation can be retried without a call, provider summary or microphone',async({page})=>{
+ const {syncId,root,piLog}=await prepare(page);await nativePeer(page);
+ await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${syncId}/call-readiness`)).json()).ready).toBe(true);
+ await pendingHistory(page,root);
+ const control=path.join(root,'sessions/fake-control.json'),before=piLog();fs.writeFileSync(control,JSON.stringify({delay:20,historyDelay:60000}));
+ try{
+  await page.goto(`/syncs/${syncId}`);await page.getByRole('button',{name:'Prepare history',exact:true}).click();
+  await page.getByRole('button',{name:'Cancel preparation',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('History preparation stopped');
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
+  await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${syncId}/progress`)).json()).busy).toBe(false);
+  await page.reload();await expect(dialog(page)).not.toBeVisible();expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
+  fs.writeFileSync(control,JSON.stringify({delay:20}));await page.getByRole('button',{name:'Prepare history',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});
+  expect(piLog()).toBe(before);expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);await expect(dialog(page)).not.toBeVisible();
+  expect((await(await page.request.get(`/api/syncs/${syncId}`)).json()).status).toBe('open');
+ }finally{fs.writeFileSync(control,JSON.stringify({delay:20}));}
+});
+
+test('a readiness change at click time stays outside the call without capture or a reservation',async({page})=>{
+ const {syncId}=await prepare(page);await nativePeer(page);await page.goto(`/syncs/${syncId}`);
+ await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled();let reservations=0;
+ page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/api/voice/live/calls'))reservations++;});
+ await page.route(`**/api/syncs/${syncId}/call-readiness`,route=>route.fulfill({json:{ready:false,briefingReady:true,historyReady:false,preparing:false,before:null,error:''}}));
+ await page.getByRole('button',{name:'Call Draken',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Prepare history',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();await expect(dialog(page)).not.toBeVisible();
+ expect(reservations).toBe(0);expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
 });
 
 test('microphone denial still allows typed ChatGPT voice, without a local speech fallback', async ({ page }) => {
