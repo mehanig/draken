@@ -9,15 +9,24 @@ import { createReadOnlyBackend } from './backend.mjs';
 
 export const CODEX_VERSION = '0.166.0';
 export const realtimeRoot = path.join(os.homedir(), '.draken', 'realtime');
-export const defaultBinary = path.join(realtimeRoot, 'runtime', 'node_modules', '.bin', 'codex');
+export function codexExecutable(root, platform = process.platform, arch = process.arch) {
+  if (platform !== 'win32') return path.join(root, 'runtime', 'node_modules', '.bin', 'codex');
+  const target = { x64: 'x86_64', arm64: 'aarch64' }[arch];
+  if (!target) throw new Error('Native voice requires Windows x64 or arm64.');
+  // The pinned official optional package contains the actual executable. Own
+  // that process directly: killing a Node/.cmd wrapper on Windows can orphan it.
+  return path.join(root, 'runtime', 'node_modules', '@openai', `codex-win32-${arch}`, 'vendor', `${target}-pc-windows-msvc`, 'bin', 'codex.exe');
+}
+export const defaultBinary = codexExecutable(realtimeRoot);
 export const defaultHome = path.join(realtimeRoot, 'account');
 const exec = promisify(execFile);
 
 // Positive allowlist: no API keys, pi session ownership, cloud credentials,
 // proxy overrides, provider URLs, NODE_OPTIONS, or user agent configuration.
 export function helperEnvironment(home, source = process.env) {
-  const env = { CODEX_HOME: home, HOME: home, RUST_LOG: 'off' };
-  for (const key of ['PATH', 'LANG', 'LC_ALL', 'SYSTEMROOT', 'WINDIR']) if (source[key]) env[key] = source[key];
+  const env = { CODEX_HOME: home, HOME: home, USERPROFILE: home,
+    APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), RUST_LOG: 'off' };
+  for (const key of ['PATH', 'LANG', 'LC_ALL', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP']) if (source[key]) env[key] = source[key];
   return env;
 }
 export function hasNativeLogin(home) {

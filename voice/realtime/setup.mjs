@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { npmCli } from '../../dist/npm-cli.js';
 import { CODEX_VERSION, realtimeRoot, defaultBinary, defaultHome, helperEnvironment, nativeStatus } from './native.mjs';
 
 process.umask(0o077);
@@ -16,7 +17,7 @@ if (flags.length !== 1 || !['--install', '--login', '--check'].includes(flags[0]
   try {
     if (flags[0] === '--install') {
       fs.mkdirSync(realtimeRoot, { recursive: true, mode: 0o700 });
-      await run('npm', ['install', '--prefix', path.join(realtimeRoot, 'runtime'), '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact', `@openai/codex@${CODEX_VERSION}`], helperEnvironment(defaultHome));
+      await run(process.execPath, [npmCli(), 'install', '--prefix', path.join(realtimeRoot, 'runtime'), '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact', `@openai/codex@${CODEX_VERSION}`], helperEnvironment(defaultHome));
     }
     if (flags[0] === '--login') {
       if (!(await nativeStatus()).installed) throw new Error('Run npm run voice:realtime:setup first.');

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { createInterface } from 'readline/promises';
 import { getDataDir } from '../db/schema';
+import { npmCli } from '../npm-cli';
 import { executable, isolatedFlags, managedEnvironment, PI_PACKAGE, PI_VERSION, piPaths, piSetupStatus, privateDirectory, selectedPi } from './runtime';
 
 /** Explicit terminal operations only. This module has no HTTP installation/login route. */
@@ -18,17 +19,6 @@ function run(binary: string, args: string[], env: NodeJS.ProcessEnv, cwd: string
     child.once('error', () => { cleanup(); reject(new Error('Could not start the requested program. Check Node.js/npm and executable permissions.')); });
     child.once('close', code => { cleanup(); if (cancelled) reject(new Error('Operation cancelled or timed out. Existing credentials were retained.')); else if (code !== 0) reject(new Error(`The requested program exited with status ${code ?? 'signal'}.`)); else resolve(); });
   });
-}
-
-function npmCli(): string {
-  const npm = executable('npm');
-  const candidates = [process.env.npm_execpath, npm && fs.realpathSync(npm),
-    path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'),
-    path.resolve(path.dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js'),
-    npm && path.join(path.dirname(npm), 'node_modules/npm/bin/npm-cli.js')];
-  const found = candidates.find(file => file && path.basename(file) === 'npm-cli.js' && fs.existsSync(file));
-  if (!found) throw new Error('npm was not found. Install Node.js 22.19+ with npm, then run draken setup again.');
-  return found;
 }
 
 export async function installPi(yes: boolean): Promise<void> {

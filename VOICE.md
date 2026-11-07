@@ -16,6 +16,8 @@ npm start
 
 No voice-mode setting is needed. An existing `DRAKEN_VOICE_MODE=native` remains accepted so installed launchers keep working. Any other value, including `local`, fails startup rather than silently changing an old privacy choice into cloud audio. Remove obsolete local speech settings from launchers; `voice:setup` no longer exists.
 
+Setup runs npm's resolved JavaScript entry under the current Node executable, without a shell or command-shim evaluation. On Windows x64/arm64, status/login/calls launch the pinned official package's `codex.exe` directly, so the owned child is the native process rather than a `.cmd`/Node wrapper. HOME and Windows profile directories are private to the voice account. Runtime installation/version checks do not qualify sign-in, refresh, WebRTC or physical audio.
+
 The helper and its credentials live under `~/.draken/realtime/`, outside the checkout. Provider credentials never enter the browser. Pi credentials are not copied or converted. Preserve the existing database, dashboard credentials and TLS configuration when updating an installation. No snapshot regeneration is needed to enable voice.
 
 This uses an experimental native interface, not a stable public embedding API. Successful setup or a connection handshake is not proof that an account can receive usable audio. The opt-in probe tests actual audio separately. Quota, idle accounting, coding-allowance impact and future compatibility are not established.

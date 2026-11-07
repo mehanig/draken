@@ -61,7 +61,7 @@ test('native RPC bounds concurrent requests and rejects late responses after shu
 test('native helper environment has no inherited key, provider, proxy or pi ownership fallback', async () => {
   const { helperEnvironment, helperArguments } = await import('../voice/realtime/native.mjs');
   const env = helperEnvironment('/isolated', { PATH: '/bin', LANG: 'en', OPENAI_API_KEY: 'not-a-key', CODEX_API_KEY: 'not-a-key', PI_SESSION_ID: 'private', HTTPS_PROXY: 'http://bad', NODE_OPTIONS: '--bad', HOME: '/private' });
-  assert.deepEqual(env, { HOME: '/isolated', CODEX_HOME: '/isolated', RUST_LOG: 'off', PATH: '/bin', LANG: 'en' });
+  assert.deepEqual(env, { HOME: '/isolated', USERPROFILE: '/isolated', APPDATA: path.join('/isolated', 'AppData', 'Roaming'), LOCALAPPDATA: path.join('/isolated', 'AppData', 'Local'), CODEX_HOME: '/isolated', RUST_LOG: 'off', PATH: '/bin', LANG: 'en' });
   const args = helperArguments('http://127.0.0.1:9/v1');
   assert.ok(args.includes('forced_login_method="chatgpt"')); assert.ok(args.includes('model_provider="draken_readonly"'));
   assert.ok(args.includes('model_providers.draken_readonly.base_url="http://127.0.0.1:9/v1"'));
