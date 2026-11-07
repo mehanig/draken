@@ -1,7 +1,7 @@
 {
   "name": "draken",
-  "version": "0.1.6",
-  "description": "Local-first engineering sync across coding-agent sessions",
+  "version": "0.2.0",
+  "description": "Read-only summaries and discussion of your coding-agent sessions",
   "main": "dist/server.js",
   "bin": {
     "draken": "./dist/cli.js"
@@ -50,7 +50,8 @@
     "SOURCES.md",
     "SETUP.md",
     "ACCEPTANCE.md",
-    "CONTRIBUTING.md"
+    "CONTRIBUTING.md",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "pi",
