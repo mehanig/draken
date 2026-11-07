@@ -14,6 +14,7 @@ on:
       - 'voice/realtime/**'
       - 'tests/native-launch.test.cjs'
       - 'tests/runtime-smoke.cjs'
+      - 'tests/realtime-native.cjs'
       - 'tray/**'
       - 'tests/tray*'
       - 'tests/fixtures/fake-tray-worker.cjs'

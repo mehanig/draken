@@ -39,6 +39,8 @@ const server=http.createServer((req,res)=>{
  run(['voice','setup']);
  const voice=JSON.parse(run(['voice','status']));
  assert.equal(voice.installed,true);assert.equal(voice.nativeLoginPresent,false);assert.equal(voice.readyForProbe,false);assert.equal(voice.audioVerified,false);
+ const native=execFileSync(process.execPath,[path.join(__dirname,'realtime-native.cjs')],{env,encoding:'utf8',timeout:60000,maxBuffer:64000}).trim().split('\n').map(JSON.parse);
+ assert.equal(native.length,2);assert.ok(native.every(result=>result.executedTools===0&&result.realCredentialsUsed===false&&result.backingAttempts===1));
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  fs.writeFileSync(path.join(piPaths().agent,'models.json'),JSON.stringify({providers:{'usage-fixture':{baseUrl:`http://127.0.0.1:${server.address().port}/v1`,api:'openai-responses',apiKey:'synthetic-fixture-key',models:[{id:'summary',reasoning:true,input:['text'],contextWindow:32768,maxTokens:1024,cost:{input:1,output:2,cacheRead:.1,cacheWrite:1}}]}}}));
  const {invokePi}=require('../dist/sync/pi');let accounting;
@@ -48,7 +50,7 @@ const server=http.createServer((req,res)=>{
  assert.deepEqual(accounting.tokens,{input:100,output:10,cache_read:20,cache_write:0,reasoning:2});
  reported=false;assert.equal(await invokePi('Return the synthetic result without usage.',options),text);
  assert.equal(accounting.cost_usd,null);assert.equal(accounting.complete,false);assert.equal(requests,2);
- console.log(JSON.stringify({platform:process.platform,privatePi:PI_VERSION,voice,syntheticLoopbackRequests:requests,realProviderCalls:0,realCredentialsUsed:false}));
+ console.log(JSON.stringify({platform:process.platform,privatePi:PI_VERSION,voice,syntheticLoopbackRequests:{pi:requests,native:2},nativeRpcAndExitVerified:true,realProviderCalls:0,realCredentialsUsed:false}));
 })().catch(error=>{console.error(error.message);process.exitCode=1;}).finally(async()=>{
  await new Promise(resolve=>server.close(resolve));fs.rmSync(root,{recursive:true,force:true});
 });
