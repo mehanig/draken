@@ -29,11 +29,14 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.match(await page.locator('#get-started').innerText(),/not published yet/);
   assert.match(await page.locator('.release-note').innerText(),/0\.1\.6.*old task dashboard/);
+  assert.doesNotMatch(await page.locator('.release-note').innerText(),/draken@/i,'avoid Cloudflare treating the package version as an email address');
+  assert.match(await page.locator('.findings').innerText(),/Export uploads now retry when they fail/);
   await page.getByRole('button',{name:'Inspect source E03',exact:true}).click();
-  assert.match(await page.locator('#source-quote').innerText(),/Deployment has not been checked/);
+  assert.match(await page.locator('#source-quote').innerText(),/I haven’t checked the live site yet/);
   assert.equal(await page.getByRole('button',{name:'Inspect source E03',exact:true}).getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'Inspect source E01',exact:true}).focus();await page.keyboard.press('Enter');
-  assert.match(await page.locator('#source-quote').innerText(),/bounded retry/);
+  assert.match(await page.locator('#source-quote').innerText(),/retries for failed export uploads/);
+  assert.match(await page.locator('#source-qualification').innerText(),/hasn’t checked the code itself/);
   await page.getByText('Do I have to use voice?',{exact:false}).click();
   assert.match(await page.locator('.faq details[open]').innerText(),/without a microphone/);
   assert.equal(await page.evaluate(()=>window.__captures),0);
