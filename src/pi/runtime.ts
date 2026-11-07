@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { getDataDir } from '../db/schema';
 import { defaultModels } from '../sync/store';
 
-export const PI_VERSION = '1.4.0';
+export const PI_VERSION = '1.5.0';
 export const PI_PACKAGE = '@earendil-works/pi-coding-agent';
 export const isolatedFlags = ['--no-session', '--no-tools', '--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files', '--no-approve', '--offline'];
 import type { PiSetupStatus } from '../types';

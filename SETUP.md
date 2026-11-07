@@ -43,13 +43,15 @@ draken login
 
 `draken setup` explains the destination and asks for confirmation. In an unattended terminal, `draken setup --yes` is explicit installation consent; npm package installation, server startup and browser requests never run it automatically.
 
-The installer uses the shipped `runtime/pi/package.json` and **package-lock.json**, with pi **1.4.0**, resolved npm dependency versions and integrity hashes. It runs `npm ci --ignore-scripts --omit=dev`, without audit/funding requests or user npm configuration. No global packages or PATH entries are changed. Dependencies come from the npm registry; this is an explicit network download, not a model request.
+The installer uses the shipped `runtime/pi/package.json` and **package-lock.json**, with pi **1.5.0**, resolved npm dependency versions and integrity hashes. It runs `npm ci --ignore-scripts --omit=dev`, without audit/funding requests or user npm configuration. No global packages or PATH entries are changed. Dependencies come from the npm registry; this is an explicit network download, not a model request.
+
+The 1.5.0 lock replaces the previously shipped 1.4.0 lock with affected `undici`/`minimatch` dependencies. Updating Draken does **not** silently replace an already selected runtime: run `draken setup` explicitly to select the new private runtime while retaining the same private credential directory. External pi installations remain operator-managed. A clean audit of the shipped lock does not certify an older selected or external installation.
 
 Default layout (under `DRAKEN_DATA_DIR` when overridden):
 
 ```text
 ~/.draken/pi/
-  runtime/1.4.0-<lock-hash>/   immutable selected runtime directory
+  runtime/1.5.0-<lock-hash>/   immutable selected runtime directory
   selected.json              small, atomically replaced runtime selection
   agent/                     pi's private configuration and auth.json
   home/                      private child HOME and npm cache
