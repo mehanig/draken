@@ -3,7 +3,12 @@
 $ErrorActionPreference = 'Stop'
 [Console]::Out.WriteLine('{"type":"progress","phase":"configuring-output"}')
 [Console]::Out.Flush()
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$ProgressPreference = 'SilentlyContinue'
+$PSModuleAutoLoadingPreference = 'None'
+# Load only the required system module, not user module discovery (which can
+# spend 30+ seconds scanning a fresh Windows profile before the first cmdlet).
+Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
 [Console]::Out.WriteLine('{"type":"progress","phase":"loading-frameworks"}')
 [Console]::Out.Flush()
 Add-Type -AssemblyName System.Windows.Forms
@@ -11,18 +16,18 @@ Add-Type -AssemblyName System.Drawing
 if (-not [System.Windows.Forms.SystemInformation]::UserInteractive) { throw 'An interactive Windows desktop is required' }
 $statePath = $env:DRAKEN_TRAY_STATE
 $assets = $env:DRAKEN_TRAY_ASSETS
-$tray = New-Object System.Windows.Forms.NotifyIcon
-$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$tray = [System.Windows.Forms.NotifyIcon]::new()
+$menu = [System.Windows.Forms.ContextMenuStrip]::new()
 $items = @{}
 $icons = @{}
-$timer = New-Object System.Windows.Forms.Timer
+$timer = [System.Windows.Forms.Timer]::new()
 
 function Emit($value) {
     [Console]::Out.WriteLine(($value | ConvertTo-Json -Compress))
     [Console]::Out.Flush()
 }
 function Add-Item($id, $text, $actionable) {
-    $item = New-Object System.Windows.Forms.ToolStripMenuItem
+    $item = [System.Windows.Forms.ToolStripMenuItem]::new()
     $item.Text = $text
     $item.Tag = $id
     $item.Enabled = $actionable
@@ -35,11 +40,11 @@ function Add-Item($id, $text, $actionable) {
 function Update-State {
     # Allow atomic replacement while the parent publishes the next heartbeat.
     $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
-    $stream = New-Object System.IO.FileStream($statePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+    $stream = [System.IO.FileStream]::new($statePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
     $reader = $null
     try {
         if ($stream.Length -gt 16384) { throw 'Invalid tray state' }
-        $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
         $state = $reader.ReadToEnd() | ConvertFrom-Json
     } finally {
         if ($null -ne $reader) { $reader.Dispose() } else { $stream.Dispose() }
@@ -64,15 +69,15 @@ function Update-State {
 try {
     Emit @{type='progress'; phase='creating-menu'}
     foreach ($phase in @('running','stopped','starting','stopping','error')) {
-        $icons[$phase] = New-Object System.Drawing.Icon((Join-Path $assets ($phase + '.ico')))
+        $icons[$phase] = [System.Drawing.Icon]::new([System.IO.Path]::Combine($assets, ($phase + '.ico')))
     }
     Add-Item 'status' 'Draken - Starting' $false
     Add-Item 'detail' 'Checking server' $false
-    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    [void]$menu.Items.Add([System.Windows.Forms.ToolStripSeparator]::new())
     Add-Item 'open' 'Open Draken' $true
     Add-Item 'start' 'Start Draken (current settings)' $true
     Add-Item 'stop' 'Stop Draken (ends active calls)' $true
-    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    [void]$menu.Items.Add([System.Windows.Forms.ToolStripSeparator]::new())
     Add-Item 'quit' 'Quit tray' $true
     $tray.ContextMenuStrip = $menu
     $tray.add_DoubleClick({ if ($items.open.Enabled) { Emit @{type='action'; action='open'} } })

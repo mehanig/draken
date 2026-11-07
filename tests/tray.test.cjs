@@ -9,7 +9,11 @@ test('Windows tray transport preserves the fixed Unicode program without shell o
  const command=nativeCommand('win32','C:\\Windows');
  assert.match(command.executable,/powershell\.exe$/);
  assert.deepEqual(command.args.slice(0,-1),['-NoLogo','-NoProfile','-NonInteractive','-STA','-WindowStyle','Hidden','-EncodedCommand']);
- assert.equal(Buffer.from(command.args.at(-1),'base64').toString('utf16le'),fs.readFileSync(path.join(__dirname,'../tray/windows.ps1'),'utf8'));
+ const program=Buffer.from(command.args.at(-1),'base64').toString('utf16le');
+ assert.equal(program,fs.readFileSync(path.join(__dirname,'../tray/windows.ps1'),'utf8'));
+ assert.doesNotMatch(program,/New-Object|Join-Path/);
+ assert.match(program,/\$PSModuleAutoLoadingPreference = 'None'/);
+ assert.match(program,/Import-Module \(\$PSHOME/);
  assert.throws(()=>nativeCommand('linux','/synthetic'),/Unsupported/);
 });
 const {probeServer}=require('../dist/server-status');

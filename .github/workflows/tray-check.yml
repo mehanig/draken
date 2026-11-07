@@ -33,9 +33,6 @@ jobs:
       - run: npm ci
       - run: npm run build:server
       - run: node --test tests/tray.test.cjs
-      - name: Diagnose Windows framework startup
-        if: runner.os == 'Windows'
-        run: node tests/windows-startup.cjs
       - run: npm run test:tray:native
       # Startup/update/exit is not proof that a person can see or click the icon.
       # Manual menu, browser, close-terminal, logout and OS-policy checks remain.
