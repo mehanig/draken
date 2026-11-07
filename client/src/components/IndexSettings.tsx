@@ -26,7 +26,7 @@ export function IndexSettings() {
     scanning: 'Checking session sources', indexing: 'Indexing in the background', paused: 'Paused for foreground work', stopping: 'Stopping background work', error: 'Background indexing needs attention' })[settings.phase];
   return <>
     <button type="button" className="btn btn-secondary header-settings" aria-haspopup="dialog" onClick={() => setOpen(true)}><Settings size={16} aria-hidden="true" />Settings</button>
-    <dialog ref={dialog} className="settings-dialog" aria-labelledby="settings-title" onCancel={() => setOpen(false)} onClose={() => setOpen(false)}>
+    <dialog ref={dialog} className="settings-dialog" aria-labelledby="settings-title" onCancel={event => { event.preventDefault(); setOpen(false); }} onClose={event => { if (!event.currentTarget.open) setOpen(false); }}>
     <div className="section-heading"><h2 id="settings-title">Settings</h2><button type="button" className="icon-button" aria-label="Close settings" autoFocus onClick={() => setOpen(false)}><X size={18} aria-hidden="true" /></button></div>
     <label className="index-toggle"><input type="checkbox" role="switch" checked={settings?.enabled || false} disabled={!settings || saving}
       onChange={async event => { const enabled = event.target.checked, previous = settings; setSaving(true); setError('');

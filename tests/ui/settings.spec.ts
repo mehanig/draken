@@ -17,6 +17,22 @@ async function openSources(page: Page) {
   return dialog;
 }
 
+test('a queued close event cannot dismiss a newly reopened settings dialog', async ({ page }) => {
+  await page.goto('/');
+  const trigger = page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  for (let cycle = 0; cycle < 3; cycle++) {
+    await trigger.click(); await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape'); await expect(trigger).toBeFocused();
+    await page.keyboard.press('Enter'); await expect(dialog).toBeVisible();
+    // Native close events are queued: the previous close can arrive after showModal().
+    await dialog.evaluate(element => element.dispatchEvent(new Event('close')));
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close settings' }).click();
+    await expect(dialog).not.toBeVisible();
+  }
+});
+
 test('settings inventory shows recorded sources; scan, selection and missing-source states remain explicit', async ({ page }) => {
   await nativePeer(page);
   const before = await inventory(page), homeBefore = await (await page.request.get('/api/home')).json();
