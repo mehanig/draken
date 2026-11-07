@@ -45,7 +45,7 @@ export function nativeTray(statePath: string, action: (action: TrayAction) => vo
       try {
         const message = JSON.parse(line);
         if (message.type === 'ready' && !readySeen) { readySeen = true; clearTimeout(timer); resolveReady(); }
-        else if (message.type === 'progress' && !readySeen && ['loading-frameworks', 'creating-menu', 'showing-icon'].includes(message.phase)) phase = message.phase;
+        else if (message.type === 'progress' && !readySeen && ['configuring-output', 'loading-frameworks', 'creating-menu', 'showing-icon'].includes(message.phase)) phase = message.phase;
         else if (message.type === 'action' && readySeen && ['open', 'start', 'stop', 'quit'].includes(message.action)) action(message.action);
         else { fail(); return; }
       } catch { fail(); return; }

@@ -14,4 +14,7 @@ async function probe(name,env,args){
  await probe('inherited-plain',process.env,['-Command',code]);
  await probe('allowlist-plain',env,['-Command',code]);
  await probe('allowlist-encoded',env,['-STA','-WindowStyle','Hidden','-EncodedCommand',encoded]);
+ for(const [name,prefix] of [['new-object','[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false);'],['constructor','[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);']]) {
+  await probe(name,env,['-EncodedCommand',Buffer.from(prefix+code,'utf16le').toString('base64')]);
+ }
 })().catch(error=>{console.error(error);process.exitCode=1;});
