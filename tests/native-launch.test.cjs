@@ -10,7 +10,7 @@ test('npm resolution runs JS under current Node, never the command shim or shell
   const cli=path.join(directory,'npm-cli.js');fs.writeFileSync(cli,'console.log(JSON.stringify(process.argv.slice(2)))');
   fs.writeFileSync(path.join(root,'npm.cmd'),'THIS SHIM MUST NEVER EXECUTE');
   const found=npmCli({PATH:root,npm_execpath:path.join(root,'npm.cmd')},path.join(root,'elsewhere','node.exe'));
-  assert.equal(found,cli);
+  assert.equal(fs.realpathSync(found),fs.realpathSync(cli)); // macOS /var aliases /private/var.
   const args=['install','space & semicolon; literal','quote\'s'];
   assert.deepEqual(JSON.parse(execFileSync(process.execPath,[found,...args],{encoding:'utf8',shell:false})),args);
   assert.throws(()=>npmCli({PATH:''},path.join(root,'missing','node.exe')),/npm was not found/);
