@@ -2,14 +2,14 @@
 
 Draken uses **pi for summaries, preparation recaps and text discussion**, regardless of which coding agent produced the imported history. It does not implement provider OAuth, translate another agent's credentials, or run Claude/Codex to summarize.
 
-> **Release status:** the engineering-sync version has not been published to npm yet. Public npm **0.1.6** is the old task dashboard. The installation instructions below are for the upcoming release.
+> **Version note:** this guide is for **Draken 0.2.0**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md).
 
 ## Install and start
 
 Install Node.js **22.19+** with npm, then run:
 
 ```sh
-npm install -g draken
+npm install -g draken@0.2.0
 draken
 ```
 

@@ -20,10 +20,10 @@ Draken remembers which evidence a finished sync covered, what you decided, and w
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-> **Release status:** the engineering-sync version has not been published to npm yet. Public npm **0.1.6** is the old task dashboard. The installation instructions below are for the upcoming release.
+> **Version note:** these instructions are for **Draken 0.2.0**. Versions **0.1.6 and earlier** are the old task dashboard, not this application. Back up your original agent logs and Draken data before upgrading; see [what changed](CHANGELOG.md).
 
 ```sh
-npm install -g draken
+npm install -g draken@0.2.0
 draken
 ```
 
