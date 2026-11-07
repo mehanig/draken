@@ -4,6 +4,14 @@ const {spawn}=require('node:child_process');
 const {TrayController}=require('../dist/tray/controller');
 const {launchServer,openBrowser}=require('../dist/tray/processes');
 const {assertTrayDesktop}=require('../dist/tray/launcher');
+const {nativeCommand}=require('../dist/tray/native');
+test('Windows tray transport preserves the fixed Unicode program without shell or execution-policy overrides',()=>{
+ const command=nativeCommand('win32','C:\\Windows');
+ assert.match(command.executable,/powershell\.exe$/);
+ assert.deepEqual(command.args.slice(0,-1),['-NoLogo','-NoProfile','-NonInteractive','-STA','-WindowStyle','Hidden','-EncodedCommand']);
+ assert.equal(Buffer.from(command.args.at(-1),'base64').toString('utf16le'),fs.readFileSync(path.join(__dirname,'../tray/windows.ps1'),'utf8'));
+ assert.throws(()=>nativeCommand('linux','/synthetic'),/Unsupported/);
+});
 const {probeServer}=require('../dist/server-status');
 const {serverTarget,recordedServerTarget}=require('../dist/server-state');
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject};};

@@ -6,6 +6,18 @@ import type { TrayAction } from './controller';
 
 export interface TrayHelper { ready: Promise<void>; exited: Promise<void>; close(): Promise<void> }
 
+export function nativeCommand(platform: NodeJS.Platform, systemRoot: string) {
+  const root = path.join(__dirname, '../../tray');
+  if (platform === 'darwin') return { executable: '/usr/bin/osascript', args: ['-l', 'JavaScript', path.join(root, 'macos.js')] };
+  if (platform !== 'win32') throw new Error('Unsupported tray platform');
+  // PowerShell parses its command line differently from a conventional Windows
+  // argv consumer. UTF-16LE encoding preserves the fixed program verbatim; it
+  // does not change execution policy or interpolate presentation/user data.
+  const program = Buffer.from(fs.readFileSync(path.join(root, 'windows.ps1'), 'utf8'), 'utf16le').toString('base64');
+  return { executable: path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-WindowStyle', 'Hidden', '-EncodedCommand', program] };
+}
+
 export function nativeTray(statePath: string, action: (action: TrayAction) => void): TrayHelper {
   const root = path.join(__dirname, '../../tray');
   const env: NodeJS.ProcessEnv = {};
@@ -16,18 +28,10 @@ export function nativeTray(statePath: string, action: (action: TrayAction) => vo
   // inherited preload hooks. Only a private, bounded presentation file.
   env.DRAKEN_TRAY_STATE = statePath;
   env.DRAKEN_TRAY_ASSETS = path.join(root, 'assets');
-  const mac = process.platform === 'darwin';
-  if (!mac && process.platform !== 'win32') throw new Error('Unsupported tray platform');
-  const executable = mac ? '/usr/bin/osascript' : path.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const args = mac ? ['-l', 'JavaScript', path.join(root, 'macos.js')] : [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-WindowStyle', 'Hidden',
-    // Fixed, packaged program, never interpolated user input. No execution-policy
-    // changes; managed application-control/constrained-language failures surface.
-    '-Command', fs.readFileSync(path.join(root, 'windows.ps1'), 'utf8'),
-  ];
+  const { executable, args } = nativeCommand(process.platform, env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows');
   const child = spawn(executable, args, { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
-  let resolveReady: () => void, rejectReady: (error: Error) => void, readySeen = false, finished = false, diagnostic = '';
-  const failure = () => new Error(`Native tray could not start. Check desktop availability and OS application-control policies.${diagnostic ? ' ' + diagnostic.slice(-800).trim() : ''}`);
+  let resolveReady: () => void, rejectReady: (error: Error) => void, readySeen = false, finished = false, diagnostic = '', phase = 'launching';
+  const failure = () => new Error(`Native tray could not start (${phase}). Check desktop availability and OS application-control policies.${diagnostic ? ' ' + diagnostic.slice(-800).trim() : ''}`);
   const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   const fail = () => { rejectReady(failure()); child.kill(); };
   const timer = setTimeout(fail, 10_000);
@@ -41,6 +45,7 @@ export function nativeTray(statePath: string, action: (action: TrayAction) => vo
       try {
         const message = JSON.parse(line);
         if (message.type === 'ready' && !readySeen) { readySeen = true; clearTimeout(timer); resolveReady(); }
+        else if (message.type === 'progress' && !readySeen && ['loading-frameworks', 'creating-menu', 'showing-icon'].includes(message.phase)) phase = message.phase;
         else if (message.type === 'action' && readySeen && ['open', 'start', 'stop', 'quit'].includes(message.action)) action(message.action);
         else { fail(); return; }
       } catch { fail(); return; }

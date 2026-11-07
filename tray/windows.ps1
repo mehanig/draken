@@ -2,6 +2,8 @@
 # never evaluates presentation data or changes execution/application-control policy.
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+[Console]::Out.WriteLine('{"type":"progress","phase":"loading-frameworks"}')
+[Console]::Out.Flush()
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 if (-not [System.Windows.Forms.SystemInformation]::UserInteractive) { throw 'An interactive Windows desktop is required' }
@@ -58,6 +60,7 @@ function Update-State {
     $items.quit.Text = if ($state.owned) { 'Quit tray and stop Draken' } else { 'Quit tray (leave server running)' }
 }
 try {
+    Emit @{type='progress'; phase='creating-menu'}
     foreach ($phase in @('running','stopped','starting','stopping','error')) {
         $icons[$phase] = New-Object System.Drawing.Icon((Join-Path $assets ($phase + '.ico')))
     }
@@ -72,6 +75,7 @@ try {
     $tray.ContextMenuStrip = $menu
     $tray.add_DoubleClick({ if ($items.open.Enabled) { Emit @{type='action'; action='open'} } })
     Update-State
+    Emit @{type='progress'; phase='showing-icon'}
     $tray.Visible = $true
     $timer.Interval = 500
     $timer.add_Tick({
