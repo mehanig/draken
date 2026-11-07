@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="A visual, plain-English guide to Draken: fixed snapshots, cached summaries, conversation memory, ChatGPT voice, storage and safety boundaries.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%239136d8' d='M0 0h32v32H0z'/%3E%3Cpath fill='%23f2c230' d='M8 6h8a10 10 0 0 1 0 20H8V6zm6 6v8h2a4 4 0 0 0 0-8h-2z'/%3E%3C/svg%3E">
+  <title>Inside Draken — a visual architecture guide</title>
+  <style>
+    :root{--paper:#c7c6c0;--panel:#deddd7;--light:#eeede7;--ink:#111;--muted:#4f4d47;--purple:#9136d8;--yellow:#f2c230;--blue:#1746a2;--red:#e33b2e;--green:#0b7a53;--line:2px solid var(--ink);font-family:"Avenir Next",Futura,"Century Gothic","Arial Narrow",Arial,sans-serif;color:var(--ink);background:var(--paper);font-size:16px;line-height:1.65}
+    *{box-sizing:border-box}body{margin:0;background-image:linear-gradient(#11100006 1px,transparent 1px),linear-gradient(90deg,#11100006 1px,transparent 1px);background-size:32px 32px}a{color:var(--blue);text-underline-offset:4px}a:hover{text-decoration-thickness:3px}a:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline-offset:5px}p{margin:0 0 1em}p:last-child{margin-bottom:0}h1,h2,h3,h4{line-height:1.12;letter-spacing:-.035em;margin:0}h1,h2{text-transform:uppercase}h1{font-size:clamp(2.7rem,6vw,5.6rem);font-weight:900;max-width:920px}h2{font-size:clamp(1.85rem,3.4vw,2.85rem);font-weight:900;max-width:810px}h3{font-size:1.2rem;margin-bottom:.55em}h4{font-size:1rem;margin-bottom:.4em}strong{font-weight:800}code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.83em}code{overflow-wrap:anywhere}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}ul{padding-left:1.3em;margin:.6em 0 0}li+li{margin-top:.35em}section{scroll-margin-top:24px}::selection{background:var(--yellow);color:var(--ink)}
+    .skip{position:absolute;left:16px;top:-100px;padding:10px 18px;background:var(--yellow);border:var(--line);z-index:5}.skip:focus{top:12px}.wrap{width:min(1280px,calc(100% - 64px));margin:auto}.masthead{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:24px 0;border-bottom:var(--line)}.brand{display:flex;align-items:center;gap:12px;font-size:1.25rem;font-weight:900;letter-spacing:.04em;color:var(--ink);text-decoration:none}.brand svg{width:36px;height:36px}.eyebrow,.tag,.number,.lane-label,.kicker{font-size:.72rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.masthead .eyebrow{text-align:right}.hero{padding:58px 0 42px}.hero .eyebrow{display:inline-block;background:var(--yellow);border:var(--line);padding:5px 11px;margin-bottom:24px}.hero .intro{max-width:790px;font-size:1.2rem;line-height:1.6;margin:24px 0}.hero-facts{display:flex;flex-wrap:wrap;gap:10px}.tag{border:var(--line);background:var(--panel);padding:7px 12px;letter-spacing:.06em}.hero-note{margin-top:22px;font-size:.88rem;max-width:840px;color:var(--muted)}
+    .layout{display:grid;grid-template-columns:205px minmax(0,1fr);gap:38px;padding-bottom:64px;align-items:start}.toc{position:sticky;top:22px;border-top:5px solid var(--ink);padding-top:15px;font-size:.85rem;max-height:calc(100vh - 44px);overflow:auto}.toc p{font-size:.7rem;font-weight:900;letter-spacing:.15em;text-transform:uppercase;margin:0 0 12px}.toc ol{list-style:none;margin:0;padding:0}.toc a{display:flex;gap:9px;color:var(--ink);text-decoration:none;padding:8px 4px;border-bottom:1px solid #1113;line-height:1.4}.toc a:hover{background:var(--yellow)}.toc span{font-family:ui-monospace,monospace;color:var(--muted);font-size:.7rem;padding-top:2px}.toc .toc-note{font-size:.75rem;line-height:1.55;font-weight:400;letter-spacing:0;text-transform:none;margin-top:18px;color:var(--muted)}main{min-width:0}.chapter{background:var(--panel);border:var(--line);padding:32px;margin-bottom:32px}.chapter.feature{box-shadow:8px 8px 0 var(--purple);margin-right:8px}.section-head{display:flex;gap:14px;align-items:baseline;margin-bottom:22px}.section-head h2{min-width:0;overflow-wrap:anywhere}.number{display:grid;place-items:center;flex:0 0 36px;min-height:36px;background:var(--ink);color:var(--light);font-size:.85rem;letter-spacing:0}.lead{font-size:1.04rem;max-width:780px}.why{border-left:5px solid var(--purple);padding:10px 0 10px 16px;margin-top:22px;font-size:.94rem}.why strong:first-child{color:#582080}.note{padding:15px 18px;background:var(--light);border:var(--line);margin:20px 0 0;font-size:.9rem}.note.yellow{background:#fff0b8}.note.blue{background:#e1e7f2}.small{font-size:.85rem;color:var(--muted)}.two,.three{display:grid;gap:16px;margin:20px 0}.two{grid-template-columns:repeat(2,minmax(0,1fr))}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.card{border:var(--line);background:var(--light);padding:20px;min-width:0}.card p,.card li{font-size:.9rem}.card .kicker{color:var(--muted);margin-bottom:10px}.card.yellow{box-shadow:4px 4px 0 var(--yellow)}.card.blue{border-top:6px solid var(--blue)}.card.purple{border-top:6px solid var(--purple)}.card.green{border-top:6px solid var(--green)}
+    .diagram{margin:24px 0;background:var(--light);border:var(--line);padding:22px}.diagram figcaption{font-size:.78rem;color:var(--muted);margin-top:17px;line-height:1.5}.lane-label{margin-bottom:14px;color:var(--muted)}.core-flow{display:grid;grid-template-columns:minmax(0,1fr) 90px minmax(0,1.1fr);align-items:center;gap:12px}.node{border:var(--line);background:var(--panel);padding:16px;min-width:0;position:relative}.node b{display:block;font-size:1rem;line-height:1.25;margin-bottom:8px}.node p{font-size:.85rem;line-height:1.55}.node.server{background:var(--yellow);box-shadow:4px 4px 0 var(--ink)}.node.browser{border-top:6px solid var(--purple)}.edge{text-align:center;font-size:.65rem;line-height:1.4;color:var(--muted);font-weight:800}.edge .arrow{display:block;font-size:2rem;line-height:1.25;color:var(--ink)}.branch-label{text-align:center;font-size:.78rem;padding:22px 0 12px;font-weight:700}.branches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.branch{border:var(--line);padding:15px;background:#f6f5f0}.branch .kicker{font-size:.63rem;color:var(--muted);margin-bottom:6px}.branch h3{font-size:1rem}.branch p{font-size:.83rem;line-height:1.55}.cloud-strip{border-top:2px dashed var(--blue);margin-top:20px;padding-top:15px}.cloud-strip p{font-size:.86rem}.connection{display:flex;justify-content:center;align-items:center;gap:16px;background:#e1e7f2;border:var(--line);padding:12px;text-align:center;font-size:.83rem}.connection .arrow{font-size:1.5rem}.connection b{display:block}.connection .sub{font-size:.74rem;color:var(--muted)}
+    .flow{list-style:none;padding:0;margin:24px 0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.flow li{margin:0;border:var(--line);padding:13px 10px;background:var(--light);position:relative}.flow .step{font-size:.68rem;display:block;color:var(--muted);margin-bottom:12px;font-weight:800}.flow strong{display:block;line-height:1.2;margin-bottom:9px}.flow p{font-size:.8rem;line-height:1.55}.flow li:not(:last-child)::after{content:'→';position:absolute;right:-11px;top:36px;z-index:1;font-weight:900;background:var(--panel);line-height:1}.flow li:last-child{background:#e0eee5}
+    .table-wrap{margin:22px 0}table{border-collapse:collapse;width:100%;font-size:.87rem;table-layout:fixed;text-align:left}th,td{border-bottom:1px solid #1115;padding:12px 10px;vertical-align:top;overflow-wrap:anywhere}th{font-size:.73rem;letter-spacing:.04em;text-transform:uppercase;border-top:var(--line);border-bottom:var(--line);background:var(--light)}td:first-child{font-weight:700}td code{font-weight:400}table th:first-child{width:30%}.status{display:inline-block;padding:2px 6px;border:1px solid var(--ink);font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;background:var(--light)}.status.held{background:#fff0b8}.status.done{background:#dfeee4}.state-line{display:grid;grid-template-columns:1fr 28px 1fr 28px 1fr;align-items:stretch;gap:5px}.state-line .node{text-align:center;padding:14px 9px}.state-line .edge{align-self:center}.state-line .node small{display:block;font-size:.76rem;line-height:1.45}.state-line .node.held{background:#fff0b8}.state-line .node.done{background:#dfeee4}.formula{padding:13px 16px;background:var(--ink);color:var(--light);font-size:.85rem;line-height:1.6;margin-top:18px}.formula b{color:var(--yellow)}
+    .tree-row{display:grid;gap:10px;position:relative}.tree-row.leaves{grid-template-columns:repeat(4,minmax(0,1fr))}.tree-row.sessions{grid-template-columns:repeat(2,minmax(0,1fr))}.tree-cell{border:var(--line);padding:13px 10px;text-align:center;font-size:.82rem;background:var(--panel);line-height:1.45;min-width:0}.tree-cell b{display:block;margin-bottom:3px}.tree-cell.final{background:var(--yellow);box-shadow:4px 4px 0 var(--purple)}.tree-cell.final b{font-size:1.1rem}.tree-cell.merge{background:#e8dcf1}.tree-join{text-align:center;position:relative;padding:11px 0;font-size:.7rem;color:var(--muted);font-weight:700}.tree-join::before{content:'↓';display:block;font-size:1.5rem;line-height:1;color:var(--ink);margin-bottom:5px}.tree-caption{margin-top:18px;border-top:1px solid #1115;padding-top:12px;font-size:.8rem;text-align:center}
+    details{margin-top:18px;border:var(--line);background:var(--light)}summary{cursor:pointer;font-size:.9rem;font-weight:800;padding:13px 16px}details[open] summary{border-bottom:1px solid #1115}details>div{padding:17px;font-size:.9rem}details>div p:last-child{margin:0}.label-row{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.label-row code{border:var(--line);padding:4px 8px;background:var(--light)}.voice-path{margin-top:18px}.voice-path .path-title{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:900;margin-bottom:8px}.voice-chain{display:flex;align-items:stretch;gap:8px}.voice-chain .node{flex:1;padding:13px 10px}.voice-chain .node b{font-size:.88rem}.voice-chain .node p{font-size:.78rem}.voice-chain .edge{align-self:center}.limits{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:22px 0}.limit{border:var(--line);padding:13px 10px;background:var(--light);text-align:center}.limit strong{font-size:1.75rem;display:block;line-height:1.15}.limit span{display:block;font-size:.73rem;line-height:1.45;margin-top:6px}.no{border-left:5px solid var(--red);padding-left:15px}.yes{border-left:5px solid var(--green);padding-left:15px}.code-box{background:var(--ink);color:var(--light);padding:20px;margin:20px 0}.code-box .comment{color:#c9c7bc}.build-line{padding:15px;border:var(--line);background:var(--light);margin-top:12px;font-size:.9rem}.build-line strong{display:block;margin-bottom:4px}.file-map th:first-child{width:35%}.file-map code{display:block;font-size:.83em}.footer{border-top:var(--line);padding:24px 0 40px;display:flex;justify-content:space-between;gap:24px;font-size:.84rem}.footer p{max-width:800px}.footer a{white-space:nowrap}
+    @media(min-width:1400px){.chapter{padding:38px}}
+    @media(max-width:1100px){.layout{grid-template-columns:170px minmax(0,1fr);gap:26px}.chapter{padding:25px}.flow{grid-template-columns:1fr}.flow li{padding:14px 16px 14px 58px}.flow .step{position:absolute;left:16px;top:16px}.flow li:not(:last-child)::after{content:'↓';right:auto;left:25px;top:auto;bottom:-12px}.flow strong{margin-bottom:4px}.flow p{font-size:.86rem}.three{grid-template-columns:1fr}.three .card{padding:18px}}
+    @media(max-width:850px){.wrap{width:calc(100% - 40px)}.layout{display:block}.toc{position:static;max-height:none;margin-bottom:28px;overflow:visible}.toc ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 16px}.toc .toc-note{display:none}.hero{padding-top:38px}.hero .intro{font-size:1.08rem}.masthead .eyebrow{font-size:.62rem;max-width:170px}.chapter{padding:25px}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.three .card{padding:15px}.three h3{font-size:1.05rem}}
+    @media(max-width:620px){.wrap{width:calc(100% - 28px)}.hero{padding:30px 0}.hero .eyebrow{font-size:.63rem;letter-spacing:.06em;margin-bottom:20px}.hero-facts{gap:7px}.tag{font-size:.64rem;padding:5px 8px}.toc ol{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}.toc a{font-size:.76rem}.chapter{padding:20px 16px;margin-bottom:24px}.chapter.feature{box-shadow:5px 5px 0 var(--purple);margin-right:5px}.section-head{gap:10px;align-items:start}.number{flex-basis:29px;min-height:29px;font-size:.75rem;margin-top:3px}.two,.three{grid-template-columns:1fr;gap:12px}.diagram{padding:15px 12px}.core-flow{grid-template-columns:1fr;gap:10px}.core-flow>.edge .arrow{font-size:0}.core-flow>.edge .arrow::after{content:'↕';font-size:1.7rem}.branches{grid-template-columns:1fr}.node p,.branch p{font-size:.85rem}.state-line{grid-template-columns:1fr}.state-line>.edge{font-size:0}.state-line>.edge::after{content:'↓';font-size:1.25rem}.state-line .node{padding:14px}.tree-row.leaves{grid-template-columns:repeat(2,minmax(0,1fr))}.tree-cell{font-size:.77rem}.voice-chain{flex-direction:column}.voice-chain>.edge{font-size:0}.voice-chain>.edge::after{content:'↓';font-size:1.25rem}.voice-chain .node b{font-size:.95rem}.voice-chain .node p{font-size:.85rem}.limits{grid-template-columns:repeat(2,minmax(0,1fr))}.connection{gap:8px;padding:10px;font-size:.78rem}.connection .sub{font-size:.7rem}.table-wrap{margin:18px 0}th,td{padding:10px 6px;font-size:.79rem}table th:first-child{width:34%}.file-map th:first-child{width:36%}.file-map code{font-size:.9em}.footer{display:block}.footer a{display:inline-block;margin-top:14px}.note{padding:13px;font-size:.85rem}}
+    @media(max-width:360px){.section-head{display:block}.section-head .number{display:inline-grid;margin-bottom:12px;min-width:29px}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+    @media(forced-colors:active){body{background-image:none}.chapter.feature,.node.server,.tree-cell.final,.card.yellow{box-shadow:none}.number,.formula,.code-box{border:2px solid CanvasText}.why strong:first-child,.formula b{color:CanvasText}a{text-decoration:underline}}
+    @media print{body{background:white}.wrap{width:100%}.masthead{padding-top:0}.hero{padding:24px 0}.hero h1{font-size:38pt}.layout{display:block}.toc,.skip,.footer a{display:none}.chapter,.chapter.feature{box-shadow:none;margin:0 0 22px;padding:20px;break-inside:auto}.section-head{break-after:avoid}h2{font-size:24pt}.diagram,.card,.note,table tr,details{break-inside:avoid}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.flow{grid-template-columns:1fr}.footer{padding-bottom:0}}
+  </style>
+</head>
+<body id="top">
+  <a class="skip" href="#overview">Skip to the architecture</a>
+  <div class="wrap">
+    <header class="masthead">
+      <a class="brand" href="#top" aria-label="Draken architecture, back to top"><svg aria-hidden="true" viewBox="0 0 36 36"><path fill="#9136d8" stroke="#111" stroke-width="2" d="M1 1h34v34H1z"/><path fill="#f2c230" d="M9 7h9a11 11 0 0 1 0 22H9V7zm7 7v8h2a4 4 0 0 0 0-8h-2z"/></svg>DRAKEN</a>
+      <span class="eyebrow">Engineering guide<br>Sync-first · ChatGPT-only</span>
+    </header>
+    <div class="hero">
+      <span class="eyebrow">Architecture, without the mystery</span>
+      <h1>How Draken<br>fits together.</h1>
+      <p class="intro">A companion for understanding work across coding sessions. It freezes evidence, prepares a briefing, talks it through with you, and keeps the conversation. <strong>It does not run the work.</strong></p>
+      <div class="hero-facts"><span class="tag">One application</span><span class="tag">One SQLite database</span><span class="tag">One voice engine</span></div>
+      <p class="hero-note">This guide describes the current sync-first source, not a live deployment or account status. It is a self-contained document: no login, tracking, API requests, microphone access or live session data.</p>
+    </div>
+    <div class="layout">
+      <nav class="toc" aria-label="Guide sections">
+        <p>Inside the system</p>
+        <ol>
+          <li><a href="#overview"><span>01</span>The whole system</a></li>
+          <li><a href="#journey"><span>02</span>The sync journey</a></li>
+          <li><a href="#evidence"><span>03</span>Evidence &amp; review</a></li>
+          <li><a href="#summaries"><span>04</span>Large-history summaries</a></li>
+          <li><a href="#memory"><span>05</span>Memory &amp; decisions</a></li>
+          <li><a href="#voice"><span>06</span>ChatGPT voice</a></li>
+          <li><a href="#dragon"><span>07</span>The dragon</a></li>
+          <li><a href="#storage"><span>08</span>Storage &amp; restarts</a></li>
+          <li><a href="#boundaries"><span>09</span>Trust &amp; privacy</a></li>
+          <li><a href="#package"><span>10</span>Build &amp; distribution</a></li>
+          <li><a href="#files"><span>11</span>Find the right file</a></li>
+          <li><a href="#verification"><span>12</span>Checks &amp; limits</a></li>
+        </ol>
+        <p class="toc-note">Read top to bottom, or jump to a part. Technical details expand in place. Everything works without JavaScript.</p>
+      </nav>
+      <main>
+        <section class="chapter feature" id="overview" aria-labelledby="overview-title">
+          <div class="section-head"><span class="number">01</span><h2 id="overview-title">One app.<br>Clear responsibilities.</h2></div>
+          <p class="lead">The browser handles the interface and microphone. One Node.js server owns records, checks requests and starts model work. SQLite keeps the durable history.</p>
+          <figure class="diagram">
+            <div class="lane-label">Your computer / your local network</div>
+            <div class="core-flow">
+              <div class="node browser"><b>Browser</b><p>Home cards, sync detail, source inspection, call controls and the animated dragon.</p></div>
+              <div class="edge"><span class="arrow" aria-hidden="true">↔</span>HTTP / HTTPS<br>commands &amp; records</div>
+              <div class="node server"><b>Draken server</b><p>Node.js + Express<br>Owns snapshots, jobs, notes, review and call lifecycle.</p></div>
+            </div>
+            <div class="branch-label">The server owns four connections ↓</div>
+            <div class="branches">
+              <div class="branch"><div class="kicker">Reads →</div><h3>Pi session files</h3><p>Original coding history. Draken does not rewrite the source logs or edit projects.</p></div>
+              <div class="branch"><div class="kicker">Reads &amp; writes ↔</div><h3>SQLite</h3><p>Copied evidence, notes, conversations, review status and reusable summaries.</p></div>
+              <div class="branch"><div class="kicker">Starts →</div><h3>Isolated pi processes</h3><p>Briefings, text questions and recaps. Tools and session persistence are disabled.</p></div>
+              <div class="branch"><div class="kicker">Manages →</div><h3>Official voice helper</h3><p>A pinned Codex helper manages the native ChatGPT voice session. No coding execution.</p></div>
+            </div>
+            <div class="cloud-strip"><p><strong>Outside your computer:</strong> pi sends selected text to its configured model provider. The voice helper sends bounded context and control messages to OpenAI.</p></div>
+            <div class="connection"><div><b>Browser audio</b><span class="sub">Microphone / playback</span></div><span class="arrow" aria-hidden="true">↔</span><div><b>OpenAI</b><span class="sub">Persistent WebRTC connection</span></div></div>
+            <figcaption>Audio has its own browser-to-provider connection. It is not a sequence of locally transcribed and synthesized voice turns.</figcaption>
+          </figure>
+          <div class="note yellow"><strong>“Read-only” means read-only toward your coding work.</strong> Draken still writes its own database when you start a sync, talk, save notes or explicitly mark evidence reviewed.</div>
+          <p class="why"><strong>Why one server?</strong> This is a personal tool. One application and database are easier to run and back up. The tradeoff: active jobs and call ownership also live in memory, so this is not a multi-user, multi-server service without further work.</p>
+        </section>
+
+        <section class="chapter" id="journey" aria-labelledby="journey-title">
+          <div class="section-head"><span class="number">02</span><h2 id="journey-title">From a click<br>to a conversation.</h2></div>
+          <p class="lead">The ordinary path is <strong>Sync with Draken → prepared snapshot → call</strong>. It creates one coherent conversation, not a set of artificial user-facing batches.</p>
+          <ol class="flow">
+            <li><span class="step">01</span><strong>Scan</strong><p>Read complete new records from eligible local session files.</p></li>
+            <li><span class="step">02</span><strong>Freeze</strong><p>Copy all currently available entries into a new snapshot.</p></li>
+            <li><span class="step">03</span><strong>Prepare</strong><p>Make short prior-sync memory, then the new briefing.</p></li>
+            <li><span class="step">04</span><strong>Talk</strong><p>Start the call only from the still-valid browser action.</p></li>
+            <li><span class="step">05</span><strong>Remember</strong><p>Keep the exchange and request a short recap on call-UI closure.</p></li>
+          </ol>
+          <div class="two">
+            <div class="card"><h3>Home stays compact</h3><p>History cards help you recognize earlier conversations. Each <code>/syncs/:id</code> page keeps the full briefing, notes, discussion and expandable sources.</p></div>
+            <div class="card"><h3>Failure does not erase work</h3><p>If preparation fails or is cancelled, the snapshot and valid cached summaries stay. Recovery is an explicit retry, not a hidden restart.</p></div>
+          </div>
+          <div class="note blue"><strong>A URL is not microphone permission.</strong> Call-start intent exists only in browser memory. Reloading or sharing a sync URL cannot start capture. A hidden page, denied permission or failed preparation requires explicit recovery.</div>
+          <details><summary>Under the button: request IDs, background work and progress</summary><div><p><code>POST /api/syncs/start-call</code> receives a unique request ID. Repeating the same ID returns the same sync rather than making duplicates.</p><p>The server responds with <strong>202 Accepted</strong> after launching preparation. That means “work accepted,” not “briefing finished.” The browser polls progress. The request itself cannot open a microphone; the browser controller performs call setup separately when preparation is ready and its original intent is still valid.</p></div></details>
+          <p class="why"><strong>Why separate preparation from capture?</strong> A briefing can take minutes. The browser should not need one long HTTP request, and an old tab should never act as a standing instruction to record.</p>
+        </section>
+
+        <section class="chapter" id="evidence" aria-labelledby="evidence-title">
+          <div class="section-head"><span class="number">03</span><h2 id="evidence-title">Included is<br>not reviewed.</h2></div>
+          <p class="lead">The local index can change as new activity arrives. A snapshot is a fixed copy of evidence for a particular conversation. Several snapshots can stay open at once.</p>
+          <figure class="diagram">
+            <div class="state-line">
+              <div class="node"><b>Available</b><small>Eligible for a new snapshot</small></div><div class="edge" aria-hidden="true">→</div>
+              <div class="node held"><b>Included / held</b><small>Reserved by an open sync<br>Still unreviewed</small></div><div class="edge" aria-hidden="true">→</div>
+              <div class="node done"><b>Covered</b><small>Only after you explicitly<br>choose “Mark reviewed”</small></div>
+            </div>
+            <figcaption>Summarizing, talking, hearing a reply and saving a recap do not move an entry into the final state.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card yellow"><h3>Another open sync is a reservation</h3><p>Sync B skips entries held by open Sync A. You do not have to approve A just to start a fresh conversation about later work.</p></div>
+            <div class="card"><h3>Discard releases, not erases</h3><p>Discarding releases held entries if they are still eligible and unreviewed. The discarded sync’s history remains readable.</p></div>
+          </div>
+          <div class="table-wrap"><table><thead><tr><th scope="col">State</th><th scope="col">What it actually means</th></tr></thead><tbody>
+            <tr><td><span class="status">Indexed</span></td><td>The collector read an entry into the local index.</td></tr>
+            <tr><td><span class="status">Available</span></td><td>Eligible, not covered, and not held by another open snapshot.</td></tr>
+            <tr><td><span class="status held">Included</span></td><td>A fixed snapshot contains a copy of that evidence.</td></tr>
+            <tr><td><span class="status">Processed</span></td><td>The entry passed through a successful first-level summary. This is not review.</td></tr>
+            <tr><td><span class="status done">Reviewed</span></td><td>You explicitly completed review; the server wrote coverage.</td></tr>
+          </tbody></table></div>
+          <div class="formula"><b>Available entries</b> = eligible source entries − reviewed entries − entries reserved by other open syncs.</div>
+          <details><summary>How the collector and fixed copies work</summary><div><p>The collector reads complete JSONL records, remembers read positions, follows the saved active branch and avoids double-counting inherited entries. It omits unsupported content such as thinking blocks and applies best-effort secret removal.</p><p>Stored evidence is a bounded text excerpt, not a byte-for-byte archive of every field. A snapshot copies the text and source details so later scans cannot silently rewrite an old conversation. Legacy capped snapshots have a separate explicit expansion operation that preserves earlier notes and citations.</p><p>Only explicit review writes <code>sync_coverage</code>. A generation run that started but did not finish successfully blocks review instead of presenting partial work as complete.</p></div></details>
+          <p class="why"><strong>Why freeze evidence?</strong> A conversation needs a stable meaning. “What did we know in that sync?” should not change merely because the original session grew later.</p>
+        </section>
+
+        <section class="chapter feature" id="summaries" aria-labelledby="summaries-title">
+          <div class="section-head"><span class="number">04</span><h2 id="summaries-title">Split the model work.<br>Not your conversation.</h2></div>
+          <p class="lead">A long history is too large and costly to send in one go. Draken builds smaller summaries with a cheaper model, reconciles them, and gives a stronger model the bounded result.</p>
+          <figure class="diagram">
+            <div class="lane-label">Illustrative sources — not real session data</div>
+            <div class="tree-row leaves"><div class="tree-cell"><b>Session A</b>Earlier entries</div><div class="tree-cell"><b>Session A</b>Later entries</div><div class="tree-cell"><b>Session B</b>Earlier entries</div><div class="tree-cell"><b>Session B</b>Later entries</div></div>
+            <div class="tree-join">Cheaper model · chronological chunks</div>
+            <div class="tree-row leaves"><div class="tree-cell"><b>Chunk A1</b>Small summary</div><div class="tree-cell"><b>Chunk A2</b>Small summary</div><div class="tree-cell"><b>Chunk B1</b>Small summary</div><div class="tree-cell"><b>Chunk B2</b>Small summary</div></div>
+            <div class="tree-join">Cheaper model · reconcile each session</div>
+            <div class="tree-row sessions"><div class="tree-cell"><b>Reconcile A</b>Compare plans with later outcomes</div><div class="tree-cell"><b>Reconcile B</b>Keep corrections and unresolved work</div></div>
+            <div class="tree-join">Cheaper model · repeat levels as needed</div>
+            <div class="tree-row"><div class="tree-cell merge"><b>Related work across sessions</b>Group and merge the shared threads</div></div>
+            <div class="tree-join">Bounded summaries + selected original excerpts + saved notes</div>
+            <div class="tree-row"><div class="tree-cell final"><b>Stronger model</b>Opening briefing or answer to a text question</div></div>
+            <figcaption>All eligible snapshot entries can be processed, but the output is still lossy. This is not proof that every fact survived or that any claim was independently verified.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card purple"><h3>Save useful partial work</h3><p>A successful summary is cached under a key made from its input, model, prompt and kind. Retry reuses matching results. Relevant changes produce a different key.</p></div>
+            <div class="card"><h3>Keep failures bounded</h3><p>Requests run serially within a tree. Runs have an invocation ceiling. Each summary gets at most one same-model repair. There is no automatic expensive-model fallback.</p></div>
+          </div>
+          <h3>References are a trail, not a truth stamp.</h3>
+          <div class="label-row"><code>S1 — one model request</code><code>[E3] — snapshot evidence</code><code>[C2] — snapshot context</code></div>
+          <p>The model uses short labels; the server maps them to actual sources. A reader can open a cited excerpt. Those labels are local to their request or snapshot, not universal identifiers.</p>
+          <details><summary>Citation repair and chunk limits</summary><div><p>Chronological leaves target at most 100 entries and 48,000 serialized characters. These are internal processing units, not a limit on the user’s whole snapshot.</p><p>A summary observation can cite at most 16 distinct references. If the only validation error is the count, the existing second attempt asks the same model to select from that observation’s original references. It does not rewrite the claim, guess IDs, silently take the first 16 or add retries. Other malformed output uses the normal bounded repair.</p><p>If validation still fails, the run stops and keeps valid cached work. Shape and source-membership checks cannot prove that an excerpt supports the model’s interpretation.</p></div></details>
+          <p class="why"><strong>Why this tree?</strong> Large histories become practical to retry without paying to redo every successful step. The cost is information loss; original evidence must remain inspectable.</p>
+        </section>
+
+        <section class="chapter" id="memory" aria-labelledby="memory-title">
+          <div class="section-head"><span class="number">05</span><h2 id="memory-title">Memory is not<br>an agreement.</h2></div>
+          <p class="lead">Draken keeps records, summaries and your decisions separate. A model’s suggestion must not become a saved decision just because it was spoken aloud.</p>
+          <div class="three">
+            <div class="card blue"><p class="kicker">Recorded</p><h3>Conversation</h3><p>What was asked and generated. Voice records retain generated/interrupted qualifications, not a claim about what you heard.</p></div>
+            <div class="card purple"><p class="kicker">Derived</p><h3>Recap</h3><p>A short model-written reminder. Helps recognize a sync and bring some context into the next one. Not an exact quotation.</p></div>
+            <div class="card green"><p class="kicker">Explicitly saved</p><h3>Your notes</h3><p>Decisions and carry-forward work that you choose to save through the app’s notes controls.</p></div>
+          </div>
+          <figure class="diagram"><div class="connection"><div><b>Three recent syncs</b><span class="sub">Non-discarded; open ones included</span></div><span class="arrow" aria-hidden="true">→</span><div><b>Short frozen memory</b><span class="sub">For the new sync</span></div></div><figcaption>The new one-click sync freezes prior inputs. It does not silently inherit a moving window of every later edit.</figcaption></figure>
+          <p>Recap generation processes the supplied briefing, messages and notes in parts, then combines them. It does not just grab the last few messages. Each final recap is <strong>one to five lines, no more than 600 characters</strong>.</p>
+          <p>New discussion or notes make the old recap stale. Closing the call UI requests a refresh; a browser exit cannot guarantee that it happens. You can refresh explicitly. Saved fragments can be reused, and an older frozen input cannot overwrite a newer recap.</p>
+          <div class="note yellow"><strong>No idle inference.</strong> There is no background timer spending model requests just because Draken is open. Preparation, questions and recap generation are explicit actions or documented parts of the call flow.</div>
+          <p class="why"><strong>Why keep memory small?</strong> It makes history easier to browse and avoids resending every previous exchange. The tradeoff is incomplete recall. For detail, go back to the original sync.</p>
+        </section>
+
+        <section class="chapter feature" id="voice" aria-labelledby="voice-title">
+          <div class="section-head"><span class="number">06</span><h2 id="voice-title">One voice path:<br>ChatGPT.</h2></div>
+          <p class="lead">One persistent browser audio connection, through a separate native ChatGPT sign-in and the pinned official Codex helper. <strong>No local speech engine, Platform API-key fallback or alternative-provider fallback.</strong></p>
+          <figure class="diagram">
+            <div class="voice-path"><div class="path-title">Audio — does not pass through a local speech model</div><div class="connection"><div><b>Browser mic / speaker</b><span class="sub">Controller owns capture &amp; playback</span></div><span class="arrow" aria-hidden="true">↔</span><div><b>OpenAI live voice</b><span class="sub">WebRTC</span></div></div></div>
+            <div class="voice-path"><div class="path-title">Control and context</div><div class="voice-chain"><div class="node"><b>Browser</b><p>Start, type, stop, end</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>Draken</b><p>Call ownership and frozen evidence</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>Official helper</b><p>Native account and session</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>OpenAI</b><p>Generated conversation</p></div></div></div>
+            <div class="voice-path"><div class="path-title">If more evidence is requested</div><div class="connection"><div><b>Read-only lookup</b><span class="sub">Search this frozen snapshot</span></div><span class="arrow" aria-hidden="true">→</span><div><b>Selected text</b><span class="sub">Not a coding model or tool result to execute</span></div></div></div>
+            <figcaption>Provider credentials remain on the server. Pi credentials are not copied or converted. No raw microphone recording is stored locally; transcript text is.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card"><h3>Context is bounded data</h3><p>The call starts with a briefing, notes and excerpts. Initial context is at most 24,000 UTF-8 bytes; lookup packets are at most 3,500 bytes. Original source roles and dates matter.</p><p>Explicit recall can supply dated history. Prior recaps are labelled as summaries, not quotations. Old requests are not reissued as new instructions.</p></div>
+            <div class="card"><h3>No path from speech to execution</h3><p>Tool and approval requests are denied. The helper’s local endpoint can return assistant text, not executable tool calls. It cannot run shell commands, edit projects, save decisions by instruction or advance review.</p><p>Malformed endpoint requests are contained, and lookup limits are validated.</p></div>
+          </div>
+          <div class="limits"><div class="limit"><strong>30 min</strong><span>Maximum call duration</span></div><div class="limit"><strong>60</strong><span>User-message limit</span></div><div class="limit"><strong>90 sec</strong><span>Disconnect lease</span></div><div class="limit"><strong>120</strong><span>Delegated lookups per call</span></div></div>
+          <p class="small">These are resource limits, not a subscription spending guarantee. Only one call can be active; a replacement waits for confirmed helper cleanup. Lookup requests are not the same as spoken turns.</p>
+          <details><summary>Call controls and conservative history</summary><div><ul><li><strong>Mute</strong> releases microphone tracks. Explicit unmute obtains input again.</li><li><strong>Speaker-safe mode</strong> pauses input during replies. Headphone mode allows full-duplex conversation.</li><li><strong>Stop reply</strong> mutes playback locally and sends a stop request. It cannot prove immediate remote cancellation or the end of accounting.</li><li><strong>End call</strong> cleans up tracks, playback, timers and the connection. There is no automatic reconnection.</li><li><strong>History</strong> stores ordered user and assistant messages, including interruptions. It does not invent exact question–answer pairs, played words, human hearing or agreement.</li></ul></div></details>
+          <div class="note yellow"><strong>Experimental interface, not a stable public embedding API.</strong> Audio goes to OpenAI. Speech may paraphrase and is not held for complete-answer JSON validation. A successful sign-in or connection handshake alone does not prove usable audio. Quotas, retention and future compatibility are not established.</div>
+          <p class="why"><strong>Why retire the old voice path?</strong> Keeping Whisper → pi → Kokoro meant maintaining another working product path the app no longer needed. Its execution code is gone. A small legacy reader preserves old call records without preserving that engine.</p>
+        </section>
+
+        <section class="chapter" id="dragon" aria-labelledby="dragon-title">
+          <div class="section-head"><span class="number">07</span><h2 id="dragon-title">The dragon<br>only draws.</h2></div>
+          <p class="lead">The character is a local Three.js scene, not an agent and not a speech engine. It receives read-only playback signals from the call controller.</p>
+          <figure class="diagram"><div class="connection"><div><b>Received audio energy</b><span class="sub">No exact word timing</span></div><span class="arrow" aria-hidden="true">→</span><div><b>Dragon motion</b><span class="sub">Jaw, posture and listening state</span></div></div><figcaption>Silence and stopped playback close the mouth. A drawing failure can fall back to a still image without ending the conversation.</figcaption></figure>
+          <div class="two"><div class="yes"><h3>It can</h3><p>Animate the character, soften the background, limit rendering work and respect reduced-motion preferences.</p></div><div class="no"><h3>It cannot</h3><p>Capture a microphone, call a model, change notes, start a sync or mark evidence reviewed.</p></div></div>
+          <p>The separate <code>/persona.html</code> app preview uses a stored synthetic sample and approximate text-driven movement. It is for appearance testing, without a live provider call. It is not embedded in this guide.</p>
+          <p class="why"><strong>Why keep it separate?</strong> Improving the character should not change microphone permissions or model behavior. A graphics problem should not become a conversation problem.</p>
+        </section>
+
+        <section class="chapter" id="storage" aria-labelledby="storage-title">
+          <div class="section-head"><span class="number">08</span><h2 id="storage-title">Keep the record.<br>Not a running action.</h2></div>
+          <p class="lead">Private state lives outside the checkout, by default under <code>~/.draken/</code>. The main database is <code>~/.draken/draken.db</code>. Credentials, installed helper files and TLS keys are private runtime material, not application assets.</p>
+          <div class="table-wrap"><table><thead><tr><th scope="col">Records</th><th scope="col">Tables and responsibility</th></tr></thead><tbody>
+            <tr><td>Source index</td><td><code>pi_sessions</code>, <code>pi_entries</code>, <code>sync_settings</code><br>Read positions, source entries and selection settings.</td></tr>
+            <tr><td>Fixed snapshots</td><td><code>syncs</code>, <code>sync_items</code><br>Copied evidence; notes and the briefing live on the sync.</td></tr>
+            <tr><td>Discussion &amp; review</td><td><code>sync_messages</code>, <code>sync_coverage</code><br>History and separately recorded explicit review.</td></tr>
+            <tr><td>Preparation</td><td><code>sync_runs</code>, <code>sync_tree_nodes</code>, <code>summary_cache</code><br>Progress, tree structure and valid reusable summaries.</td></tr>
+            <tr><td>Short memory</td><td><code>sync_presentations</code>, <code>sync_recap_cache</code><br>Card recaps, frozen prior inputs and cached recap parts.</td></tr>
+            <tr><td>Native calls</td><td><code>live_calls</code>, <code>live_messages</code><br>Call state and independent user/assistant messages.</td></tr>
+            <tr><td>Preserved old calls</td><td><code>voice_calls</code>, <code>voice_turns</code><br>Historical local-engine records. Not a new-call execution path.</td></tr>
+          </tbody></table></div>
+          <div class="two"><div class="card green"><h3>Survives a server restart</h3><p>Snapshots, copied evidence, saved notes, conversations, review coverage and successful cached summaries.</p></div><div class="card"><h3>Does not silently restart</h3><p>In-flight model work and calls. Startup records interruptions; the user must retry. The microphone never reopens automatically.</p></div></div>
+          <p>Closing a browser page does not cancel an ordinary server-side preparation job. A voice call loses its connection and is cleaned up; page exit cannot guarantee a final recap request. These are different lifetimes.</p>
+          <p>Transactions keep related writes together: snapshot plus copied entries, or completed review plus coverage. Schema changes preserve historical rows, including older tables no longer used by the current app.</p>
+          <div class="note yellow"><strong>Copied history has its own lifetime.</strong> Deleting original pi logs does not erase prior snapshots. There is no in-app retention/purge UI yet. Back up current data before deployment; never restore a stale database merely to update code.</div>
+          <p class="why"><strong>Why preserve records but stop actions?</strong> A restart should not lose what happened, but it should not quietly spend model usage or resume audio capture either.</p>
+        </section>
+
+        <section class="chapter" id="boundaries" aria-labelledby="boundaries-title">
+          <div class="section-head"><span class="number">09</span><h2 id="boundaries-title">Convenience is<br>not permission.</h2></div>
+          <div class="two">
+            <div class="card"><h3>History is untrusted data</h3><p>A source log may contain “ignore these rules” or an old request to deploy. Reading it does not authorize doing it. Pi processes run tool-free, outside project checkouts, with session persistence and automatic context discovery disabled.</p></div>
+            <div class="card"><h3>Controls belong on the server</h3><p>Snapshot locks, review writes, request validation and call ownership are checked by the server. Hiding a button is not an authorization boundary.</p></div>
+            <div class="card"><h3>Local does not mean offline</h3><p>Browsing and indexing stay local. Preparation, questions and recaps can send selected text to providers. Native voice sends audio and bounded context to OpenAI.</p></div>
+            <div class="card"><h3>Cleaning has limits</h3><p>Obvious secrets are removed on a best-effort basis. Improved outbound cleaning can apply without silently rewriting frozen records. It is not a guarantee that every excerpt is safe to send.</p></div>
+          </div>
+          <div class="note blue"><strong>This page and the app have different access rules.</strong> This static guide needs no login because it contains no private records or app APIs. The Draken application still requires authentication on the LAN. Microphone capture needs localhost or trusted HTTPS; ordinary loopback app use can work without dashboard login.</div>
+          <p>Dashboard authentication and provider sign-in are separate. Provider tokens are never sent to the browser. The app rejects cross-origin API requests and protects anonymous loopback use with Host checks.</p>
+          <p class="why"><strong>Why these boundaries?</strong> A web page, source-log instruction or generated sentence must not become permission to execute work, expose credentials or declare your review complete.</p>
+        </section>
+
+        <section class="chapter" id="package" aria-labelledby="package-title">
+          <div class="section-head"><span class="number">10</span><h2 id="package-title">One npm app.<br>Separate outside needs.</h2></div>
+          <p class="lead">Draken is one npm-distributed application containing its server, built browser UI, persona assets and voice integration scripts. Package consumers do not need a separate frontend install or build.</p>
+          <div class="build-line"><strong>Server source → runtime</strong><code>src/</code> · TypeScript → compiler → <code>dist/</code> · Node.js</div>
+          <div class="build-line"><strong>Browser source → static assets</strong><code>client/</code> · React + TypeScript → Vite → <code>public/</code> · served by Express</div>
+          <div class="build-line"><strong>Native integration → direct modules</strong><code>voice/realtime/</code> · JavaScript modules → run directly; official helper installed separately</div>
+          <div class="two"><div class="card"><h3>What runs outside the package?</h3><ul><li>Node.js 22.19 or newer.</li><li>Configured pi 1.4+ for briefing, text discussion and recaps.</li><li>The pinned official Codex helper and separate ChatGPT login for voice.</li><li>Trusted HTTPS for a microphone on the LAN.</li></ul></div><div class="card"><h3>Current setup rough edges</h3><p>One package does not mean every runtime or account is bundled. Voice setup instructions currently use checkout-level commands. The optional synthetic browser probe needs development tooling and a browser; it is not a core voice runtime dependency.</p></div></div>
+          <h3>The public website is another thing.</h3>
+          <div class="build-line"><code>site/</code> → website deployment workflow → public landing page</div>
+          <div class="build-line"><code>client/</code> → <code>public/</code> → private local/LAN application</div>
+          <div class="build-line"><code>docs/architecture.html</code> → this standalone guide → separate static serving, no app API</div>
+          <p class="small" style="margin-top:16px">The public landing-page artwork is separate from the procedural call dragon. This guide does not publish the website, modify that artwork or change application authentication.</p>
+          <p class="why"><strong>Why separate build output and source?</strong> People installing the app need ready-to-run files, not the frontend toolchain. Developers work in source directories; generated <code>dist/</code> and <code>public/</code> should not be edited by hand.</p>
+        </section>
+
+        <section class="chapter" id="files" aria-labelledby="files-title">
+          <div class="section-head"><span class="number">11</span><h2 id="files-title">Where a change<br>belongs.</h2></div>
+          <p>These are repository paths, not links into this server’s filesystem. The guide does not expose source files or private runtime directories over HTTP.</p>
+          <div class="table-wrap"><table class="file-map"><thead><tr><th scope="col">Concern</th><th scope="col">Start here</th></tr></thead><tbody>
+            <tr><td>Navigation &amp; transient call intent</td><td><code>client/src/App.tsx</code></td></tr>
+            <tr><td>Home cards &amp; sync detail</td><td><code>client/src/pages/Home.tsx</code><code>client/src/pages/Sync.tsx</code></td></tr>
+            <tr><td>HTTP checks &amp; routes</td><td><code>src/server.ts</code><code>src/routes/</code></td></tr>
+            <tr><td>Indexing &amp; cleaning</td><td><code>src/sync/collector.ts</code><code>src/sync/normalize.ts</code></td></tr>
+            <tr><td>Snapshots, notes &amp; review</td><td><code>src/sync/store.ts</code></td></tr>
+            <tr><td>Summary tree &amp; citations</td><td><code>src/sync/tree.ts</code><code>src/sync/references.ts</code></td></tr>
+            <tr><td>Model jobs &amp; final replies</td><td><code>src/sync/manager.ts</code><code>src/sync/pi.ts</code></td></tr>
+            <tr><td>Short conversation memory</td><td><code>src/sync/recap.ts</code></td></tr>
+            <tr><td>Native call server &amp; context</td><td><code>src/voice/live.ts</code><code>src/voice/live-context.ts</code></td></tr>
+            <tr><td>Browser call lifecycle</td><td><code>client/src/voice/live-session.ts</code><code>client/src/components/VoiceCall.tsx</code></td></tr>
+            <tr><td>Helper, RPC &amp; text lookup</td><td><code>voice/realtime/native.mjs</code><code>voice/realtime/rpc.mjs</code><code>voice/realtime/backend.mjs</code></td></tr>
+            <tr><td>Old call history only</td><td><code>src/voice/legacy-history.ts</code></td></tr>
+            <tr><td>Storage &amp; shared types</td><td><code>src/db/schema.ts</code><code>src/types.ts</code></td></tr>
+            <tr><td>Dragon &amp; playback signals</td><td><code>client/src/persona/</code><code>client/src/audio/playback.ts</code></td></tr>
+            <tr><td>Checks &amp; product boundaries</td><td><code>tests/</code><code>tests/voice-boundary.test.cjs</code><code>knip.jsonc</code></td></tr>
+          </tbody></table></div>
+          <div class="note"><strong>A useful rule:</strong> keep record-changing checks on the server, microphone ownership in the call controller, and drawing in the persona. Model prose does not decide which writes are allowed.</div>
+        </section>
+
+        <section class="chapter" id="verification" aria-labelledby="verification-title">
+          <div class="section-head"><span class="number">12</span><h2 id="verification-title">Check the code.<br>Keep the caveats.</h2></div>
+          <p class="lead">Tests are evidence about specific behavior, not a certificate that every spoken claim is true or every physical device works.</p>
+          <div class="code-box"><pre><span class="comment"># Development checkout; run builds and browser tests in sequence.</span>
+npm run check    <span class="comment"># TypeScript + unused-code checks</span>
+npm test         <span class="comment"># Server/unit tests with temporary data</span>
+npm run test:ui  <span class="comment"># Build, then browser workflows</span></pre></div>
+          <div class="two"><div class="card green"><h3>What automated checks cover</h3><p>Snapshots, review boundaries, caching, citation repair, malformed requests, bounded lookups, denied execution, historical-record preservation, browser controls and no capture on reload.</p><p>Ordinary tests use temporary records, fake model/helper responses and local peers carrying synthetic audio. Real-provider checks are separate and explicitly opted in.</p></div><div class="card"><h3>What they cannot promise</h3><p>Complete semantic recall, the truth of every summary, exact words heard, physical microphone and Bluetooth behavior, every mobile browser, subscription accounting, provider retention or future native-interface stability.</p><p>A live audio handshake is not proof of a substantive spoken answer. Synthetic peers are not a physical headset test.</p></div></div>
+          <p>TypeScript and Knip help find unused bindings, files and exports. They cannot decide whether a reachable feature belongs in the product. Explicit tests also check that the retired local voice engine stays absent while its old records remain readable.</p>
+          <div class="note yellow"><strong>Not part of this architecture:</strong> scheduling jobs, coding workers, project-file edits, deployments or automatic review. Any future execution feature needs its own approval and design; it is not a hidden capability of the voice model.</div>
+          <p class="why"><strong>The central tradeoff:</strong> Draken makes a large, scattered history easier to understand. It preserves evidence and your choices, but it does not turn a generated explanation into independent verification.</p>
+        </section>
+      </main>
+    </div>
+    <footer class="footer"><p><strong>DRAKEN / Architecture guide</strong><br>Companion to <code>ARCHITECTURE.md</code>. Static documentation of the current source, not production status. No live data, external assets, analytics or executable examples.</p><a href="#top">Back to the top ↑</a></footer>
+  </div>
+</body>
+</html>

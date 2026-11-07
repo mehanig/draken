@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  // Internal helpers are live code; several are also tested through CJS namespaces
+  // that Knip cannot attribute to individual exports. Do not hide wholly unused functions.
+  "ignoreExportsUsedInFile": { "function": true },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "tests/*.cjs", "tests/ui/**/*.{ts,cjs}",
+        // Executables copied/spawned by tests, not imported as modules.
+        "tests/fixtures/fake-*.cjs",
+        // Browser modules served over HTTP by the isolated voice probe.
+        "voice/realtime/probe-browser.mjs", "voice/realtime/peer.mjs",
+        // The client compiler consumes this declaration; Knip resolves the JS implementation.
+        "voice/realtime/peer.d.mts"
+      ],
+      "project": ["src/**/*.ts", "tests/**/*.{ts,cjs}", "voice/**/*.{mjs,mts}"],
+      "paths": {
+        // Test-browser HTTP import, served from this source file.
+        "/peer.mjs": ["voice/realtime/peer.mjs"]
+      },
+      "ignore": ["dist/**"],
+      // Operator-installed TLS utility, not an npm dependency.
+      "ignoreBinaries": ["openssl"]
+    },
+    "client": {
+      "project": ["src/**/*.{ts,tsx}"]
+    }
+  }
+}

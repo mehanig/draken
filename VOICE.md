@@ -1,122 +1,128 @@
-# Voice-call prototype
+# ChatGPT voice calls
 
-**Talk to Draken through the same configured pi login.** No separate OpenAI voice API, API key, account, or voice subscription is required. This is a local speech pipeline around pi's text model—not OpenAI's native Realtime service or a promise of ChatGPT Voice latency.
+**Draken has one voice engine: subscription-backed ChatGPT live voice.** It uses the pinned official Codex helper and a separate native sign-in to the same paid ChatGPT account. Microphone audio and bounded context go to OpenAI over a persistent browser audio connection.
 
-## Use it
+The former Whisper → pi → Kokoro engine has been removed, including its Python worker, installer, browser speech detector and execution endpoints. Old call records are still readable; they are not a second working voice option. There is no local-speech, Platform API-key or alternative-provider fallback.
 
-1. Install local speech once on the server: `npm run voice:setup`.
-2. Open Draken on **localhost or trusted HTTPS**. The LAN instructions below matter: ordinary `http://192.168.…` cannot normally access a browser microphone.
-3. Prepare a sync's briefing, then click **Call Draken** and allow microphone access. An unfinished briefing is not silently resumed by the call.
-4. Speak naturally. A roughly 0.7-second pause sends a turn. **Speaker-safe mode is the default:** speech detection pauses during the whole reply and resets after the speaker tail, so output cannot interrupt itself. Use **Stop reply** to interrupt. If you wear headphones, enable **Headphone mode** for automatic interruption by speaking. **Mute** stops microphone tracks; **Type a question** also works when microphone permission is unavailable.
-5. **End call** (or Escape) stops capture/playback and keeps the text history. Review/edit your decisions on the page afterward. Ending a call **does not finish the sync** or mark anything reviewed.
+## Setup
 
-A short greeting is generated locally without a model request. Recognized speech and typed questions use pi. A malformed model response gets one formatting repair before any speech; the call shows **Preparing the spoken reply…** while it works. If that also fails, listening resumes and **Retry question** submits a new turn without restarting the call. The call stays anchored to the current **frozen snapshot**; later coding activity belongs to your next sync.
-
-Headphones are recommended. Echo cancellation and noise suppression are requested, but real speaker/microphone feedback, background conversations, accents, Bluetooth routing and mobile browser behavior still need hands-on evaluation. The current speech models are English-only. Chromium on Linux is the tested browser/server combination; other platforms are not claimed verified.
-
-## Animated call persona
-
-Calls now show a local 3D interpretation of the homepage’s mechanical dragon, seated in a warm workshop. The jaw follows decoded speech energy and approximate English text shapes on the actual playback clock; interruption and silence stop it. Idle/listening/thinking poses are procedural, not model-generated emotions. This is an animated illustration, **not a webcam or native video service**.
-
-The call image has no captions or animation controls. Closer portrait framing, a clear desk and a softly blurred background keep attention on the dragon. OS reduced-motion preferences and a static WebGL-failure fallback leave audio working; **Pause animation** and retry controls remain in the standalone preview. Known software renderers automatically use reduced detail/frame rate. No new permissions, model calls or external assets are required. Try the independent `/persona.html` preview without a microphone or sync. See [PERSONA.md](PERSONA.md) for the modular interface, limitations and tests.
-
-## Local speech installation
-
-```bash
-npm run voice:setup
-npm run voice:setup -- --check    # hashes + local synthesis smoke test; no pi request
+```sh
+npm run voice:realtime:setup
+npm run voice:realtime:login        # Complete the official ChatGPT device sign-in
+npm run voice:realtime:check        # Local prerequisites only; not an audio test
+npm run voice:realtime:probe -- --allow-provider  # Explicit provider use, synthetic audio
+npm start
 ```
 
-The explicit installer downloads a pinned uv binary, Python 3.12 if needed, Python dependencies, Whisper `base.en`, Kokoro v1.0 int8, and voice weights. Model/uv archives are SHA-256 checked; model files are installed atomically. It needs internet access during setup, roughly 270 MB of model downloads plus Python/dependencies, and no sudo or Docker. Existing matching models and the virtual environment are reused. Linux/macOS installer targets are included; only Linux x64 has been exercised.
+No voice-mode setting is needed. An existing `DRAKEN_VOICE_MODE=native` remains accepted so installed launchers keep working. Any other value, including `local`, fails startup rather than silently changing an old privacy choice into cloud audio. Remove obsolete local speech settings from launchers; `voice:setup` no longer exists.
 
-Defaults live in `~/.draken/voice/`, **not the repository**. Runtime speech has model downloads and Hugging Face telemetry disabled. One warm CPU process handles recognition and synthesis; it is started by a call, not by browsing your session history. Four threads are the default. Ending the call releases audio/turn state; the models remain warm until server shutdown.
+The helper and its credentials live under `~/.draken/realtime/`, outside the checkout. Provider credentials never enter the browser. Pi credentials are not copied or converted. Preserve the existing database, dashboard credentials and TLS configuration when updating an installation. No snapshot regeneration is needed to enable voice.
 
-### LAN microphone access
+This uses an experimental native interface, not a stable public embedding API. Successful setup or a connection handshake is not proof that an account can receive usable audio. The opt-in probe tests actual audio separately. Quota, idle accounting, coding-allowance impact and future compatibility are not established.
 
-Use an existing **trusted HTTPS reverse proxy** preserving Host/Origin, or the built-in optional TLS listener:
+## Start and use a call
 
-```bash
-npm run voice:tls -- --host 192.168.1.20    # use your actual server address
+1. Open Draken on **localhost or trusted HTTPS**. Plain LAN HTTP normally cannot access the microphone.
+2. **Sync with Draken** collects available entries, prepares a snapshot with short prior-sync recaps, then opens its call. On an existing prepared sync, use **Call Draken**.
+3. Wait for any needed history download/indexing to finish on a dedicated preparation screen; the microphone remains off and the dragon is not shown yet. Then allow microphone access. A failed or cancelled preparation does not request permission, and if the page is hidden when preparation finishes, start the call again explicitly. You can also type if microphone permission is unavailable.
+4. Speaker-safe mode pauses input during replies. Use **Stop reply** to speak, or enable **Headphone mode** to allow spoken interruption. Headphones are recommended.
+5. **Mute** releases the microphone tracks. **Stop reply** cuts playback locally and asks the provider to stop; it does not prove immediate remote cancellation. **End call** stops capture/playback and keeps the text history.
+
+Capture follows a transient browser action, never a URL flag. Reloading or opening `/syncs/:id` does not restart the microphone. Failed preparation, a hidden page, denied permission or an ended connection requires explicit recovery. There is no automatic reconnect or fallback voice engine.
+
+Reply waiting is owned by the server's identified user transcript and pending-answer events. Unkeyed WebRTC user events can arrive late and must not switch an already pending reply back to listening, erase its waiting caption, or restart a settled reply. A lookup acknowledgement such as “I’ll check what’s recorded” is not meant to end the answer. Draken keeps the question pending and can automatically resume ChatGPT speech when its context arrives; you should not need to ask “have you checked?” Quiet captions in the dragon scene show **[Thinking...]**, **[Hmmm...]** and **[Hmmmmmm...]** during a pending reply, including silence after an acknowledgement. They change every five seconds without animation. **[Checking...]** and **[Looking that up...]** are used only while the local history worker reports fresh lookup activity; these labels are not proof of a match or exhaustive search. These are visual waiting cues—not the model’s private thoughts, spoken messages, a percentage or an ETA. They are never saved in the transcript or sent to the model. The separate waiting banner and elapsed-wait timer have been removed. Stop, a newer question, interruption, or ending the call cancels the old pending continuation. There is at most one automatic completion cue per question—not a retry loop or a fabricated user message. A failed lookup must be disclosed; a failed or silent continuation produces a visible notice instead of silently retrying.
+
+One call may be active at a time, with a 30-minute limit, at most 60 user messages and a 90-second disconnect timeout. These are resource limits, not spending guarantees. A new call cannot start until helper cleanup is confirmed.
+
+## Evidence, records and recap
+
+- Voice questions do **not** start pi, local transcription or local synthesis. The call receives a bounded briefing, saved notes and source excerpts. Explicit source/history questions can request more data from the same frozen snapshot. Calls automatically prepare and use bounded semantic + keyword retrieval across retained older records, using the local index described in [MEMORY.md](MEMORY.md). No scope/setup switch is required; first use may take longer while the local model/index is prepared. Initial indexing progress is visible before the dragon appears. Expand **Conversation & details** for the full transcript, sources and any later history progress. Optional **Settings → Automatically index history** prewarms local search in idle batches; it never starts capture, calls or provider summaries. This block starts collapsed for every call; its progress polling reads metadata only. Those dated excerpts also go to ChatGPT; they are not new snapshot evidence. The embedding runtime is text-only and is not a replacement speech engine.
+- The read-only lookup service is not a coding model or a general web search. Tool-execution and approval requests are denied. Calls cannot edit files, deploy work, save decisions by model instruction, finish syncs or advance coverage.
+- Speech may paraphrase. **Sources supplied** means context was given to the model, not that every spoken claim was verified. Responses are not held for whole-answer JSON validation before playback.
+- History stores ordered user/assistant messages with generated/interrupted labels. It does not invent question–answer pairs, exact played words, human hearing or agreement. Historical records from the retired engine retain their original playback reports and are labelled separately.
+- No raw microphone recording is persisted locally. Text, source references and call status are stored in the private SQLite database. There is no retention/purge UI yet.
+- Ending the call does not mark the sync reviewed. Closing the call UI requests a short text recap through pi using the sync's cheaper summary model. This is separate from live audio; a browser exit cannot guarantee the request is sent or completes. You can explicitly refresh the recap later.
+
+See [the native implementation guide](voice/realtime/README.md) for packet limits, helper restrictions, recall rules and verification details. Provider retention and exact subscription accounting are not promised by Draken.
+
+## Animated dragon
+
+The local 3D dragon follows received audio energy, not exact words or phonemes. Its drawing code cannot capture audio, call a model or change records. Silence and stopped playback close its mouth. Drawing failure leaves a still image without disabling the call.
+
+Live subtitles appear over the bottom of the call scene, labelled **You** or **Draken**. They show a bounded window of the latest transcript, not word-timed audio alignment; the complete text remains in the collapsed **Conversation & details** block. Captions also work over the static fallback image. Errors and recovery buttons remain visible outside that block. There is no animation-control overlay. The separate `/persona.html` preview uses a stored sample without microphone access, sign-in or model use. See [PERSONA.md](PERSONA.md).
+
+## LAN microphone access
+
+Use an existing **trusted HTTPS reverse proxy** preserving Host/Origin, or the built-in TLS listener:
+
+```sh
+npm run voice:tls -- --host 192.168.1.20    # Use your actual server address
 ```
 
-This generates a private local certificate authority and a server certificate, then prints these environment settings:
+This creates a private local certificate authority and a server certificate, then prints settings like:
 
-```bash
+```sh
 DRAKEN_HTTPS_PORT=44433
 DRAKEN_TLS_CERT=/absolute/path/to/draken-server.crt
 DRAKEN_TLS_KEY=/absolute/path/to/draken-server.key
 DRAKEN_TLS_CA=/absolute/path/to/draken-local-root.crt
 ```
 
-Export those settings alongside your existing **authenticated LAN configuration**, restart Draken, and permit the HTTPS port on your trusted LAN if necessary. `.env` is not auto-loaded. HTTP stays available at the existing port; use HTTPS for normal LAN use. The TLS command does **not** alter firewall rules, install a system trust anchor, change dashboard credentials, or expose a service to the internet.
+Export them alongside your existing authenticated LAN configuration and restart Draken while idle. `.env` is not loaded automatically. The command does not change firewall rules, install system trust, change dashboard credentials or expose Draken to the internet.
 
-**One-time client trust:** on your other computer, open **First-time browser setup** in the voice card and download the public certificate using your dashboard login. Compare its fingerprint with the TLS setup command's output. Install **only your own** `draken-local-root.crt`:
+### One-time browser trust
 
-- **Windows:** open certificate → Install Certificate → Current User → Trusted Root Certification Authorities.
-- **macOS:** Keychain Access → login keychain → import certificate → open its Trust section → Always Trust.
+In the voice card, open **First-time browser setup** and download the public certificate using your dashboard login. Compare its fingerprint with the TLS setup output. Trust **only your own** `draken-local-root.crt`:
+
+- **Windows:** open the certificate → Install Certificate → Current User → Trusted Root Certification Authorities.
+- **macOS:** import into the login keychain → open its Trust section → Always Trust.
 - **Firefox:** Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import; trust it to identify websites.
-- **Chromium/Linux:** import the certificate through your browser/platform's certificate manager. Certificate-store paths differ by browser release; do not assume Firefox's import affects Chromium.
+- **Chromium/Linux:** use your browser/platform certificate manager. Firefox trust settings do not necessarily apply to Chromium.
 
-Restart the browser if necessary, visit `https://your-server:44433`, sign in with the **same dashboard credentials**, and allow the microphone on starting a call. HTTPS is a separate browser origin, so an existing HTTP login is not automatically transferred. Merely dismissing a certificate warning is not the supported setup.
+Restart the browser if needed, visit `https://your-server:44433`, sign in and allow the microphone when starting a call. HTTPS is a separate browser origin, so an HTTP login is not automatically transferred. Dismissing a certificate warning is not the supported setup.
 
-Keep **both `.key` files private**. A trusted local CA is security-sensitive: its key can sign certificates. The app's authenticated certificate route parses/re-encodes only the public certificate and never serves a key. Rerunning TLS setup preserves the CA and reuses a valid matching server certificate; certificates nearing expiry or requiring a new hostname are renewed. No renewal daemon is installed.
+Keep both `.key` files private. The authenticated download route re-encodes only the public certificate. Rerunning TLS setup preserves the CA and reuses valid matching certificates; it renews certificates near expiry or with changed hostnames. There is no renewal daemon.
 
-**Alternative, no certificate installation:** if you already use SSH to the server, forward its HTTP listener to your own localhost:
+### SSH alternative
 
-```bash
+If you already have trusted SSH access, forward Draken to your own localhost:
+
+```sh
 ssh -N -L 40333:192.168.1.20:40333 your-user@192.168.1.20
-# Then open http://localhost:40333 on the client computer.
+# Open http://localhost:40333 on the client computer.
 ```
 
-The browser's localhost secure-context exception permits the microphone, and SSH encrypts the connection. Existing dashboard authentication is still enforced. This requires an available local port and an existing trusted SSH login.
+The localhost browser exception permits microphone access; SSH encrypts the connection. Dashboard authentication is still required for an authenticated server.
 
-## Data, permissions and limits
+## Server settings
 
-- **Speech recognition and synthesis run on the Draken server.** Browser audio travels only to that server. No Web Speech recognition service, CDN-hosted model, or cloud TTS is used.
-- **Text goes to the configured pi provider:** recognized/typed question, bounded briefing/excerpts, saved decisions and recent discussion. The existing subscription's limits still apply; this is not unlimited or guaranteed free usage. Draken cannot see your remaining ChatGPT quota or invoice.
-- Pi runs tool-free, outside project checkouts, with no session persistence, extensions, MCP, skills, templates, context discovery, or automatic catalog updates. Credentials remain with pi and never enter the browser or Python speech worker.
-- Raw microphone audio and generated WAVs are **not recorded to disk**. Text questions, generated answers, source IDs, errors, timing and playback confirmations are stored in the private SQLite database. There is no retention/purge UI yet.
-- Only completely played, browser-confirmed chunks enter ordinary discussion as heard text. Interrupted/failed turns are marked explicitly. Full generated text remains inspectable in call history. Playback confirmation is a client receipt, not proof a human heard or agreed with it.
-- Speech starts only after the **entire reply** passes schema and exact known-source validation. Draken reads pi's successfully settled final assistant message, not provisional model deltas. A formatting/schema failure gets at most **one same-model repair**, with the original evidence and rejected answer supplied for revalidation. Prose, arrays, concatenated objects and unknown IDs are not spoken or silently accepted. If repair fails, no answer is synthesized and the turn is marked failed. Provider/network errors are not automatically retried. Sentence-by-sentence synthesis still overlaps playback after validation.
-- Formatting diagnostics log only the turn ID, attempt number, response-shape category and validation error—not raw rejected text, prompts or source excerpts. Rejected output is held temporarily for repair, not persisted as an answer.
-- Reference existence **does not prove semantic support**. Voice includes the sources cited by its bounded briefing, notes and recent discussion, plus lexical retrieval, within 64 excerpts / roughly 16,000 excerpt characters—not a search of all history. Explicitly requested sources take priority. Every citation left visible in that narrative has a supplied excerpt; unavailable or over-budget input citation markers are labeled as unavailable instead of advertising sources the validator would reject. The frozen briefing and notes themselves are unchanged. Returned source IDs still require exact validation; none are guessed or silently discarded. The model can still be wrong or miss facts. It has no execution, save-notes, finish-sync, Git or deployment tools.
-- One active call across tabs/devices; 30 minutes and 60 submitted turns per call. These are resource limits, **not spending caps**. Recording segments are bounded to about 40 seconds in the browser and 45 seconds on the server. Short/no-speech recordings do not initiate pi.
-- A 10-second heartbeat maintains the call; a disconnected call expires after 90 seconds. Reload/navigation ends capture and requests hang-up; the lease is the fallback. Microphone capture never resumes automatically after reload or server restart.
-- Interruption cancels pi and drops queued/late audio. Native local inference may finish before its result is discarded. Provider-side cancellation/accounting is best-effort.
-- Notes, source snapshots and coverage cannot be changed through a call. Other sync mutations are blocked while it is active. Compression is not rerun. Background listening outside an explicitly started call is not implemented.
-
-### Server-only options
-
-| Variable | Default |
+| Variable | Purpose |
 |---|---|
-| `DRAKEN_PI_VOICE_MODEL` | Current sync's summary model (normally `openai/gpt-6-luna`) |
-| `DRAKEN_VOICE_DATA_DIR` | `<DRAKEN_DATA_DIR>/voice` |
-| `DRAKEN_VOICE_THREADS` | `4` |
-| `DRAKEN_VOICE_SPEAKER` | `af_heart` |
-| `DRAKEN_VOICE_PYTHON` | `<voice data dir>/venv/bin/python` |
-| `DRAKEN_VOICE_WORKER` | Packaged `voice/worker.py`; override is intended for tests |
-| `DRAKEN_HTTPS_PORT` | Unset; optional second listener |
-| `DRAKEN_TLS_CERT`, `DRAKEN_TLS_KEY` | Certificate/key paths for that listener |
-| `DRAKEN_TLS_CA` | Optional public certificate download for client setup |
-| `DRAKEN_TLS_DIR` | TLS setup script's output directory; defaults to `<data dir>/runtime/tls` |
+| `DRAKEN_CODEX_BIN`, `DRAKEN_CODEX_HOME` | Trusted operator/test overrides for the pinned helper and its account directory |
+| `DRAKEN_HTTPS_PORT` | Optional second listener |
+| `DRAKEN_TLS_CERT`, `DRAKEN_TLS_KEY` | Certificate and key for that listener |
+| `DRAKEN_TLS_CA` | Optional public certificate download |
+| `DRAKEN_TLS_DIR` | TLS setup output; defaults to `<data dir>/runtime/tls` |
 
-No per-call model, budget or permission controls are added. Voice shares a **60-second model deadline across the initial answer and its optional repair**, and never falls back to a more expensive model automatically. A submitted turn normally uses one pi invocation and can use at most two; the 60-turn call limit is not a 60-invocation or spending cap.
+There are no per-call model selectors or API keys. Native helper version and native-auth checks still apply to operator overrides.
 
 ## Verification
 
-```bash
+```sh
+npm run check
 npm test
 npm run test:ui
-npm run voice:setup -- --check
+npm run test:live:browser
+npm run test:realtime:browser
+npm run test:realtime:native
 
-# Explicit opt-in: one real voice turn (up to two pi invocations), synthetic evidence, isolated DB.
-node tests/voice-real.cjs --allow-provider
-node tests/voice-real.cjs --allow-provider --browser
-node tests/voice-real.cjs --allow-provider --browser --overview
+# Explicit provider use, synthetic data/audio, isolated database:
+DRAKEN_TEST_STATIC_DIR=/path/to/staged/frontend npm run test:live:real -- --allow-provider
+
+# Focused real-voice proof with one spoken question and a controlled delayed lookup:
+DRAKEN_TEST_STATIC_DIR=/path/to/staged/frontend node tests/voice-continuation-real.cjs --allow-provider
 ```
 
-Normal test commands use fake pi/audio workers and temporary synthetic sessions. Browser tests exercise actual same-origin Silero VAD with a generated speech fixture, playback, microphone feedback suppression, headphone-mode spoken interruption, mute, microphone refusal, typing, source inspection, mobile layouts, failure/retry, broad-overview formatting repair, explicit retry after unrepaired output, 37-source briefing regression, citation consistency above the 64-source budget, playback-receipt recovery, and reload cancellation. The opt-in test also exercises real local STT/TTS and the saved pi authentication; its browser mode includes the full speech round trip. Synthetic receipts in its non-browser mode are not claimed as audible playback.
+Ordinary tests use temporary records, a fake native helper and real local browser peers carrying synthetic audio. They test the native-only UI, controls, drawing failure, source lookup, history, no-capture-on-reload, absent old endpoints and preservation of old records. The text-model fake is used only for sync preparation and recaps, not voice turns.
 
-Observed on the development machine: roughly **0.5 seconds for a short transcription**. The original sentence-streaming trials reached first audio in 3.6–6.2 seconds from model-request start, but real usage exposed unreliable model formatting. The current whole-reply approach prioritizes validation over early playback: two synthetic browser overview trials reached first audio in **7.3 seconds without repair** and **11.3 seconds with repair**. Two larger-snapshot browser checks with repair reached first audio in about **14 seconds**. Pause detection and transcription are additional. These are individual observations, not a latency guarantee; response length and provider latency vary. This is a usable turn-taking prototype, not established native-realtime parity. Physical room echo and perceived voice quality still need user testing.
-
-The synthetic fixture `tests/fixtures/voice-question.wav` is generated speech, not a user's recording. Tests, model downloads, runtime databases, credentials and certificate keys must never be published as session evidence. Speech dependencies/model assets retain their upstream licenses: see [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [Kokoro ONNX](https://github.com/thewh1teagle/kokoro-onnx), and [Silero VAD](https://github.com/snakers4/silero-vad).
+The synthetic WAV fixture is not a human recording. Synthetic peers and injected audio do not establish physical microphone quality, speaker echo, Bluetooth behavior, mobile performance or other-browser support. Those still need hands-on testing. The separately opted-in real-provider test is not part of ordinary tests.

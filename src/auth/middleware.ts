@@ -8,7 +8,7 @@ export interface AuthConfig {
   tokenExpiry: string;
 }
 
-export interface JwtPayload {
+interface JwtPayload {
   username: string;
   iat: number;
   exp: number;

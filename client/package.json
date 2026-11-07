@@ -4,15 +4,13 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/voice-assets.mjs && vite",
-    "build": "node scripts/voice-assets.mjs && tsc && vite build",
+    "dev": "vite",
+    "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ricky0123/vad-web": "0.0.31",
     "lucide-react": "^0.468.0",
-    "onnxruntime-web": "1.22.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "0.180.0"

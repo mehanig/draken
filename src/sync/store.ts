@@ -1,7 +1,11 @@
 import { getDb } from '../db/schema';
-import { Evidence, ObservedSession, Overview, SyncDetail, SyncModels, SyncSummary, TreeNode, TreeProgress, TreeRun } from '../types';
-import { getSessionRoot } from './collector';
+import { Evidence, HomeOverview, ObservedSession, Overview, SyncDetail, SyncModels, SyncSummary, TreeNode, TreeProgress, TreeRun } from '../types';
+import { getSessionRoot, EntryReader } from './source-files';
+import { EvidenceReader } from '../db/evidence';
 import { cleanText, sourceKey } from './normalize';
+import { aggregationCost } from './cost';
+import { recapInput, invalidateRecap, type RecapInput } from './recap';
+import { admittedAgent, agentSources, AGENTS } from '../sources/registry';
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -11,12 +15,17 @@ export const busySyncs = new Set<number>();
 export const activeVoiceSyncs = new Set<number>();
 const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.briefing, s.decisions, s.carry_forward,
   s.remaining_count, s.snapshot_version, s.snapshot_at,
+  COALESCE((SELECT recap FROM sync_presentations WHERE sync_id=s.id), '') AS recap,
+  COALESCE((SELECT recap_state FROM sync_presentations WHERE sync_id=s.id), 'empty') AS recap_state,
+  COALESCE((SELECT recap_error FROM sync_presentations WHERE sync_id=s.id), '') AS recap_error,
   (SELECT COUNT(*) FROM sync_items i WHERE i.sync_id = s.id) AS item_count FROM syncs s`;
 const historyWindow = `e.timestamp >= COALESCE((SELECT value FROM sync_settings WHERE key = 'history_since'), '')`;
-const pendingWhere = `e.active = 1 AND e.present = 1 AND e.is_activity = 1 AND e.effective_text != ''
-  AND ${historyWindow} AND s.included = 1 AND s.missing = 0 AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)`;
-const evidenceSelect = `SELECT e.id AS source_id, e.event_key, e.session_id, s.name AS session_name, s.path AS source_path,
-  s.cwd, e.entry_id, e.timestamp, e.role, e.effective_text AS text FROM pi_entries e JOIN pi_sessions s ON s.id = e.session_id`;
+const pendingWhere = `e.active = 1 AND e.present = 1 AND e.is_activity = 1 AND e.effective_length > 0
+  AND ${historyWindow} AND s.included = 1 AND s.missing = 0 AND ${admittedAgent('s')} AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)`;
+const availableFilter = (exceptSync = 0) => `${pendingWhere} AND NOT EXISTS (SELECT 1 FROM sync_items i JOIN syncs held ON held.id=i.sync_id WHERE i.event_key=e.event_key AND held.status='open' AND held.id != ${exceptSync})`;
+const availableWhere = availableFilter();
+const evidenceSelect = `SELECT s.agent,e.id AS source_id, e.event_key, e.session_id, s.name AS session_name, s.path AS source_path,
+  s.cwd, e.entry_id, e.timestamp, e.role FROM agent_entries e JOIN agent_sessions s ON s.id = e.session_id`;
 
 export function defaultModels(): SyncModels {
   const limit = Number(process.env.DRAKEN_PI_MAX_INVOCATIONS || 120);
@@ -28,8 +37,8 @@ export function defaultModels(): SyncModels {
 }
 
 export function pendingCount(): number {
-  return (getDb().prepare(`SELECT COUNT(DISTINCT e.event_key) AS count FROM pi_entries e
-    JOIN pi_sessions s ON s.id = e.session_id WHERE ${pendingWhere}`).get() as { count: number }).count;
+  return (getDb().prepare(`SELECT COUNT(DISTINCT e.event_key) AS count FROM agent_entries e
+    JOIN agent_sessions s ON s.id = e.session_id WHERE ${pendingWhere}`).get() as { count: number }).count;
 }
 
 function historySince(): string | null {
@@ -39,23 +48,44 @@ function historySince(): string | null {
 
 export function overview(): Overview {
   const db = getDb();
-  const sessions = db.prepare(`SELECT s.id, s.path, s.cwd, s.name, s.included, s.missing, s.modified_at,
-    (SELECT COUNT(DISTINCT e.event_key) FROM pi_entries e WHERE e.session_id = s.id AND e.active = 1
-    AND e.present = 1 AND e.is_activity = 1 AND e.effective_text != '' AND ${historyWindow}
+  const sessions = db.prepare(`SELECT s.id, s.agent, COALESCE(s.external_id,s.id) AS external_id, s.path, s.cwd, s.name, s.included, s.missing, s.modified_at,
+    (SELECT COUNT(DISTINCT e.event_key) FROM agent_entries e WHERE e.session_id = s.id AND e.active = 1
+    AND e.present = 1 AND e.is_activity = 1 AND e.effective_length > 0 AND ${historyWindow}
     AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)) AS pending
-    FROM pi_sessions s ORDER BY s.modified_at DESC`).all() as ObservedSession[];
-  const syncs = db.prepare(`${summaryQuery} ORDER BY s.id DESC LIMIT 50`).all() as SyncSummary[];
+    FROM agent_sessions s ORDER BY s.modified_at DESC`).all() as ObservedSession[];
+  const syncs = (db.prepare(`${summaryQuery} ORDER BY s.id DESC LIMIT 50`).all() as SyncSummary[])
+    .map(row => ({ ...row, aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)) }));
   const models = defaultModels();
   return {
-    sessions, syncs, pending: pendingCount(), active_sync_id: syncs.find(s => s.status === 'open')?.id || null,
+    agents: agentSources(db), sessions, syncs, pending: pendingCount(), active_sync_id: syncs.find(s => s.status === 'open')?.id || null,
     session_root: getSessionRoot(), model: models.final || 'pi configured default', summary_model: models.summary,
     history_since: historySince(),
     history_initialized: Boolean(db.prepare("SELECT 1 FROM sync_settings WHERE key = 'history_since'").get()),
   };
 }
 
+export function homeOverview(before?: number): HomeOverview {
+  const db = getDb();
+  const rows = db.prepare(`${summaryQuery} WHERE s.id < ? ORDER BY s.id DESC LIMIT 21`).all(before || Number.MAX_SAFE_INTEGER) as SyncSummary[];
+  const available = (db.prepare(`SELECT COUNT(DISTINCT e.event_key) AS n FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE ${availableWhere}`).get() as any).n;
+  return { syncs: rows.slice(0, 20).map(row => ({ aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)), id: row.id, status: row.status, created_at: row.created_at, item_count: row.item_count,
+    preview: row.recap || row.briefing.replace(/\[([EC]\d+)\]/g, '').replace(/\s+/g, ' ').slice(0, 600),
+    preview_kind: row.recap ? row.recap_state === 'ready' ? 'recap' : 'previous_recap' : row.briefing ? 'briefing' : 'empty', busy: busySyncs.has(row.id), active_call: activeVoiceSyncs.has(row.id),
+    needs_retry: row.status === 'open' && !row.briefing && ['failed', 'cancelled', 'interrupted'].includes((db.prepare('SELECT status FROM sync_runs WHERE sync_id=? ORDER BY id DESC LIMIT 1').get(row.id) as any)?.status),
+    calls: (db.prepare('SELECT (SELECT COUNT(*) FROM voice_calls WHERE sync_id=?) + (SELECT COUNT(*) FROM live_calls WHERE sync_id=?) AS n').get(row.id, row.id) as any).n })),
+    available, included_unreviewed: pendingCount() - available,
+    covered: (db.prepare('SELECT COUNT(*) AS n FROM sync_coverage').get() as any).n,
+    busy: busySyncs.size > 0, active_call: activeVoiceSyncs.size > 0, next_cursor: rows.length > 20 ? rows[19].id : null };
+}
+
+export function setAgentEnabled(agent: string, enabled: boolean): Overview {
+  if (!AGENTS.some(value => value === agent)) throw new HttpError(404, 'Unknown agent source');
+  getDb().prepare('UPDATE agent_sources SET enabled=? WHERE id=?').run(Number(enabled), agent);
+  return overview();
+}
+
 export function setIncluded(sessionId: string, included: boolean): void {
-  const result = getDb().prepare('UPDATE pi_sessions SET included = ? WHERE id = ?').run(Number(included), sessionId);
+  const result = getDb().prepare('UPDATE agent_sessions SET included = ? WHERE id = ?').run(Number(included), sessionId);
   if (!result.changes) throw new HttpError(404, 'Session not found');
 }
 
@@ -64,11 +94,13 @@ export function getProgress(id: number): TreeProgress {
   const sync = db.prepare('SELECT compression_complete FROM syncs WHERE id = ?').get(id) as { compression_complete: number } | undefined;
   if (!sync) throw new HttpError(404, 'Sync not found');
   const run = db.prepare(`SELECT id, status, stage, summary_model, final_model, invocations, max_invocations,
-    processed_entries, total_entries, cache_hits, error, question, started_at, completed_at
-    FROM sync_runs WHERE sync_id = ? ORDER BY id DESC LIMIT 1`).get(id) as TreeRun | undefined;
+    processed_entries, total_entries, cache_hits, error, question, started_at, completed_at, metrics_json
+    FROM sync_runs WHERE sync_id = ? ORDER BY id DESC LIMIT 1`).get(id) as (Omit<TreeRun, 'metrics'> & { metrics_json: string }) | undefined;
   const nodes = (db.prepare('SELECT key, kind, label, status, children_json, source_count, error FROM sync_tree_nodes WHERE sync_id = ? ORDER BY rowid').all(id) as any[])
     .map(({ children_json, ...node }) => ({ ...node, children: JSON.parse(children_json) })) as TreeNode[];
-  return { busy: busySyncs.has(id), complete: Boolean(sync.compression_complete), run: run || null, nodes };
+  const { metrics_json, ...fields } = run || { metrics_json: '[]' };
+  return { busy: busySyncs.has(id), complete: Boolean(sync.compression_complete),
+    run: run ? { ...fields, metrics: JSON.parse(metrics_json) } as TreeRun : null, nodes };
 }
 
 export function getSync(id: number): SyncDetail {
@@ -76,14 +108,20 @@ export function getSync(id: number): SyncDetail {
   const row = db.prepare(`${summaryQuery} WHERE s.id = ?`).get(id) as SyncSummary | undefined;
   if (!row) throw new HttpError(404, 'Sync not found');
   const extra = db.prepare('SELECT context_json, memory_json, model_config_json FROM syncs WHERE id = ?').get(id) as any;
-  const items = (db.prepare('SELECT evidence_json FROM sync_items WHERE sync_id = ? ORDER BY rowid').all(id) as any[])
-    .map(item => JSON.parse(item.evidence_json));
-  return {
-    ...row, items, context: JSON.parse(extra.context_json), memory: JSON.parse(extra.memory_json),
-    messages: db.prepare('SELECT id, role, content, created_at FROM sync_messages WHERE sync_id = ? ORDER BY id').all(id) as SyncDetail['messages'],
-    busy: busySyncs.has(id), history_since: historySince(),
-    models: { ...defaultModels(), ...JSON.parse(extra.model_config_json) }, tree: getProgress(id),
-  };
+  const reader = new EvidenceReader(db);
+  try {
+    const items = (db.prepare('SELECT evidence_json FROM sync_items WHERE sync_id = ? ORDER BY rowid').all(id) as any[]).map(item => reader.read(item.evidence_json, true));
+    return {
+      ...row, aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
+      messages: db.prepare('SELECT id, role, content, created_at FROM sync_messages WHERE sync_id = ? ORDER BY id').all(id) as SyncDetail['messages'],
+      busy: busySyncs.has(id), history_since: historySince(),
+      models: { ...defaultModels(), ...JSON.parse(extra.model_config_json) }, tree: getProgress(id),
+    };
+  } finally { reader.close(); }
+}
+
+export function assertEvidenceAvailable(sync: SyncDetail): void {
+  if ([...sync.items, ...sync.context].some(item => item.unavailable)) throw new HttpError(409, 'Original session evidence is unavailable or changed. Restore the session files before summarizing, calling or marking this snapshot reviewed. Conversation and notes remain accessible.');
 }
 
 export function requireOpen(id: number, allowBusy = false): SyncDetail {
@@ -103,11 +141,14 @@ function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence
   const items: Evidence[] = [];
   const seen = new Set<string>();
   const firstBySession = new Map<string, number>();
-  for (const row of db.prepare(`${evidenceSelect} WHERE ${pendingWhere} ORDER BY e.timestamp, e.id`).iterate() as Iterable<Evidence & { source_id: number }>) {
+  const reader = new EntryReader(db);
+  try {
+  for (const row of db.prepare(`${evidenceSelect} WHERE ${availableFilter(previous?.id)} ORDER BY e.timestamp, e.id`).iterate() as Iterable<Evidence & { source_id: number }>) {
     if (seen.has(row.event_key)) continue;
-    const { source_id, ...data } = row;
+    const { source_id, ...metadata } = row;
+    const data = { ...metadata, text: reader.effective(source_id) };
     const prior = old.get(row.event_key);
-    const same = prior && prior.text === row.text;
+    const same = prior && prior.text === data.text;
     items.push({ ...data, sequence: source_id, ref: same ? prior.ref : `E${nextRef++}` });
     seen.add(row.event_key);
     firstBySession.set(row.session_id, Math.min(firstBySession.get(row.session_id) ?? Infinity, source_id));
@@ -120,10 +161,11 @@ function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence
   let nextContext = Math.max(0, ...context.map(item => item.ref.startsWith('C') ? Number(item.ref.slice(1)) : 0)) + 1;
   for (const [sessionId, firstId] of firstBySession) {
     const prior = db.prepare(`${evidenceSelect} WHERE e.session_id = ? AND e.active = 1 AND e.present = 1
-      AND e.id < ? AND e.effective_text != '' ORDER BY e.id DESC LIMIT 6`).all(sessionId, firstId) as Evidence[];
+      AND e.id < ? AND e.effective_length > 0 ORDER BY e.id DESC LIMIT 6`).all(sessionId, firstId) as (Evidence & { source_id: number })[];
     for (const row of prior.reverse()) {
       if (seen.has(row.event_key)) continue;
-      const item = { ...row, ref: `C${nextContext}`, text: cleanText(row.text, 2000) };
+      const { source_id, ...metadata } = row;
+      const item = { ...metadata, ref: `C${nextContext}`, text: cleanText(reader.effective(source_id), 2000) };
       if (contextKeys.has(sourceKey(item))) continue;
       nextContext++;
       const cost = JSON.stringify(item).length;
@@ -134,17 +176,24 @@ function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence
     }
   }
   return { items, context };
+  } finally { reader.close(); }
+}
+
+function frozenContext(db: ReturnType<typeof getDb>, items: Evidence[]): string {
+  const reader = new EvidenceReader(db);
+  try { return JSON.stringify(items.map(item => JSON.parse(reader.freeze(item)))); } finally { reader.close(); }
 }
 
 function persistItems(id: number, items: Evidence[]): void {
   const insert = getDb().prepare('INSERT INTO sync_items(sync_id, event_key, evidence_json) VALUES (?, ?, ?)');
-  for (const item of items) insert.run(id, item.event_key, JSON.stringify(item));
+  const reader = new EvidenceReader(getDb());
+  try { for (const item of items) insert.run(id, item.event_key, reader.freeze(item)); } finally { reader.close(); }
 }
 
 export function startSync(since?: string | null): SyncDetail {
   const db = getDb();
   return db.transaction(() => {
-    const existing = db.prepare("SELECT id FROM syncs WHERE status = 'open'").get() as { id: number } | undefined;
+    const existing = db.prepare("SELECT id FROM syncs WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
     if (existing) return getSync(existing.id);
     if (!db.prepare("SELECT 1 FROM sync_settings WHERE key = 'history_since'").get()) {
       const parsed = since ? new Date(since) : null;
@@ -157,9 +206,30 @@ export function startSync(since?: string | null): SyncDetail {
       WHERE status = 'completed' ORDER BY id DESC LIMIT 10`).all() as SyncDetail['memory'];
     const now = new Date().toISOString();
     const result = db.prepare(`INSERT INTO syncs(created_at, snapshot_at, snapshot_version, context_json, memory_json, carry_forward)
-      VALUES (?, ?, 2, ?, ?, ?)`).run(now, now, JSON.stringify(context), JSON.stringify(memory), memory[0]?.carry_forward || '');
+      VALUES (?, ?, 2, ?, ?, ?)`).run(now, now, frozenContext(db, context), JSON.stringify(memory), memory[0]?.carry_forward || '');
     const id = Number(result.lastInsertRowid);
     persistItems(id, items);
+    return getSync(id);
+  })();
+}
+
+/** New one-click workflow: reserve previously unassigned entries, never review them.
+ * Repeated transport requests reuse the same immutable snapshot. */
+export function startConversationSync(requestId: string): SyncDetail {
+  const db = getDb();
+  return db.transaction(() => {
+    const existing = db.prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
+    if (existing) return getSync(existing.sync_id);
+    if (activeVoiceSyncs.size || busySyncs.size) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
+    db.prepare("INSERT OR IGNORE INTO sync_settings(key,value) VALUES ('history_since','')").run();
+    const prior = (db.prepare("SELECT id FROM syncs WHERE status != 'discarded' ORDER BY id DESC LIMIT 3").all() as { id: number }[]).map(row => getSync(row.id));
+    const inputs: RecapInput[] = prior.map(recapInput);
+    const memory = prior.map(item => ({ sync_id: item.id, status: item.status, snapshot_at: item.snapshot_at, decisions: item.decisions, carry_forward: item.carry_forward, recap: item.recap }));
+    const { items, context } = snapshot(), now = new Date().toISOString();
+    const result = db.prepare(`INSERT INTO syncs(created_at,snapshot_at,snapshot_version,context_json,memory_json,carry_forward,model_config_json)
+      VALUES (?,?,2,?,?,?,?)`).run(now, now, frozenContext(db, context), JSON.stringify(memory), memory[0]?.carry_forward || '', JSON.stringify(defaultModels()));
+    const id = Number(result.lastInsertRowid); persistItems(id, items);
+    db.prepare('INSERT INTO sync_presentations(sync_id,request_id,memory_inputs_json) VALUES (?,?,?)').run(id, requestId, JSON.stringify(inputs));
     return getSync(id);
   })();
 }
@@ -175,12 +245,13 @@ export function expandSnapshot(id: number): SyncDetail {
   return db.transaction(() => {
     const sync = requireOpen(id);
     if (sync.snapshot_version >= 2) throw new HttpError(409, 'This is already a full frozen snapshot. Later arrivals belong in the next sync.');
+    assertEvidenceAvailable(sync);
     const { items, context } = snapshot(sync);
     archiveBriefing(sync, 'the old partial snapshot was expanded; later evidence may change its conclusions');
     db.prepare('DELETE FROM sync_items WHERE sync_id = ?').run(id);
     persistItems(id, items);
     db.prepare('UPDATE syncs SET snapshot_version = 2, snapshot_at = ?, context_json = ?, remaining_count = 0 WHERE id = ?')
-      .run(new Date().toISOString(), JSON.stringify(context), id);
+      .run(new Date().toISOString(), frozenContext(db, context), id);
     return getSync(id);
   })();
 }
@@ -209,12 +280,14 @@ export function getTreeNode(id: number, key: string) {
 }
 
 export function recoverInterruptedRuns(): void {
+  getDb().prepare("UPDATE sync_presentations SET recap_state='failed',recap_error='Recap interrupted by restart. Retry to reuse cached fragments.' WHERE recap_state='running'").run();
   getDb().prepare("UPDATE sync_runs SET status = 'interrupted', error = 'Server restarted. Retry to reuse completed summaries.', completed_at = ? WHERE status = 'running'")
     .run(new Date().toISOString());
 }
 
 export function saveNotes(id: number, decisions: string, carryForward: string): SyncDetail {
   requireOpen(id);
+  invalidateRecap(id);
   getDb().prepare('UPDATE syncs SET decisions = ?, carry_forward = ? WHERE id = ?').run(decisions, carryForward, id);
   return getSync(id);
 }
@@ -224,7 +297,9 @@ export function completeSync(id: number, decisions: string, carryForward: string
   return db.transaction(() => {
     const sync = requireOpen(id);
     if (!reviewed) throw new HttpError(400, 'Confirm you reviewed this snapshot before finishing the sync');
+    assertEvidenceAvailable(sync);
     if (sync.tree.run && !sync.tree.complete) throw new HttpError(409, 'Compression or the final verdict is incomplete. Retry or discard; failed work cannot advance coverage.');
+    if (sync.decisions !== decisions || sync.carry_forward !== carryForward) invalidateRecap(id);
     db.prepare(`UPDATE syncs SET status = 'completed', completed_at = ?, decisions = ?, carry_forward = ? WHERE id = ?`)
       .run(new Date().toISOString(), decisions, carryForward, id);
     db.prepare('INSERT OR IGNORE INTO sync_coverage(event_key, sync_id) SELECT event_key, sync_id FROM sync_items WHERE sync_id = ?').run(id);

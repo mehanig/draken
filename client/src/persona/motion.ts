@@ -56,12 +56,14 @@ export class PersonaMotion {
   sample(input: PersonaInput, time: number, delta: number): DragonPose {
     if (this.cue !== input.playback) {
       this.cue = input.playback;
-      this.track = this.cue ? prepareSpeech(this.cue) : null;
+      this.track = this.cue && !this.cue.level ? prepareSpeech(this.cue) : null;
       this.jaw = 0; this.round = 0;
     }
     const elapsed = this.cue ? this.cue.now() - this.cue.startedAt : NaN;
-    const playing = input.mode === 'speaking' && this.track && Number.isFinite(elapsed) && elapsed >= 0 && elapsed < this.track.duration;
-    const speech = playing ? sampleSpeech(this.track!, elapsed) : { jaw: 0, round: 0, energy: 0 };
+    const playing = input.mode === 'speaking' && this.cue && Number.isFinite(elapsed) && elapsed >= 0 && elapsed < this.cue.duration;
+    let live = 0;
+    if (playing && this.cue?.level) { try { const value = this.cue.level(); live = Number.isFinite(value) ? clamp(value) : 0; } catch { /* Presentation-only observer. */ } }
+    const speech = playing && this.track ? sampleSpeech(this.track, elapsed) : live > 0.02 ? { jaw: Math.sqrt(live) * 0.7, round: 0, energy: live } : { jaw: 0, round: 0, energy: 0 };
     const smooth = 1 - Math.exp(-Math.min(delta, 0.1) * 28);
     // End/interrupt/paused output closes immediately, even between speech chunks.
     this.jaw = playing && speech.energy > 0 ? this.jaw + (speech.jaw - this.jaw) * smooth : 0;

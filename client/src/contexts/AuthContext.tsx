@@ -165,8 +165,3 @@ export function useAuth() {
   }
   return context;
 }
-
-// Helper to get current token for API calls
-export function getAuthToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}

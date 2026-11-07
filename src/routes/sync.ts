@@ -1,7 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { getDb, getDataDir } from '../db/schema';
+import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, HttpError, overview, saveNotes, setIncluded, startSync } from '../sync/store';
-import { cancelReply, launchReply } from '../sync/manager';
+import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, HttpError, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs } from '../sync/store';
+import { cancelReply, launchReply, launchRecap } from '../sync/manager';
+import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
 
 const router = Router();
 const route = (handler: (req: Request, res: Response) => unknown | Promise<unknown>) =>
@@ -16,7 +19,45 @@ function text(value: unknown, name: string, max = 4000): string {
   return value.trim();
 }
 
+router.get('/setup', route(async (req, res) => {
+  if (Object.keys(req.query).some(key => key !== 'refresh') || (req.query.refresh !== undefined && req.query.refresh !== '1')) throw new HttpError(400, 'Unknown setup status option');
+  res.json({ pi: await piSetupStatus(req.query.refresh === '1'), data_dir: getDataDir() });
+}));
+router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettings())));
+router.patch('/settings/auto-index', route((req, res) => {
+  if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, 'enabled')) throw new HttpError(400, 'Only enabled is accepted');
+  res.json(setAutoIndex(req.body.enabled));
+}));
+router.use((req, _res, next) => { if (['POST', 'PATCH', 'DELETE'].includes(req.method)) yieldBackgroundIndexing(); next(); });
+
+router.get('/home', route((req, res) => {
+  const before = req.query.before === undefined ? undefined : Number(req.query.before);
+  if (before !== undefined && (!Number.isSafeInteger(before) || before < 1)) throw new HttpError(400, 'Invalid history cursor');
+  res.json(homeOverview(before));
+}));
+let starting = false;
+router.post('/syncs/start-call', route(async (req, res) => {
+  const requestId = req.body?.request_id;
+  if (typeof requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestId)) throw new HttpError(400, 'A request ID is required');
+  // One scan/start operation at a time, including the async indexing interval.
+  if (starting) throw new HttpError(409, 'A sync is already being prepared');
+  const prior = getDb().prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
+  if (prior) { res.status(202).json({ sync: getSync(prior.sync_id), scan: { files: 0, added: 0, warnings: [] } }); return; }
+  if (busySyncs.size || activeVoiceSyncs.size) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
+  starting = true;
+  try {
+    const setup = await piSetupStatus(true);
+    if (setup.state !== 'configured') throw new HttpError(503, setup.message);
+    const scan = await scanSessions(), sync = startConversationSync(requestId);
+    res.status(202).json({ sync: launchReply(sync.id), scan });
+  } finally { starting = false; }
+}));
+router.post('/syncs/:id/recap', route((req, res) => res.status(202).json(launchRecap(id(req)))));
 router.get('/overview', route((_req, res) => res.json(overview())));
+router.patch('/agents/:agent', route((req, res) => {
+  if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 || typeof req.body.enabled !== 'boolean') throw new HttpError(400, 'Only boolean enabled is accepted');
+  res.json(setAgentEnabled(String(req.params.agent), req.body.enabled));
+}));
 router.post('/scan', route(async (_req, res) => res.json(await scanSessions())));
 router.patch('/sessions/:sessionId', route((req, res) => {
   if (typeof req.body?.included !== 'boolean') throw new HttpError(400, 'included must be a boolean');
@@ -56,6 +97,7 @@ router.post('/syncs/:id/briefing', route((req, res) => {
 router.post('/syncs/:id/messages', route((req, res) => {
   const question = text(req.body?.message, 'Message');
   if (!question) throw new HttpError(400, 'Message cannot be empty');
+  if (Object.keys(req.body).some(key => key !== 'message')) throw new HttpError(400, 'Unknown discussion option. Refresh the page.');
   res.status(202).json(launchReply(id(req), question));
 }));
 router.post('/syncs/:id/complete', route((req, res) => {

@@ -20,15 +20,14 @@ test('GifGun signature: square surfaces, shared palette, readable text and keybo
   await expect(primary).toHaveCSS('background-color', 'rgb(145, 54, 216)');
   await expect(primary).toHaveCSS('border-radius', '0px');
   await expect(primary).toHaveCSS('text-transform', 'uppercase');
-  await expect(page.locator('select, textarea, .input').first()).toHaveCSS('border-radius', '0px');
   await expect(page.locator('.brand img')).toHaveAttribute('src', '/favicon.png');
 
   await page.keyboard.press('Tab');
-  const scan = page.getByRole('button', { name: 'Scan sessions', exact: true });
-  await expect(scan).toBeFocused();
-  await expect(scan).toHaveCSS('outline-width', '3px');
-  await expect(scan).toHaveCSS('outline-style', 'solid');
-  await expect(scan).toHaveCSS('outline-color', 'rgb(145, 54, 216)');
+  const homeLink = page.getByRole('link', { name: 'Draken sync history' });
+  await expect(homeLink).toBeFocused();
+  await expect(homeLink).toHaveCSS('outline-width', '3px');
+  await expect(homeLink).toHaveCSS('outline-style', 'solid');
+  await expect(homeLink).toHaveCSS('outline-color', 'rgb(145, 54, 216)');
 
   // Small supporting text and button/citation labels need normal-text contrast.
   const contrastRatios = await page.evaluate(() => {

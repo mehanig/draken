@@ -1,12 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const ts = require('typescript');
-// The motion core is pure TS with type-only dependencies: no DOM/WebGL required.
-const source = fs.readFileSync(require('node:path').join(__dirname, '../client/src/persona/motion.ts'), 'utf8');
-const exportsObject = {};
-new Function('exports', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)(exportsObject);
-const { prepareSpeech, sampleSpeech, PersonaMotion } = exportsObject;
+// Node >=22.19 loads this pure, type-only-dependency module without a transpiler or DOM.
+const { prepareSpeech, sampleSpeech, PersonaMotion } = require('../client/src/persona/motion.ts');
 function cue(text = 'Maybe we should go?') {
   const samples = new Float32Array(16000);
   for (let i = 4000; i < 12000; i++) samples[i] = Math.sin(i * 0.15) * 0.2;
@@ -44,6 +40,17 @@ test('suspended playback clocks do not flap the jaw and a new chunk resets its a
   clock = 3.9; assert.equal(motion.sample(input, 1.4, 0.1).jaw, 0);
   assert.equal(motion.sample({ ...input, playback: cue('mmm') }, 1.5, 0.1).jaw, 0);
 });
+test('live mouth follows received energy without invented phoneme timing or suspended-clock movement', () => {
+  const motion = new PersonaMotion(); let level = 0.8, clock = 2;
+  const input = { mode: 'speaking', motion: true, playback: { ...cue(), samples: new Float32Array(0), duration: Infinity, startedAt: 0, now: () => clock, level: () => level } };
+  assert.ok(motion.sample(input, 1, 0.1).jaw > 0.4);
+  level = 0; assert.equal(motion.sample(input, 1.1, 0.1).jaw, 0);
+  level = 0.8; clock = NaN; assert.equal(motion.sample(input, 1.2, 0.1).jaw, 0);
+  clock = 2; assert.equal(motion.sample({ ...input, motion: false }, 1.3, 0.1).jaw, 0);
+  input.playback.level = () => { throw Error('observer failed'); };
+  assert.equal(motion.sample(input, 1.4, 0.1).jaw, 0);
+});
+
 test('the persona module contains no backend, session, microphone or provider dependencies', () => {
   const root = require('node:path').join(__dirname, '../client/src/persona');
   for (const file of fs.readdirSync(root).filter(f => /\.tsx?$/.test(f))) {

@@ -94,7 +94,6 @@ export function createMaterials(a: StudioAssets) {
     cream: a.material({ color: '#ded2b5', roughness: 0.86 }),
     green: a.material({ color: '#2d573d', roughness: 0.68, side: THREE.DoubleSide }),
     terracotta: a.material({ color: '#9b6650', roughness: 0.9 }),
-    paper: a.material({ color: '#e4dbc3', roughness: 0.88 }),
     glow: a.material({ color: '#ffdf9c', emissive: '#ffcb75', emissiveIntensity: 2, roughness: 1 }),
   };
 }

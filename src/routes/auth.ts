@@ -16,8 +16,10 @@ interface LoginRequest {
 }
 
 // Check if auth is enabled
-router.get('/status', (_req: Request, res: Response) => {
+router.get('/status', (req: Request, res: Response) => {
   res.json({
+    application: 'draken',
+    instance: req.app.locals.drakenInstance,
     enabled: isAuthEnabled(),
   });
 });

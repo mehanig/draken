@@ -1,3 +1,4 @@
+require('./fixtures/fake-memory.cjs');
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

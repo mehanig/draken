@@ -11,15 +11,15 @@ Open **`/persona.html`** on your Draken server. In development:
 ```sh
 npm --prefix client ci
 npm run dev:client
-# Open http://localhost:5173/persona.html
+# Open http://localhost:3000/persona.html
 ```
 
-The preview offers listening/thinking poses, a generated speech sample, pause and the original reference. It does not request a microphone, authenticate, read sessions, or invoke a model. Everything is served locally. The call integration mounts the same component only while its dialog is active. Calls are image-only: no workshop caption, animation button or other visual overlays. Preview chrome is an explicit `studioControls` option; the preview keeps its pause/retry controls.
+The preview offers listening/thinking poses, a generated speech sample, pause and the original reference. It does not request a microphone, authenticate, read sessions, or invoke a model. Everything is served locally. The call integration mounts the same component only while its dialog is active. Calls keep the dragon prominent, with a lightweight DOM subtitle layer at the bottom of the scene. It shows live transcript excerpts or bracketed waiting cues; the full transcript/details block is collapsed by default. There is no workshop label or animation-button overlay. Preview chrome is an explicit `studioControls` option; the preview keeps its pause/retry controls.
 
 ## Boundaries
 
 ```text
-voice/session.ts — owns audio, microphone, requests and receipts
+voice/live-session.ts — owns the ChatGPT call and audio
   └─ optional onPlayback(PlaybackCue | null)
        └─ VoiceCall.tsx stores a ref and maps call phase to PersonaMode
             └─ persona/PersonaStage.tsx — lifecycle, visibility, lazy loading
@@ -31,13 +31,14 @@ voice/session.ts — owns audio, microphone, requests and receipts
                  └─ motion.ts — pure motion / audio-envelope math
 ```
 
-`client/src/audio/playback.ts` is a presentation-only contract: text, an isolated copy of mono PCM samples, duration, sample rate, playback start and a read-only audio-clock getter. The renderer cannot start/stop speech, submit a turn, write notes, access auth or finish a sync. Observer exceptions are contained by the audio controller. No server/schema/model changes are required.
+`client/src/audio/playback.ts` is a presentation-only contract. Live calls supply a read-only energy meter and audio clock. The standalone preview supplies its stored sample's text, PCM samples, duration and playback clock. The renderer cannot start/stop speech, submit a turn, write notes, access auth or finish a sync. Observer exceptions are contained by the audio controller. Live voice optionally supplies only a read-only received-energy getter and audio clock, with no PCM retention or invented phoneme alignment. The persona itself requires no server/schema/model dependencies.
 
 `types.ts` describes the small pose/scene interface. A future authored mesh or glTF rig can replace `dragon.ts` and map the existing pose values to bones/morph targets; call logic and the room do not need to change. No glTF loading or external avatar service is implemented in this version.
 
 ## Animation and timing
 
-- Jaw energy is derived from the **actual decoded audio**, sampled into a bounded envelope. Text supplies approximate English closed/rounded/open mouth shapes across its audible duration.
+- The standalone preview derives jaw energy from its **stored sample's decoded audio**. Its text supplies approximate English mouth shapes. This preview does not synthesize speech or provide another call engine.
+- Native live voice follows actual received energy through the same presentation boundary. It does not estimate phonemes from a growing transcript; mute/stop, silence and suspended output produce a closed mouth.
 - Timing uses the same `AudioContext.currentTime` as playback—not response arrival or a looping “talk” animation. Silence, chunk boundaries, interruption, suspended audio and hang-up close the mouth.
 - Idle breathing/blinks, listening/thinking head poses, speaking gestures and question tilt are procedural. They are not model-generated emotions or evidence of attention/understanding.
 - This is **heuristic lip synchronization**, not forced phoneme alignment. Accents, names and speech rate can misalign individual shapes.
@@ -51,7 +52,7 @@ Hardware rendering is capped at 30 fps while speaking / 18 fps otherwise, DPR 1.
 
 The room is rendered and blurred only on initialization/resize; each animation frame composites that cached texture behind the sharp dragon and desk. This is layered call-style background separation, not a full optical depth-of-field simulation. Both rendering profiles use it. Blur targets/materials are disposed with the renderer.
 
-WebGL initialization/context loss switches to the static poster; voice continues independently. The call fallback stays free of visual overlays, with an accessible description. The standalone preview retains its retry button and **Pause animation** control. The preview and call were exercised in Chromium, including its software renderer. Physical mobile GPUs, Safari, Firefox and long-session battery behavior are not yet verified.
+WebGL initialization/context loss switches to the static poster; voice continues independently. The call fallback retains the same live subtitle layer and an accessible scene description. Captions are presentation only and do not drive speech or write records. The standalone preview retains its retry button and **Pause animation** control. The preview and call were exercised in Chromium, including its software renderer. Physical mobile GPUs, Safari, Firefox and long-session battery behavior are not yet verified.
 
 ## Verification
 
@@ -59,8 +60,8 @@ WebGL initialization/context loss switches to the static poster; voice continues
 npm test                 # Includes pure audio-clock/pose and module-boundary checks
 npm run test:ui          # Includes preview, reduced motion, context loss and call regressions
 
-# Explicit opt-in; real local STT/TTS + pi, synthetic evidence, isolated DB:
-node tests/voice-real.cjs --allow-provider --browser --overview --persona
+# Explicit opt-in: synthetic evidence/audio, real ChatGPT voice, staged frontend:
+DRAKEN_TEST_STATIC_DIR=/path/to/stage node tests/live-voice-real.cjs --allow-provider
 ```
 
-Browser checks cover a chrome-free call image, cached blur reuse/resize, high-quality shader compilation (also exercised on software GL), audible sample mouth motion, stopping, desktop/mobile sizing, local-only requests, no preview microphone access, WebGL loss/retry, unavailable WebGL during a working call, and context disposal on hang-up. Existing voice tests still cover speaker feedback suppression, spoken interruption, full playback receipts, citation-heavy replies and retry recovery. No production snapshot is changed by these tests.
+Browser checks cover a chrome-free call image, cached blur reuse/resize, high-quality shader compilation (also exercised on software GL), audible sample mouth motion, stopping, desktop/mobile sizing, local-only requests, no preview microphone access, WebGL loss/retry, unavailable WebGL during a working call, and context disposal on hang-up. Native controller/peer tests cover speaker/headphone gating, interruption, mute, permission refusal and cleanup. Main UI tests cover supplied sources, generated/interrupted history, explicit retry and preservation of retired-engine records. No production snapshot is changed by these tests.

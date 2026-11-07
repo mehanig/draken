@@ -1,221 +1,117 @@
-import { useEffect, useState } from 'react';
-import { ArrowRight, Check, ChevronRight, Clock3, FolderOpen, MessageSquare, RefreshCw, Sparkles } from 'lucide-react';
-import { api } from '../api';
-import type { Overview, SyncDetail } from '../types';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import * as api from '../api';
+import type { SyncDetail } from '../types';
 import { CitedText, EvidenceList } from '../components/EvidenceList';
 import { SummaryTree } from '../components/SummaryTree';
 import { VoiceCall } from '../components/VoiceCall';
+import { HistoryProgress } from '../components/HistoryProgress';
+import { SyncCost } from '../components/SyncCost';
+import { linkClick, type Navigate } from './Home';
 
-const date = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-
-export function Sync() {
-  const [overview, setOverview] = useState<Overview | null>(null);
+export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
+  id: number; callIntent: boolean; consumeIntent: () => void; navigate: Navigate; setGuard: (guard: (() => boolean) | null) => void;
+}) {
   const [sync, setSync] = useState<SyncDetail | null>(null);
-  const [work, setWork] = useState('');
-  const [voiceActive, setVoiceActive] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [question, setQuestion] = useState('');
-  const [decisions, setDecisions] = useState('');
-  const [carry, setCarry] = useState('');
-  const [reviewed, setReviewed] = useState(false);
-  const [initialWindow, setInitialWindow] = useState('24');
-
-  const showSync = (value: SyncDetail) => {
-    setSync(value); setDecisions(value.decisions); setCarry(value.carry_forward);
-  };
-  const refresh = async () => { const value = await api.overview(); setOverview(value); return value; };
-  const run = async (label: string, fn: () => Promise<void>) => {
-    setWork(label); setError(''); setNotice('');
-    try { await fn(); }
-    catch (err) { setError(err instanceof Error ? err.message : 'Something went wrong'); }
-    finally { setWork(''); }
+  const [work, setWork] = useState(''), [error, setError] = useState('');
+  const [voiceActive, setVoiceActive] = useState(false), [callAfterPreparation, setCallAfterPreparation] = useState(false);
+  const [decisions, setDecisions] = useState(''), [carry, setCarry] = useState(''), [question, setQuestion] = useState('');
+  const alive = useRef(true);
+  const show = (value: SyncDetail) => { if (alive.current) { setSync(value); setDecisions(value.decisions); setCarry(value.carry_forward); } };
+  const run = async (label: string, action: () => Promise<void>) => {
+    setWork(label); setError('');
+    try { await action(); } catch (error) { if (alive.current) setError(error instanceof Error ? error.message : 'Something went wrong'); }
+    finally { if (alive.current) setWork(''); }
   };
   useEffect(() => {
-    let alive = true;
-    api.overview().then(async value => {
-      if (!alive) return;
-      setOverview(value);
-      if (value.active_sync_id) {
-        const current = await api.sync(value.active_sync_id);
-        if (alive) showSync(current);
-      }
-    }).catch(err => { if (alive) setError(err.message); });
-    return () => { alive = false; };
-  }, []);
-
-  // Poll only compact progress, not the potentially large frozen evidence payload.
+    alive.current = true; void api.sync(id).then(show).catch(error => { if (alive.current) setError(error.message); });
+    return () => { alive.current = false; };
+  }, [id]);
   useEffect(() => {
     if (!sync?.busy) return;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
+    let stopped = false, timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const progress = await api.progress(sync.id);
-        if (!alive) return;
-        if (progress.busy) setSync(current => current?.id === sync.id ? { ...current, tree: progress } : current);
-        else {
-          const current = await api.sync(sync.id);
-          if (!alive) return;
-          showSync(current);
-          if (progress.run?.status === 'completed') setQuestion(value => value === progress.run?.question ? '' : value);
-          await refresh();
-          return;
-        }
-      } catch (err) { if (alive) setError(err instanceof Error ? err.message : 'Could not refresh progress'); }
-      if (alive) timer = setTimeout(() => void poll(), 1000);
+        const progress = await api.progress(id);
+        if (stopped) return;
+        if (progress.busy) setSync(current => current ? { ...current, tree: progress } : current);
+        else { const value = await api.sync(id); if (!stopped) { show(value); if (progress.run?.status === 'completed') setQuestion(''); } return; }
+      } catch (error) { if (!stopped) setError(error instanceof Error ? error.message : 'Could not refresh progress'); }
+      if (!stopped) timer = setTimeout(() => void poll(), 1000);
     };
-    void poll();
-    return () => { alive = false; clearTimeout(timer); };
-  }, [sync?.id, sync?.busy]);
-
-  const disabled = Boolean(work || sync?.busy || voiceActive);
-  const open = sync?.status === 'open';
+    void poll(); return () => { stopped = true; clearTimeout(timer); };
+  }, [id, sync?.busy]);
   const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward));
-  const canGenerate = sync?.snapshot_version === 2;
   useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    const guard = () => !(dirty || voiceActive) || window.confirm(voiceActive ? 'Leave this page and end the call?' : 'Leave without saving your notes?');
+    setGuard(guard);
+    const warn = (event: BeforeUnloadEvent) => { if (dirty || voiceActive) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
-  const selectSync = (id: number) => {
-    if (dirty && !window.confirm('Leave without saving your notes?')) return;
-    void run('Opening sync', async () => {
-      showSync(await api.sync(id)); setReviewed(false); setQuestion('');
-    });
-  };
-  const scan = () => void run('Reading local sessions', async () => {
-    const result = await api.scan(); setWarnings(result.warnings); await refresh();
-    setNotice(`Scanned ${result.files} files · ${result.added} new entries indexed. Nothing was sent to a model.`);
-  });
-  const start = () => void run('Preparing snapshot', async () => {
-    const since = overview?.history_initialized ? undefined : initialWindow === 'all' ? null
-      : new Date(Date.now() - Number(initialWindow) * 60 * 60 * 1000).toISOString();
-    const result = await api.start(since); showSync(result.sync); setWarnings(result.scan.warnings);
-    setReviewed(false); await refresh();
-  });
-  const generate = () => void run('Starting summary tree', async () => {
-    if (!sync) return;
-    await api.notes(sync.id, decisions, carry);
-    showSync(await api.brief(sync.id)); await refresh();
-  });
-  const discuss = (message = question) => void run('Starting discussion', async () => {
-    if (!sync) return;
-    await api.notes(sync.id, decisions, carry);
-    showSync(await api.discuss(sync.id, message));
-  });
-  const resume = () => sync?.tree.run?.question ? discuss(sync.tree.run.question) : generate();
+    return () => { setGuard(null); window.removeEventListener('beforeunload', warn); };
+  }, [dirty, voiceActive, setGuard]);
+  const consume = () => { consumeIntent(); setCallAfterPreparation(false); };
+  const disabled = Boolean(work || sync?.busy || voiceActive), open = sync?.status === 'open';
   const evidence = sync ? [...sync.items, ...sync.context] : [];
-  const workspaces = new Set(overview?.sessions.filter(s => s.included && !s.missing).map(s => s.cwd));
-  const latest = overview?.syncs.find(s => s.status === 'completed');
+  const missing = evidence.some(item => item.unavailable);
+  const prepare = () => void run('Preparing your conversation…', async () => {
+    if (!sync) return;
+    setCallAfterPreparation(true);
+    if (dirty) await api.notes(id, decisions, carry);
+    show(await api.brief(id));
+  });
+  const discuss = (text = question) => void run('Starting discussion…', async () => {
+    if (dirty) await api.notes(id, decisions, carry);
+    show(await api.discuss(id, text));
+  });
+  const resume = () => sync?.tree.run?.question ? discuss(sync.tree.run.question) : prepare();
+  const cancel = () => { consume(); void run('Stopping preparation…', async () => { await api.cancel(id); }); };
+  const preparationFailed = !sync?.busy && sync?.tree.run && ['failed', 'cancelled', 'interrupted'].includes(sync.tree.run.status);
 
-  return <div className="sync-layout">
-    <aside className="sidebar">
-      <div className="section-heading"><h2>Session sources</h2><button className="icon-button" disabled={disabled} onClick={scan} aria-label="Scan sessions"><RefreshCw size={17} /></button></div>
-      <p className="muted small">Read-only access to local pi history. Select which sessions belong in your next sync.</p>
-      <code className="source-path">{overview?.session_root || 'Loading…'}</code>
-      <div className="session-list">
-        {overview?.sessions.map(session => <label className={`session-source ${session.missing ? 'missing' : ''}`} key={session.id}>
-          <input type="checkbox" checked={Boolean(session.included)} disabled={disabled || Boolean(session.missing) || Boolean(open)} onChange={event => {
-            const included = event.target.checked;
-            void run('Updating sources', async () => setOverview(await api.include(session.id, included)));
-          }} />
-          <span><strong>{session.name || session.cwd.split('/').filter(Boolean).pop() || session.id.slice(0, 8)}</strong>
-            <span className="source-cwd" title={session.cwd}>{session.cwd}</span>
-            <span className="small muted">{session.id.slice(0, 8)} · {session.missing ? 'source unavailable' : `${session.pending} uncovered entries`}</span>
-          </span>
-        </label>)}
-        {overview && !overview.sessions.length && <div className="empty-sidebar"><FolderOpen size={25} /><p>No sessions indexed yet.</p><button className="btn btn-secondary" onClick={scan} disabled={disabled}>Scan local sessions</button></div>}
+  return <main className="sync-detail">
+    <a className="back-link" href="/" onClick={event => linkClick(event, navigate, '/')}><ArrowLeft size={16} />All syncs</a>
+    {error && <div className="alert error" role="alert">{error}</div>}
+    {!sync && !error && <p role="status">Opening sync…</p>}
+    {sync && <>
+      <div className="page-heading"><div><span className="eyebrow">FROZEN CONVERSATION</span><h1>Sync #{id}</h1><p className="muted">{new Date(sync.snapshot_at).toLocaleString()} · {sync.item_count} entries · <span className={`status ${sync.status}`}>{sync.status === 'completed' ? 'reviewed' : sync.status}</span></p><SyncCost cost={sync.aggregation_cost} /></div>
+        {open && <button className="btn btn-secondary" disabled={disabled || missing || Boolean(sync.tree.run && !sync.tree.complete)} onClick={() => {
+          if (!window.confirm(`Mark these ${sync.item_count} snapshot entries reviewed? Later activity is not affected. This does not mean every spoken suggestion was agreed.`)) return;
+          void run('Marking snapshot reviewed…', async () => { show(await api.finish(id, decisions, carry)); });
+        }}><Check size={16} />Mark reviewed</button>}
       </div>
-      {open && <p className="muted small">This sync is frozen. Finish or discard it before changing sources.</p>}
-      <div className="section-heading history-heading"><h2>Previous syncs</h2><Clock3 size={16} /></div>
-      <div className="history-list">{overview?.syncs.map(item => <button key={item.id} disabled={disabled} className={`history-item ${sync?.id === item.id ? 'selected' : ''}`} onClick={() => selectSync(item.id)}>
-        <span><strong>Sync #{item.id}</strong><span className="small muted">{date(item.created_at)}</span></span>
-        <span className={`status ${item.status}`}>{item.status}</span>
-      </button>)}</div>
-      {!overview?.syncs.length && <p className="muted small">Your first conversation starts here.</p>}
-    </aside>
-
-    <main className="sync-main">
-      <div className="page-heading"><div><span className="eyebrow">YOUR ENGINEERING SYNC</span><h1>Pick up where you left off.</h1>
-        <p className="muted">{latest ? `Last completed sync: ${date(latest.completed_at!)}` : 'Across sessions. Across projects. One conversation.'}</p></div>
-        {(!open || overview?.active_sync_id !== sync?.id) && <button className="btn btn-primary" disabled={disabled || !overview} onClick={() => {
-          if (overview?.active_sync_id) selectSync(overview.active_sync_id); else start();
-        }}>{overview?.active_sync_id ? 'Resume sync' : 'Start sync'}<ArrowRight size={17} /></button>}
-      </div>
-      <div className="stats"><span><strong>{overview?.pending ?? '—'}</strong> uncovered entries</span><span><strong>{workspaces.size}</strong> workspaces</span><span className="local-badge"><span /> Local-first · read-only</span></div>
-      {overview && !overview.history_initialized && !open && <div className="initial-window">
-        <label htmlFor="initial-window">Start your first sync from</label>
-        <select id="initial-window" value={initialWindow} disabled={disabled} onChange={e => setInitialWindow(e.target.value)}>
-          <option value="24">The last 24 hours</option><option value="168">The last 7 days</option><option value="all">All indexed history</option>
-        </select>
-        <p className="muted small">This sets a fixed starting point. Older entries won’t be treated as new work, but may appear as background. Later syncs use uncovered activity after that starting point.</p>
-      </div>}
-      {overview?.history_initialized && <p className="muted small">History starts {overview.history_since ? date(overview.history_since) : 'at the beginning of indexed sessions'}. This baseline does not move between syncs.</p>}
-      {error && <div className="alert error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
-      {notice && <div className="alert success" role="status">{notice}</div>}
-      {warnings.length > 0 && <details className="alert warning"><summary>{warnings.length} indexing warning{warnings.length !== 1 ? 's' : ''}</summary><ul>{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
-      {(work || sync?.busy) && <div className="working" role="status"><span className="spinner" />{work || 'A reply is being generated. You can leave and resume this sync.'}</div>}
-
-      {!sync && <section className="card welcome">
-        <div className="welcome-symbol"><MessageSquare size={32} /></div><h2>What happened since we last talked?</h2>
-        <p>Draken reads your pi sessions, brings the evidence together, and helps you separate progress from unfinished work.</p>
-        <div className="steps"><span><b>01</b> Scan & select sessions</span><ChevronRight size={15} /><span><b>02</b> Review & discuss</span><ChevronRight size={15} /><span><b>03</b> Save decisions</span></div>
-        <p className="muted small">Choose your first-sync window above. All eligible history enters one snapshot; a cheaper model builds a summary tree before the final verdict. No model calls happen while scanning.</p>
-        <button className="btn btn-primary" disabled={disabled || !overview} onClick={start}>Prepare first sync <ArrowRight size={16} /></button>
-      </section>}
-
-      {sync && <>
-        <VoiceCall key={`voice-${sync.id}`} sync={sync} disabled={disabled} onActiveChange={setVoiceActive}
-          beforeStart={async () => { if (dirty) showSync(await api.notes(sync.id, decisions, carry)); }}
-          onClosed={async () => { await run('Saving call transcript', async () => { showSync(await api.sync(sync.id)); await refresh(); }); }} />
-        <section className="card briefing-card">
-          <div className="section-heading"><h2>Sync #{sync.id} <span className={`status ${sync.status}`}>{sync.status}</span></h2><span className="muted small">Snapshot · {date(sync.snapshot_at)}</span></div>
-          <p className="muted small">{sync.items.length} new evidence entries · {new Set(sync.items.map(item => item.session_id)).size} sessions. Activity arriving after this snapshot belongs to a later sync.</p>
-          {sync.snapshot_version < 2 && <div className="alert warning">This is an old capped snapshot: {sync.remaining_count} entries were left out. Its briefing may describe outdated plans rather than later outcomes.
-            {open && <p><button className="btn btn-secondary" disabled={disabled} onClick={() => {
-              if (!window.confirm('Expand to all currently eligible history? Notes and discussion are kept, the old briefing is archived, and existing evidence references remain available. This performs no model calls.')) return;
-              void run('Expanding snapshot', async () => {
-                await api.notes(sync.id, decisions, carry);
-                const result = await api.expand(sync.id); showSync(result.sync); setWarnings(result.scan.warnings);
-                setReviewed(false); await refresh();
-              });
-            }}>Expand to full history</button></p>}
-          </div>}
-          {sync.briefing ? <CitedText text={sync.briefing} evidence={evidence} /> : <div className="briefing-placeholder"><Sparkles size={25} /><h3>Your evidence is ready.</h3><p>Inspect the source excerpts below, then ask Draken for a briefing. You can also review and finish without a model.</p></div>}
-          {open && !sync.briefing && <div className="briefing-actions">
-            <button className="btn btn-primary" disabled={disabled || !canGenerate} onClick={generate}><Sparkles size={16} />Generate briefing</button>
-          </div>}
-        </section>
-
-        <SummaryTree key={sync.id} syncId={sync.id} progress={sync.tree} evidence={evidence} onResume={open ? resume : undefined} resumeEnabled={!disabled && canGenerate} onCancel={() => void run('Cancelling generation', async () => { await api.cancel(sync.id); })} />
-
-        {(sync.messages.length > 0 || open) && <section className="card discussion"><h2>Talk it through</h2>
-          {sync.messages.map(message => <div className={`message ${message.role}`} key={message.id}><span className="message-author">{message.role === 'user' ? 'You' : 'Draken'}</span><CitedText text={message.content} evidence={evidence} /></div>)}
-          {open && <form onSubmit={e => { e.preventDefault(); discuss(); }}><label htmlFor="question" className="sr-only">Ask Draken about this sync</label>
-            <textarea id="question" rows={3} maxLength={4000} placeholder="What is still blocked? Did we actually validate that change?" value={question} disabled={disabled} onChange={e => setQuestion(e.target.value)} />
-            <div className="form-footer"><span className="muted small">Answers stay attached to this sync.</span><button className="btn btn-primary" disabled={disabled || !canGenerate || !question.trim()}>Ask Draken <ArrowRight size={16} /></button></div></form>}
-        </section>}
-
-        <section className="card notes-card"><div className="section-heading"><h2>What we’re taking away</h2>{dirty && <span className="small unsaved">Unsaved changes</span>}</div>
-          <div className="notes-grid"><div><label htmlFor="decisions">Decisions</label><textarea id="decisions" rows={5} maxLength={4000} disabled={!open || disabled} value={decisions} onChange={e => setDecisions(e.target.value)} placeholder="What did we agree? Priorities, choices, things not to do…" /></div>
-            <div><label htmlFor="carry-forward">Carry into the next sync</label><textarea id="carry-forward" rows={5} maxLength={4000} disabled={!open || disabled} value={carry} onChange={e => setCarry(e.target.value)} placeholder="Open questions, blockers, deferred topics. Remove resolved items." /></div></div>
-          <p className="muted small">These are your notes, not automatic model conclusions. Carry-forward items persist until you remove them; the manager also receives decisions from the last 10 completed syncs.</p>
-          {open && <div className="finish-controls"><button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes', async () => { showSync(await api.notes(sync.id, decisions, carry)); setNotice('Notes saved. Coverage has not advanced.'); })}>Save notes</button>
-            <label className="check-row"><input type="checkbox" checked={reviewed} disabled={disabled} onChange={e => setReviewed(e.target.checked)} /><span>I reviewed this snapshot. Mark its {sync.items.length} entries covered when I finish.</span></label>
-            <div className="finish-actions"><button className="btn btn-ghost" disabled={disabled} onClick={() => {
-              if (window.confirm('Discard this sync? Its entries remain uncovered. The discarded snapshot stays in history.')) void run('Discarding sync', async () => { showSync(await api.discard(sync.id)); await refresh(); });
-            }}>Discard sync</button><button className="btn btn-primary" disabled={disabled || !reviewed || Boolean(sync.tree.run && !sync.tree.complete)} onClick={() => void run('Finishing sync', async () => {
-              showSync(await api.finish(sync.id, decisions, carry)); await refresh(); setReviewed(false); setNotice('Sync saved. Activity arriving after this snapshot remains for next time.');
-            })}><Check size={17} />Finish sync</button></div>
-          </div>}
-        </section>
-        {sync.memory.length > 0 && <details className="memory-panel"><summary>Memory from previous syncs</summary>{sync.memory.map((item, index) => <div key={item.sync_id}><h4>Sync #{item.sync_id}{index === 0 ? ' · most recent' : ''}</h4><p className="prose">{item.decisions || 'No decisions recorded.'}</p>{index === 0 && <p className="prose muted">Carried forward: {item.carry_forward || 'Nothing recorded.'}</p>}</div>)}</details>}
-        <EvidenceList key={`new-${sync.id}`} items={sync.items} title="New evidence in this snapshot" />
-        <EvidenceList key={`context-${sync.id}`} items={sync.context} title="Earlier context — not new progress" />
-      </>}
-    </main>
-  </div>;
+      {missing && <div className="alert warning" role="alert"><strong>Original session evidence unavailable.</strong><p>Restore the original session files to inspect the missing excerpts, prepare replies, call or mark this snapshot reviewed. Your conversation and saved notes are still available; Draken keeps pointers, not copies of original session text.</p></div>}
+      {(work || sync.busy) && <div className="working" role="status"><span className="spinner" />{work || (sync.recap_state === 'running' ? 'Making a short conversation recap…' : sync.tree.run?.stage || 'Preparing your conversation…')}
+        {sync.busy && <button className="btn btn-secondary" onClick={cancel}>Cancel preparation</button>}</div>}
+      <HistoryProgress enabled={Boolean(sync.busy && sync.tree.run?.question)} />
+      {sync.busy && sync.recap_state !== 'running' && <p className="small muted">The complete new snapshot is being reconciled. Large histories can take a while. Leaving or reloading will not start your microphone.</p>}
+      {preparationFailed && <div className="alert warning" role="alert"><strong>{sync.tree.run?.question ? 'Reply stopped.' : 'Preparation stopped.'}</strong><p>{sync.tree.run?.error || 'Your snapshot is retained. Nothing was marked reviewed.'}</p><button className="btn btn-primary" disabled={disabled || missing} onClick={resume}>{sync.tree.run?.question ? 'Retry reply' : 'Retry preparation & call'}</button></div>}
+      {open && !sync.briefing && !sync.busy && !preparationFailed && sync.snapshot_version === 2 && <button className="btn btn-primary" disabled={disabled || missing} onClick={prepare}>Prepare &amp; call</button>}
+      <VoiceCall key={id} sync={sync} disabled={disabled || missing} onActiveChange={setVoiceActive}
+        autoStart={(callIntent || callAfterPreparation) && !preparationFailed && !missing} onAutoStartHandled={consume}
+        beforeStart={async () => { if (dirty) show(await api.notes(id, decisions, carry)); }}
+        onClosed={async () => { await run('Saving a short recap…', async () => { show(await api.recap(id)); }); }} />
+      <section className="card recap-card"><div className="section-heading"><h2>At a glance</h2><button className="btn btn-secondary" disabled={disabled} onClick={() => void run('Summarizing the conversation…', async () => show(await api.recap(id)))}>{sync.recap ? 'Refresh recap' : 'Make recap'}</button></div>
+        <p className="prose">{sync.recap || 'The call and this sync will be condensed here after you talk. The full briefing and original history remain below.'}</p>
+        <p className="small muted">Automatic summary, not saved decisions or proof of agreement.</p>{sync.recap_error && <p role="alert" className="small">{sync.recap_error}</p>}
+      </section>
+      {sync.memory.length > 0 && <details className="detail-section"><summary>Previous sync recaps</summary>{sync.memory.map(item => <article key={item.sync_id} className="memory-recap"><a href={`/syncs/${item.sync_id}`} onClick={event => linkClick(event, navigate, `/syncs/${item.sync_id}`)}>Sync #{item.sync_id}</a> <span className="small muted">{item.status === 'open' ? 'not marked reviewed' : item.status || 'historical'}</span><p className="prose">{item.recap || 'No automatic recap in this older snapshot.'}</p>{item.decisions && <p className="small prose">Saved decisions: {item.decisions}</p>}{item.carry_forward && <p className="small prose">Carried forward: {item.carry_forward}</p>}</article>)}</details>}
+      <details className="detail-section" open={!sync.messages.length && Boolean(sync.briefing)}><summary>Full briefing</summary><section className="briefing-card">
+        <p className="small muted">New activity after {new Date(sync.snapshot_at).toLocaleString()} stays outside this snapshot.</p>
+        {sync.briefing ? <CitedText text={sync.briefing} evidence={evidence} /> : <p>No briefing yet.</p>}
+        {sync.snapshot_version < 2 && <div className="alert warning">This is a historical capped snapshot. Notes and discussion are preserved.
+          {open && <button className="btn btn-secondary" disabled={disabled} onClick={() => { if (window.confirm('Expand this legacy snapshot to currently eligible history? Existing notes and citations are retained.')) void run('Expanding snapshot…', async () => show((await api.expand(id)).sync)); }}>Expand to full history</button>}</div>}
+      </section></details>
+      <details className="detail-section"><summary>Conversation &amp; text discussion ({sync.messages.length})</summary><section className="discussion">
+        {sync.messages.map(message => <div className={`message ${message.role}`} key={message.id}><span className="message-author">{message.role === 'user' ? 'You' : 'Draken'}</span><CitedText text={message.content} evidence={evidence} /></div>)}
+        {open && <form onSubmit={event => { event.preventDefault(); discuss(); }}><label className="sr-only" htmlFor="question">Ask Draken about this sync</label><textarea id="question" rows={3} maxLength={4000} value={question} disabled={disabled} onChange={event => setQuestion(event.target.value)} placeholder="Or continue in text…" /><p className="small muted">Relevant earlier history is found automatically and supplied to the discussion model, separately from this snapshot. Nothing is marked reviewed.</p><div className="form-footer"><button className="btn btn-primary" disabled={disabled || missing || !question.trim()}>Ask Draken<ArrowRight size={16} /></button></div></form>}
+      </section></details>
+      <details className="detail-section"><summary>Decisions &amp; carry-forward{dirty ? ' · unsaved' : ''}</summary><section className="notes-card"><div className="notes-grid"><div><label htmlFor="decisions">Decisions</label><textarea id="decisions" rows={4} maxLength={4000} disabled={!open || disabled} value={decisions} onChange={event => setDecisions(event.target.value)} /></div><div><label htmlFor="carry-forward">Carry into the next sync</label><textarea id="carry-forward" rows={4} maxLength={4000} disabled={!open || disabled} value={carry} onChange={event => setCarry(event.target.value)} /></div></div><p className="small muted">Only these explicitly saved notes are decisions. A call or its automatic recap does not mark anything agreed or reviewed.</p>{open && <button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes…', async () => show(await api.notes(id, decisions, carry)))}>Save notes</button>}</section></details>
+      <details className="detail-section"><summary>Evidence &amp; preparation details</summary>
+        <SummaryTree syncId={id} progress={sync.tree} evidence={evidence} onResume={open ? resume : undefined} resumeEnabled={!disabled && !missing} onCancel={cancel} />
+        <EvidenceList items={sync.items} title="New evidence in this snapshot" /><EvidenceList items={sync.context} title="Earlier context — not new progress" />
+      </details>
+      {open && <div className="detail-footer"><p className="small muted">Included does not mean reviewed. You can return to this sync at this URL, or start a separate one for new activity.</p><button className="btn btn-ghost" disabled={disabled} onClick={() => {
+        if (window.confirm('Discard this sync and release its unreviewed entries? Its history is retained.')) void run('Discarding sync…', async () => show(await api.discard(id)));
+      }}>Discard sync</button></div>}
+    </>}
+  </main>;
 }

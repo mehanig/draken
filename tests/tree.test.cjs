@@ -1,3 +1,4 @@
+require('./fixtures/fake-memory.cjs');
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -8,7 +9,7 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { scanSessions } = require('../dist/sync/collector');
 const store = require('../dist/sync/store');
 const { generateReply, cancelReply, retrieveEvidence, validateVerdict } = require('../dist/sync/manager');
-const { SummaryTree, validateSummary, validateGroups } = require('../dist/sync/tree');
+const { SummaryTree, validateSummary, validateGroups, repairSummaryCitations } = require('../dist/sync/tree');
 const { prepareModelInput } = require('../dist/sync/references');
 
 let temp, root, controlPath, logPath;
@@ -278,12 +279,43 @@ test('repair receives the rejected response, precise error, and allowed short la
   const result = await generateReply(sync.id);
   const chunks = calls().filter(call => call.stage === 'chunk');
   assert.equal(chunks.length, 2);
+  assert.equal(chunks[1].task, 'repair_summary_citations');
+  assert.equal(chunks[1].citation_repairs[0].max_references, 16);
+  assert.deepEqual(chunks[1].citation_repairs[0].candidate_source_ids, chunks[0].input.evidence.slice(0,17).map(item=>item.id));
   assert.match(chunks[1].repair.validation_error, /17 distinct source IDs/);
   assert.equal(JSON.parse(chunks[1].repair.previous_output).observations[0].evidence.length, 17);
   assert.ok(chunks[1].allowed_source_ids.every(id => /^S\d+$/.test(id)));
   assert.equal(result.tree.complete, true);
   const cached = getDb().prepare("SELECT output_json FROM summary_cache WHERE kind = 'chunk'").get();
   assert.ok(JSON.parse(cached.output_json).observations[0].evidence.every(id => /^K/.test(id)), 'cache holds canonical IDs, never short wire labels');
+});
+
+test('citation-only repair changes no claims and retains model-selected late support rather than slicing arrays', () => {
+  const refs=Array.from({length:40},(_,i)=>`S${i+1}`), allowed=new Set(refs);
+  const observation=(evidence,summary='Reported tests passed; deployment remains unverified.')=>({topic:'Export',state:'reported_done',summary,evidence});
+  const candidate={observations:[observation(refs.slice(0,19)),observation(['S40'],'Separate unchanged claim'),observation(refs.slice(20,39))],limitations:['Original qualification']};
+  const original=JSON.stringify(candidate);
+  const repaired=repairSummaryCitations(candidate,{selections:[{observation:3,evidence:['S39','S21']},{observation:1,evidence:['S19','S2','S19']}]},allowed);
+  assert.equal(JSON.stringify(candidate),original,'Do not mutate the rejected candidate');
+  assert.deepEqual(repaired.observations.map(x=>x.evidence),[['S19','S2'],['S40'],['S39','S21']]);
+  assert.deepEqual(repaired.observations.map(({evidence,...claim})=>claim),candidate.observations.map(({evidence,...claim})=>claim));
+  assert.deepEqual(repaired.limitations,candidate.limitations);
+});
+
+test('citation-only repair fails closed for missing, duplicate, unrelated, unknown, overfull and unsupported selections', () => {
+  const refs=Array.from({length:20},(_,i)=>`S${i+1}`),allowed=new Set(refs);
+  const candidate={observations:[{topic:'Demo',state:'unclear',summary:'A qualified report',evidence:refs.slice(0,19)}],limitations:[]};
+  for(const selections of [[],[{observation:2,evidence:['S1']}],[{observation:1,evidence:['S1']},{observation:1,evidence:['S2']}],[{observation:1,evidence:['S20']}],[{observation:1,evidence:['S999']}],[{observation:1,evidence:refs.slice(0,17)}],[{observation:1,evidence:[]}],[{observation:1,evidence:['S1'],summary:'Do not rewrite claims'}]]) {
+    assert.throws(()=>repairSummaryCitations(candidate,{selections},allowed),/Citation repair/);
+  }
+  assert.throws(()=>repairSummaryCitations({...candidate,observations:[...candidate.observations,{...candidate.observations[0],evidence:['S999']}]},{selections:[{observation:1,evidence:['S1']}]},allowed),/unknown source/);
+});
+
+test('a failed citation selection remains bounded and resumable without advancing coverage', async () => {
+  const sync=await begin(120);control({tooManySources:true,badCitationSelection:true});
+  await assert.rejects(generateReply(sync.id),/Citation repair still exceeds/);
+  assert.equal(calls().length,2);assert.equal(store.pendingCount(),120);assert.equal(store.getSync(sync.id).busy,false);
+  control({tooManySources:true});const done=await generateReply(sync.id);assert.equal(done.tree.complete,true);assert.equal(store.pendingCount(),120);
 });
 
 test('an invented label is rejected, then repaired by the model rather than guessed locally', async () => {

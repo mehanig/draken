@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import * as api from '../api';
 import type { Evidence, NodeSummary, TopicGroups, TreeNode, TreeProgress } from '../types';
 import { CitedText } from './EvidenceList';
 
@@ -43,10 +43,15 @@ export function SummaryTree({ syncId, progress, evidence, onCancel, onResume, re
   };
   return <section className="card tree-card">
     <div className="section-heading"><h2>Summary tree</h2><span className={`status ${run.status}`}>{run.status}</span></div>
-    <p className="small muted">Session chunks → session outcomes → related workstreams → final verdict</p>
+    <p className="small muted">Complete source batches → compact reconciliation → final verdict</p>
     <progress max={Math.max(1, run.total_entries)} value={run.processed_entries} aria-label="Evidence compression progress" />
     <div className="tree-stats"><span>{run.processed_entries} / {run.total_entries} entries processed</span>
       <span>{run.invocations} / {run.max_invocations} pi invocations</span><span>{run.cache_hits} cached nodes reused</span></div>
+    {!!run.metrics?.length && <details className="small"><summary>Model request timing</summary>
+      <p>{(run.metrics.reduce((sum, call) => sum + call.elapsed_ms, 0) / 1000).toFixed(1)} seconds across {run.metrics.length} requests · {run.metrics.reduce((sum, call) => sum + call.input_tokens_estimate, 0).toLocaleString()} estimated input tokens.</p>
+      <p className="muted">Includes pi startup and provider waiting/generation, not separately measured. Token counts are local planning estimates with input headroom, not billed usage. A completed request can still fail summary validation.</p>
+      <ul>{run.metrics.map((call, index) => <li key={index}>{call.stage || call.task}{call.repair ? ' (repair)' : ''} · {(call.elapsed_ms / 1000).toFixed(1)} s · {call.status}</li>)}</ul>
+    </details>}
     <p className="small">{stopped ? 'Stopped at: ' : ''}{run.stage}</p>
     {run.question && <p className="small muted">Question: {run.question}</p>}
     {run.error && <div className="alert error" role="alert"><strong>Last run’s error:</strong> {run.error}</div>}

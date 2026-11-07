@@ -5,7 +5,7 @@ import './persona.css';
 
 export interface PersonaStageProps {
   mode: PersonaMode;
-  /** Preview-only chrome; calls remain an uninterrupted image. */
+  /** Preview-only chrome; call subtitles are owned by the surrounding call UI. */
   studioControls?: boolean;
   /** Read-only pull interface avoids React updates on every audio/animation frame. */
   playback: { readonly current: PlaybackCue | null };

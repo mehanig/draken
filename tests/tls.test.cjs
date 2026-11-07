@@ -17,7 +17,8 @@ test('local TLS setup is reusable, trusted HTTPS retains auth, and certificate d
   const bundle = path.join(root, 'accidental-bundle.pem');
   fs.writeFileSync(bundle, Buffer.concat([ca, fs.readFileSync(path.join(root, 'tls/draken-local-root.key'))]));
   Object.assign(process.env, { DRAKEN_DATA_DIR: root, DRAKEN_HOST: '127.0.0.1', DRAKEN_NO_AUTH: 'false', DRAKEN_USERNAME: 'test',
-    DRAKEN_PASSWORD: 'test', DRAKEN_JWT_SECRET: 'tls-test-only-not-a-real-secret', DRAKEN_TLS_CA: bundle });
+    DRAKEN_PASSWORD: 'test', DRAKEN_JWT_SECRET: 'tls-test-only-not-a-real-secret', DRAKEN_TLS_CA: bundle,
+    DRAKEN_CODEX_HOME: path.join(root, 'empty-account'), DRAKEN_CODEX_BIN: path.join(__dirname, 'fixtures/fake-codex.cjs') });
   const { createApp, startServer } = require('../dist/server');
   const { getDb, closeDb } = require('../dist/db/schema'); getDb();
   const server = https.createServer({ cert, key }, createApp()).listen(0, '127.0.0.1');
