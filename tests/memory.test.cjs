@@ -6,6 +6,7 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
 const { sourceEntry, editEntry } = require('./fixtures/source-entry.cjs');
 const { EntryReader } = require('../dist/sync/source-files');
+const { EvidenceReader } = require('../dist/db/evidence');
 const { historySources } = require('../dist/memory/sources');
 const { legacyIndex } = require('./fixtures/legacy-storage.cjs');
 const { historyPacket } = require('../dist/memory/context');
@@ -36,6 +37,11 @@ function entry(text, session = 'session-a', timestamp = at) {
   return sourceEntry(db, process.env.DRAKEN_PI_SESSIONS_DIR, text, { session, timestamp });
 }
 function effective(id) { const reader = new EntryReader(db); try { return reader.effective(id); } finally { reader.close(); } }
+function frozen(e) {
+  const reader = new EvidenceReader(db);
+  try { return reader.freeze({ ref: 'E1', event_key: e.event_key, session_id: e.session_id, session_name: 'Alpha', cwd: '/demo/alpha', timestamp: at, role: 'assistant', text: effective(e.id), entry_id: e.entry_id }); }
+  finally { reader.close(); }
+}
 function change(id, text) { editEntry(db, process.env.DRAKEN_PI_SESSIONS_DIR, id, text); }
 function sync() { return Number(db.prepare("INSERT INTO syncs(created_at,snapshot_at,snapshot_version,status) VALUES(?,?,2,'completed')").run(at, at).lastInsertRowid); }
 function protectedRows() { return JSON.stringify(['agent_sessions', 'agent_entries', 'syncs', 'sync_items', 'sync_messages', 'sync_coverage', 'summary_cache', 'sync_runs'].map(table => db.prepare(`SELECT * FROM ${table}`).all())); }
@@ -89,7 +95,7 @@ test('current exclusions, missing sources, branch changes and baseline are enfor
 test('reviewed frozen evidence stays searchable; attributions retain scope and share automatic embedding cache', async () => {
   const id = entry('Whisper proposal; tests unverified.'); const s = sync();
   const e = db.prepare('SELECT * FROM agent_entries WHERE id=?').get(id);
-  db.prepare('INSERT INTO sync_items VALUES(?,?,?)').run(s, e.event_key, JSON.stringify({ ref: 'E1', event_key: e.event_key, session_id: e.session_id, session_name: 'Alpha', cwd: '/demo/alpha', timestamp: at, role: 'assistant', text: effective(e.id), entry_id: e.entry_id }));
+  db.prepare('INSERT INTO sync_items VALUES(?,?,?)').run(s, e.event_key, frozen(e));
   db.prepare('INSERT INTO sync_coverage VALUES(?,?)').run(e.event_key, s);
   const found = await index.search({ question: 'Whisper' }); assert.equal(found.results.length, 1);
   assert.equal(model.calls, 2, 'one passage embedding plus one query, despite two source attributions');
@@ -200,7 +206,7 @@ test('progress counts unique passages, reuses cached copies across scopes and re
   assert.equal(updates.at(-1).stage, 'searching');
   // Same body/title as a frozen attribution must share the original embedding.
   const s = sync(), e = db.prepare("SELECT * FROM agent_entries WHERE session_id='session-a'").get();
-  db.prepare('INSERT INTO sync_items VALUES(?,?,?)').run(s, e.event_key, JSON.stringify({ ref: 'E1', event_key: e.event_key, session_id: e.session_id, session_name: 'Alpha', cwd: '/demo/alpha', timestamp: at, role: 'assistant', text: effective(e.id), entry_id: e.entry_id }));
+  db.prepare('INSERT INTO sync_items VALUES(?,?,?)').run(s, e.event_key, frozen(e));
   const before = protectedRows(), calls = model.calls, later = [];
   await index.prepare({ session_id: 'session-a' }, update => {
     later.push(update);

@@ -4,6 +4,7 @@ import { cleanText } from '../sync/normalize';
 import { getSourceRoots, type RootInput } from '../sources/registry';
 import { NormalizationCache } from '../sync/jsonl';
 import { initHistoryStorage } from './storage';
+import { sourceStamps, saveSourceCheckpoint } from './stamps';
 import { digest, historySources, type SourceRecord } from './sources';
 import { historyUpdate, type Embedder, type HistoryPage, type HistoryQuery, type HistoryResults, type ReportHistory } from './types';
 
@@ -56,8 +57,12 @@ export class HistoryIndex {
   /** Automatic, on demand. A search never requires a separate setup/update action.
    * Freeze the candidate set here; revalidation may remove records, but arrivals
    * during this lookup belong to the next one rather than a partial keyword mode. */
-  async prepare(scope: Partial<HistoryQuery> = {}, report?: ReportHistory) {
-    report?.(historyUpdate('scanning')); this.refresh();
+  async prepare(scope: Partial<HistoryQuery> = {}, report?: ReportHistory, checkpoint = !scope.session_id && !scope.sync_id && !scope.before) {
+    report?.(historyUpdate('scanning'));
+    // Scoped lookups cannot claim global background coverage. Capture the
+    // candidate metadata before inference; later source changes stay pending.
+    const stamps = checkpoint ? sourceStamps(this.source, scope.before || new Date().toISOString()) : undefined;
+    this.refresh();
     const filter = this.filter(scope);
     const groups = this.db.prepare(`SELECT DISTINCT p.id FROM passages p JOIN chunk_links c ON c.passage_id=p.id JOIN records r ON r.ref=c.ref
       WHERE p.embedded=0 ${filter.sql} ORDER BY p.id`).all(...filter.args) as { id: number }[];
@@ -67,7 +72,7 @@ export class HistoryIndex {
     let completed = 0, computed = 0, meanMs = 0, measured = 0;
     const notify = (stage: 'loading' | 'indexing') => report?.(historyUpdate(stage, { total, completed, reused, parallelism: this.model.parallelism,
       remaining_seconds: completed === total ? 0 : measured >= 8 ? Math.ceil((total - completed) * meanMs / 1000) : null }));
-    if (!total) { notify('indexing'); return; }
+    if (!total) { if (stamps) saveSourceCheckpoint(this.db, stamps); notify('indexing'); return; }
     notify('loading'); await this.ensureModel(report);
     const getChunk = this.db.prepare('SELECT c.ref,c.offset,p.hash FROM chunk_links c JOIN passages p ON p.id=c.passage_id WHERE p.id=? ORDER BY c.id LIMIT 1');
     const saveVector = this.db.prepare('INSERT INTO passage_vectors(rowid,embedding) VALUES(?,?)');
@@ -108,6 +113,7 @@ export class HistoryIndex {
       if (pending.length >= 64 || Date.now() - lastCommit >= 1000) commit();
     }
     commit(); notify('indexing'); this.refresh(false);
+    if (stamps) saveSourceCheckpoint(this.db, stamps);
   }
   private async ensureModel(report?: ReportHistory) {
     if (!this.modelPrepared || !this.model.ready()) { await this.model.setup(report); this.modelPrepared = true; }

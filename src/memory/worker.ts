@@ -34,7 +34,7 @@ process.on('message', async (message: any) => {
       }
     };
     let value;
-    if (message.method === 'prepare') { await index.prepare({ before: message.before }, report); value = null; }
+    if (message.method === 'prepare') { await index.prepare({ before: message.before }, report, true); value = null; }
     else if (message.method === 'search') value = await index.search(message.query, report);
     else if (message.method === 'read') { report(historyUpdate('reading')); value = index.read(message.ref, message.offset); }
     else throw new Error('Unknown history operation');

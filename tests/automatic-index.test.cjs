@@ -50,11 +50,13 @@ test('settings are persistent, validated, read-only on GET, and protected from c
 });
 test('opted-in timer scans and indexes actual synthetic pointers without creating syncs or provider calls',async t=>{
  const Database=require('better-sqlite3'),{HistoryIndex}=require('../dist/memory/index'),service=require('../dist/memory/service');
- const original=service.prepareHistory,cache=new Database(':memory:');let jobs=0,foregroundJobs=0,embeddings=0;
+ fs.mkdirSync(root+'/state/memory',{recursive:true});
+ const original=service.prepareHistory,cache=new Database(root+'/state/memory/index.sqlite');let jobs=0,foregroundJobs=0,embeddings=0;
  const now=Date.now(),id='synthetic-auto-session',header={type:'session',version:3,id,cwd:'/synthetic/auto',timestamp:new Date(now-1000).toISOString()};
  const contents=[header,...Array.from({length:70},(_,n)=>({type:'message',id:String(n),parentId:n?String(n-1):null,timestamp:header.timestamp,message:{role:'assistant',content:'Synthetic record '+n+'; deployment not checked.'}}))].map(JSON.stringify).join('\n')+'\n';
  fs.writeFileSync(root+'/sessions/auto.jsonl',contents);const index=new HistoryIndex(cache,getDb(),{fingerprint:'auto-synthetic-only',ready:()=>true,setup:async()=>{},embed:async()=>{embeddings++;const v=new Float32Array(384);v[0]=1;return v;}});
- service.prepareHistory=async(before,signal,background=false)=>{assert.equal(signal.aborted,false);if(background)jobs++;else foregroundJobs++;await index.prepare({before});};
+ await index.prepare(); // Fixture-created empty cache has a known empty checkpoint.
+ service.prepareHistory=async(before,signal,background=false)=>{assert.equal(signal.aborted,false);if(background)jobs++;else foregroundJobs++;await index.prepare({before},undefined,true);};
  t.mock.timers.enable({apis:['setInterval','Date'],now});
  try{
   startBackgroundIndexing();t.mock.timers.tick(60000);await new Promise(r=>setTimeout(r,20));assert.equal(jobs,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);
