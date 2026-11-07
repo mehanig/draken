@@ -63,8 +63,11 @@ export function loadSourceCheckpoint(directory: string): Map<string, string> | u
   const db = new Database(file, { readonly: true, fileMustExist: true });
   try {
     db.pragma('query_only = ON'); db.pragma('busy_timeout = 5000');
-    const row = db.prepare('SELECT value FROM meta WHERE key=? AND length(value)<=33554432').get(KEY) as { value: string } | undefined;
-    if (!row) return undefined;
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get()) return new Map(); // Interrupted brand-new initialization.
+    const size = db.prepare('SELECT length(value) AS size FROM meta WHERE key=?').get(KEY) as { size: number } | undefined;
+    if (!size) return undefined;
+    if (size.size > 33554432) throw new Error('Oversized background checkpoint');
+    const row = db.prepare('SELECT value FROM meta WHERE key=?').get(KEY) as { value: string };
     const pairs: unknown = JSON.parse(row.value);
     if (!Array.isArray(pairs) || pairs.some(pair => !Array.isArray(pair) || pair.length !== 2 || pair.some(value => typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))) throw new Error('Invalid background checkpoint');
     const result = new Map<string, string>(pairs);

@@ -83,8 +83,18 @@ test('real source rewrites count each edited record once; failed preparation kee
  model.embed=embed;await scheduler().tick();assert.equal(jobs,2);assert.equal(embeddings,128);
 });
 
+test('an interrupted first preparation retains a known empty checkpoint and can retry after restart',async()=>{
+ const s=session('first-failure');s.append(64);history();
+ const model=index.model,embed=model.embed;model.embed=async()=>{throw Error('Synthetic setup failure');};
+ const worker=scheduler();await worker.tick();assert.equal(worker.state.phase,'error');assert.equal(jobs,1);
+ assert.equal(loadSourceCheckpoint(root+'/state').size,0);
+ model.embed=embed;await scheduler().tick();assert.equal(jobs,2);assert.equal(embeddings,64);
+ assert.equal(loadSourceCheckpoint(root+'/state').size,64);
+});
+
 test('older caches without a checkpoint require foreground preparation rather than counting the old archive as new',async()=>{
  const s=session('upgrade');s.append(64);await scanSessions();history();
+ cache.prepare("DELETE FROM meta WHERE key='background-source-stamps-v1'").run(); // Prior-release cache.
  const worker=scheduler();await worker.tick();assert.equal(jobs,0);assert.equal(embeddings,0);
  assert.match(worker.state.error,/foreground call or unfiltered history search/);
  await history().prepare();assert.equal(loadSourceCheckpoint(root+'/state').size,64);

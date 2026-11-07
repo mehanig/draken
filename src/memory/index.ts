@@ -20,7 +20,13 @@ export class HistoryIndex {
     db.pragma('foreign_keys = ON'); db.pragma('journal_mode = WAL'); db.pragma('busy_timeout = 5000');
     // Cap retained journal high-water space after checkpoints, not active work.
     db.pragma('journal_size_limit = 4194304');
-    initHistoryStorage(db, model.fingerprint);
+    const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get();
+    db.transaction(() => {
+      initHistoryStorage(db, model.fingerprint);
+      // A newly created cache has a known empty baseline even if its first
+      // preparation is interrupted. Existing caches must not be guessed empty.
+      if (fresh) saveSourceCheckpoint(db, new Map());
+    })();
   }
   /** Change only derived delta rows. Revalidate sources on every search/read so an
    * exclusion, edit, source removal or discard cannot leak through stale vectors. */
