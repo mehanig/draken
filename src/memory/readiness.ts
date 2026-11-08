@@ -14,12 +14,17 @@ const cached = new WeakMap<Database.Database, { revision: string; until: number;
  * when preparing and retrieving. Include frozen aliases here: unlike the
  * strict64 counter, readiness must cover their search links too. */
 export function historyStamp(source: Database.Database, before?: string, roots?: RootInput): string {
+  if ((source.prepare("SELECT value FROM sync_settings WHERE key='source-scan-complete-v1'").get() as { value: string } | undefined)?.value === '0') throw new Error('History import has not completed. Scan sessions before calling.');
   const now = Date.now(), cutoff = before || new Date(now).toISOString();
   const files = createHash('sha256').update(JSON.stringify(sourceRoots(roots)));
-  for (const row of source.prepare('SELECT s.path FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND EXISTS (SELECT 1 FROM agent_entries e WHERE e.session_id=s.id AND e.is_activity=1) ORDER BY s.id').iterate() as Iterable<{ path: string }>) {
-    const stat = fs.lstatSync(row.path, { bigint: true });
-    if (!stat.isFile()) throw new Error('Original session file is unavailable.');
-    files.update(JSON.stringify([row.path, ...[stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].map(String)]));
+  for (const row of source.prepare('SELECT s.path,s.file_identity,s.byte_offset,s.scanned_bytes,s.modified_at FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND EXISTS (SELECT 1 FROM agent_entries e WHERE e.session_id=s.id AND e.is_activity=1) ORDER BY s.id').iterate() as Iterable<{ path: string; file_identity: string; byte_offset: number; scanned_bytes: number; modified_at: string }>) {
+    const stat = fs.lstatSync(row.path);
+    if (!stat.isFile() || `${stat.dev}:${stat.ino}` !== row.file_identity || stat.size < row.scanned_bytes) throw new Error('Original session file is unavailable.');
+    if (stat.size === row.scanned_bytes && stat.mtime.toISOString() !== row.modified_at) throw new Error('Original session file is unavailable or changed. Prepare history again.');
+    if (!row.scanned_bytes || row.scanned_bytes < row.byte_offset) throw new Error('Finish importing history before calling.');
+    // Later appends belong to a later preparation. Never make an active agent's
+    // growing log invalidate an already captured and verified prefix forever.
+    files.update(JSON.stringify([row.path, row.file_identity, row.byte_offset, row.scanned_bytes]));
   }
   const fileStamp = files.digest('hex');
   const revision = `${source.pragma('data_version', { simple: true })}:${(source.prepare('SELECT total_changes() AS n').get() as { n: number }).n}:${fileStamp}`;

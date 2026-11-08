@@ -33,6 +33,17 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       emit({ method: 'thread/realtime/transcript/delta', params: { threadId: 'synthetic-thread', role: 'user', delta: request.params.text } });
       emit({ method: 'thread/realtime/transcript/done', params: { threadId: 'synthetic-thread', role: 'user', text: request.params.text } });
     }
+    if (request.params.role === 'user' && scenario === 'refinement') void (async()=>{
+      const prefix='model_providers.draken_readonly.base_url=',arg=process.argv.find(value=>value.startsWith(prefix)),url=JSON.parse(arg.slice(prefix.length));
+      if(!/^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(url))throw Error('Fixture permits loopback only');
+      const token=JSON.parse(fs.readFileSync(path.join(home,'auth.json'),'utf8')).tokens.access_token;
+      emit({method:'thread/realtime/transcript/done',params:{threadId:'synthetic-thread',role:'user',text:request.params.text}});
+      for(const detail of [0,0,1,2]){
+        const response=await fetch(url+'/responses',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({input:[{role:'system',content:'SYSTEM_INPUT_MUST_NOT_BECOME_A_QUERY'},{role:'user',content:`Find GPS points and recording events, detail ${detail}.`}]})});
+        if(!response.ok)throw Error('Synthetic refinement failed');await response.text();
+      }
+      emit({method:'thread/realtime/transcript/done',params:{threadId:'synthetic-thread',role:'assistant',text:'Synthetic evidence supplied for this question.'}});
+    })().catch(()=>process.exit(8));
     if (request.params.role !== 'developer' && ['conversation', 'partial', 'typed-ack', 'spoken-ack'].includes(scenario) && !request.params.text.startsWith('Stop speaking.')) {
       const event = (kind, role, text) => emit({ method: `thread/realtime/transcript/${kind}`, params: { threadId: 'synthetic-thread', role, [kind === 'done' ? 'text' : 'delta']: text } });
       event('delta', 'user', request.params.text); event('done', 'user', request.params.text);

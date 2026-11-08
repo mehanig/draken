@@ -14,12 +14,16 @@ export interface HistoryRecord {
 export interface HistoryQuery {
   question: string;
   session_id?: string;
+  session_ids?: string[];
+  kind?: 'sources' | 'conversation';
+  recent?: boolean;
+  topics?: string[];
   sync_id?: number;
   before?: string;
 }
 export interface HistoryResults {
   mode: 'hybrid';
-  results: (HistoryRecord & { offset: number; score: number })[];
+  results: (HistoryRecord & { offset: number; score: number; lead?: string })[];
   limitations: string;
 }
 export interface HistoryPage {

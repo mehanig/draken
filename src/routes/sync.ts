@@ -36,6 +36,11 @@ router.get('/home', route((req, res) => {
   if (before !== undefined && (!Number.isSafeInteger(before) || before < 1)) throw new HttpError(400, 'Invalid history cursor');
   res.json(homeOverview(before));
 }));
+async function completeScan() {
+  const scan = await scanSessions();
+  if (scan.warnings.length) throw new HttpError(409, 'History import could not finish. Check session sources and scan again; no new snapshot was prepared.');
+  return scan;
+}
 let starting = false;
 router.post('/syncs/start-call', route(async (req, res) => {
   const requestId = req.body?.request_id;
@@ -49,7 +54,7 @@ router.post('/syncs/start-call', route(async (req, res) => {
   try {
     const setup = await piSetupStatus(true);
     if (setup.state !== 'configured') throw new HttpError(503, setup.message);
-    const scan = await scanSessions(), sync = startConversationSync(requestId);
+    const scan = await completeScan(), sync = startConversationSync(requestId);
     res.status(202).json({ sync: launchReply(sync.id), scan });
   } finally { starting = false; }
 }));
@@ -68,7 +73,7 @@ router.patch('/sessions/:sessionId', route((req, res) => {
 router.post('/syncs', route(async (req, res) => {
   const since = req.body?.history_since;
   if (since !== undefined && since !== null && typeof since !== 'string') throw new HttpError(400, 'history_since must be a date string or null');
-  const scan = await scanSessions();
+  const scan = await completeScan();
   res.json({ sync: startSync(since), scan });
 }));
 router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req)))));
@@ -77,7 +82,7 @@ router.get('/syncs/:id/call-readiness', route((req, res) => res.json(callReadine
 router.post('/syncs/:id/prepare-call', route((req, res) => res.status(202).json(prepareCall(id(req)))));
 router.get('/syncs/:id/tree/:key', route((req, res) => res.json(getTreeNode(id(req), String(req.params.key)))));
 router.post('/syncs/:id/expand', route(async (req, res) => {
-  const scan = await scanSessions();
+  const scan = await completeScan();
   res.json({ sync: expandSnapshot(id(req)), scan });
 }));
 router.patch('/syncs/:id/models', route((req, res) => {

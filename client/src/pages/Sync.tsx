@@ -89,7 +89,7 @@ export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
     {error && <div className="alert error" role="alert">{error}</div>}
     {!sync && !error && <p role="status">Opening sync…</p>}
     {sync && <>
-      <div className="page-heading"><div><span className="eyebrow">FROZEN CONVERSATION</span><h1>Sync #{id}</h1><p className="muted">{new Date(sync.snapshot_at).toLocaleString()} · {sync.item_count} entries · <span className={`status ${sync.status}`}>{sync.status === 'completed' ? 'reviewed' : sync.status}</span></p><SyncCost cost={sync.aggregation_cost} /></div>
+      <div className="page-heading"><div><span className="eyebrow">FROZEN CONVERSATION</span><h1>Sync #{id}</h1><p className="muted">Snapshot created {new Date(sync.snapshot_at).toLocaleString()} · {sync.item_count} entries · <span className={`status ${sync.status}`}>{sync.status === 'completed' ? 'reviewed' : sync.status}</span></p><SyncCost cost={sync.aggregation_cost} /></div>
         {open && <button className="btn btn-secondary" disabled={disabled || missing || Boolean(sync.tree.run && !sync.tree.complete)} onClick={() => {
           if (!window.confirm(`Mark these ${sync.item_count} snapshot entries reviewed? Later activity is not affected. This does not mean every spoken suggestion was agreed.`)) return;
           void run('Marking snapshot reviewed…', async () => { show(await api.finish(id, decisions, carry)); });
@@ -116,7 +116,8 @@ export function Sync({ id, callIntent, consumeIntent, navigate, setGuard }: {
       </section>
       {sync.memory.length > 0 && <details className="detail-section"><summary>Previous sync recaps</summary>{sync.memory.map(item => <article key={item.sync_id} className="memory-recap"><a href={`/syncs/${item.sync_id}`} onClick={event => linkClick(event, navigate, `/syncs/${item.sync_id}`)}>Sync #{item.sync_id}</a> <span className="small muted">{item.status === 'open' ? 'not marked reviewed' : item.status || 'historical'}</span><p className="prose">{item.recap || 'No automatic recap in this older snapshot.'}</p>{item.decisions && <p className="small prose">Saved decisions: {item.decisions}</p>}{item.carry_forward && <p className="small prose">Carried forward: {item.carry_forward}</p>}</article>)}</details>}
       <details className="detail-section" open={!sync.messages.length && Boolean(sync.briefing)}><summary>Full briefing</summary><section className="briefing-card">
-        <p className="small muted">New activity after {new Date(sync.snapshot_at).toLocaleString()} stays outside this snapshot.</p>
+        <p className="small muted">This snapshot contains the entries captured during preparation, not a live view. Check the original source dates in the evidence.</p>
+        {readiness?.before && <p className="small muted">Call history cutoff: {new Date(readiness.before).toLocaleString()}. Later activity waits for another preparation.</p>}
         {sync.briefing ? <CitedText text={sync.briefing} evidence={evidence} /> : <p>No briefing yet.</p>}
         {sync.snapshot_version < 2 && <div className="alert warning">This is a historical capped snapshot. Notes and discussion are preserved.
           {open && <button className="btn btn-secondary" disabled={disabled} onClick={() => { if (window.confirm('Expand this legacy snapshot to currently eligible history? Existing notes and citations are retained.')) void run('Expanding snapshot…', async () => show((await api.expand(id)).sync)); }}>Expand to full history</button>}</div>}

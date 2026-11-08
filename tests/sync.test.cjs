@@ -51,6 +51,50 @@ function session(entries, options = {}) {
   return { id, file, header };
 }
 function append(file, entry) { fs.appendFileSync(file, JSON.stringify(entry) + '\n'); }
+function largeSession() {
+  const value=session([]);let parent=null;
+  for(let i=0;i<5;i++){const id=`bulk-${i}`;append(value.file,event(id,parent,'Earlier checkpoint.', 'assistant',{padding:'x'.repeat(7*1024*1024)}));parent=id;}
+  append(value.file,event('latest',parent,'Current work: Profile-first journal navigation and scoped dismissal.'));
+  return value;
+}
+test('one scan drains more than 32 MiB before freezing a snapshot, while incomplete JSONL tails are deferred',async()=>{
+  const value=largeSession(),size=fs.statSync(value.file).size;assert.ok(size>32*1024*1024);
+  fs.appendFileSync(value.file,'{"type":"message","id":"unfinished');
+  const result=await scanSessions();assert.deepEqual(result.warnings,[]);
+  const row=getDb().prepare('SELECT byte_offset,scanned_bytes FROM agent_sessions WHERE id=?').get(value.id);
+  assert.equal(row.byte_offset,size);assert.equal(row.scanned_bytes,fs.statSync(value.file).size);
+  const snapshot=store.startSync();assert.equal(snapshot.items.length,6);assert.match(snapshot.items.at(-1).text,/Profile-first journal navigation/);
+});
+test('cancelling a large scan retains its cursor without certifying a partial import and retry reaches the captured tail',async()=>{
+  const value=largeSession(),controller=new AbortController();
+  const timer=setInterval(()=>{const row=getDb().prepare('SELECT byte_offset,scanned_bytes FROM agent_sessions WHERE id=?').get(value.id);if(row?.byte_offset>0&&!row.scanned_bytes)controller.abort();},1);
+  try{await assert.rejects(scanSessions(controller.signal),/abort/i);}finally{clearInterval(timer);}
+  const partial=getDb().prepare('SELECT byte_offset,scanned_bytes FROM agent_sessions WHERE id=?').get(value.id);
+  assert.ok(partial.byte_offset>0&&partial.byte_offset<fs.statSync(value.file).size);assert.equal(partial.scanned_bytes,0);
+  const completed=await scanSessions();assert.deepEqual(completed.warnings,[]);
+  assert.equal(getDb().prepare('SELECT scanned_bytes FROM agent_sessions WHERE id=?').get(value.id).scanned_bytes,fs.statSync(value.file).size);
+});
+test('legacy EOF cursors and repeated retries cannot certify a previously skipped malformed record',async()=>{
+  const value=session([event('good',null,'A valid original record.')]);await scanSessions();
+  const originalSize=fs.statSync(value.file).size,entryId=getDb().prepare('SELECT id FROM agent_entries WHERE entry_id=?').get('good').id;
+  fs.appendFileSync(value.file,'malformed-json\n');
+  getDb().prepare('UPDATE agent_sessions SET byte_offset=?,scanned_bytes=-1 WHERE id=?').run(fs.statSync(value.file).size,value.id);
+  for(let i=0;i<2;i++){
+    const result=await scanSessions();assert.ok(result.warnings.some(warning=>/malformed JSON/.test(warning)));
+    assert.equal(getDb().prepare('SELECT scanned_bytes FROM agent_sessions WHERE id=?').get(value.id).scanned_bytes,0);
+    assert.equal(getDb().prepare("SELECT value FROM sync_settings WHERE key='source-scan-complete-v1'").get().value,'0');
+  }
+  fs.truncateSync(value.file,originalSize);assert.deepEqual((await scanSessions()).warnings,[]);
+  assert.equal(getDb().prepare('SELECT id FROM agent_entries WHERE entry_id=?').get('good').id,entryId,'full legacy revalidation preserves stable entry IDs');
+  assert.equal(getDb().prepare("SELECT value FROM sync_settings WHERE key='source-scan-complete-v1'").get().value,'1');
+});
+test('scan errors block snapshot routes rather than hiding warnings behind a recent snapshot timestamp',async()=>{
+  session([event('good',null,'A valid retained record.')]);
+  fs.writeFileSync(path.join(root,'broken.jsonl'),'not a supported session\n');
+  const request=await serve(),response=await request('/syncs','POST',{});
+  assert.equal(response.status,409);assert.match(response.data.error,/import could not finish/);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM syncs').get().n,0);
+});
 function fakePi() {
   const executable = path.join(temp, 'fake-pi');
   fs.copyFileSync(path.join(__dirname, 'fixtures/fake-pi.cjs'), executable);
@@ -214,6 +258,10 @@ test('partial UTF-8/JSON tails wait for a newline; malformed complete lines are 
   fs.appendFileSync(source.file, '{broken}\n');
   const scan = await scanSessions();
   assert.ok(scan.warnings.some(warning => warning.includes('malformed')));
+  assert.equal(store.pendingCount(), 1, 'the last complete chunk is retained, but the malformed chunk cannot advance');
+  assert.equal(store.overview().sessions[0].missing, 0, 'an incomplete import is not a disappeared file');
+  fs.truncateSync(source.file, fs.statSync(source.file).size - Buffer.byteLength('{broken}\n'));
+  assert.deepEqual((await scanSessions()).warnings, []);
   assert.equal(store.pendingCount(), 2);
   assert.match(store.startSync().items[1].text, /🐉/);
 });

@@ -113,8 +113,9 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
     expect((await page.request.post('/api/voice/live/calls',{data:{syncId:sync.id}})).status()).toBe(409);
     expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
   } finally { fs.renameSync(file+'.hidden',file); }
-  await page.reload();await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
-  await page.getByRole('button',{name:'Prepare history',exact:true}).click();
+  await page.reload();
+  // The exact captured file was restored, not replaced or rewritten. Its
+  // verified receipt can be reused without another preparation or capture.
   await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});await expect(page.getByRole('alert')).not.toBeVisible();
   expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}`)).json()).items).toEqual(original.items);
 });

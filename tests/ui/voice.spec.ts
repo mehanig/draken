@@ -149,6 +149,20 @@ test('cancelled history preparation can be retried without a call, provider summ
  }finally{fs.writeFileSync(control,JSON.stringify({delay:20}));}
 });
 
+test('ready history can be explicitly refreshed without a new summary, call or capture',async({page})=>{
+ const {syncId,root,piLog}=await prepare(page);await nativePeer(page);await page.goto(`/syncs/${syncId}`);
+ await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled();
+ const before=piLog(),control=path.join(root,'sessions/fake-control.json');
+ fs.writeFileSync(control,JSON.stringify({delay:20,historyDelay:1500}));
+ try{
+  await page.getByRole('button',{name:'Refresh history',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});
+  expect(piLog()).toBe(before);expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
+  await expect(dialog(page)).not.toBeVisible();expect((await(await page.request.get('/api/voice/status')).json()).activeCall).toBeNull();
+ }finally{fs.writeFileSync(control,JSON.stringify({delay:20}));}
+});
+
 test('a readiness change at click time stays outside the call without capture or a reservation',async({page})=>{
  const {syncId}=await prepare(page);await nativePeer(page);await page.goto(`/syncs/${syncId}`);
  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled();let reservations=0;
