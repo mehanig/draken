@@ -195,6 +195,42 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .login-error { display: flex; gap: 9px; align-items: center; color: var(--ink); background: var(--danger-surface); border-left: 4px solid var(--red); padding: 12px; font-size: 12px; margin-bottom: 20px; }
 .login-error svg { flex-shrink: 0; }
 
+/* Text chat shares the sync, without mounting the audio/call surface. */
+.conversation-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.text-chat { padding: 24px; }
+.chat-heading { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.chat-heading > div { flex: 1; min-width: 160px; }
+.chat-heading h2, .chat-heading p { margin: 0; }
+.chat-heading p { margin-top: 5px; }
+.chat-avatar { flex-shrink: 0; object-fit: cover; border: 2px solid var(--line); border-radius: 0; background: var(--yellow); }
+.chat-thread { max-height: min(65dvh, 640px); min-height: 180px; overflow-y: auto; overscroll-behavior: contain; padding: 12px 4px; }
+.chat-welcome { max-width: 520px; margin: 30px auto; text-align: center; line-height: 1.7; }
+.chat-welcome h3 { font-size: 20px; }
+.chat-message { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 22px; }
+.chat-message.user { justify-content: flex-end; padding-left: 40px; }
+.chat-bubble { min-width: 0; max-width: 90%; padding: 14px 18px; background: var(--paper); border: 1px solid var(--rule); overflow-wrap: anywhere; }
+.chat-message.user .chat-bubble { background: var(--yellow); border-color: var(--line); }
+.chat-bubble .prose { margin: 8px 0 0; }
+.chat-author { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; font-size: 12px; }
+.chat-author time { color: var(--muted); font-size: 10px; }
+.chat-thinking { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chat-thinking > .small { flex-basis: 100%; }
+.chat-compose { border-top: 1px solid var(--rule); padding-top: 16px; }
+.chat-compose textarea { width: 100%; resize: vertical; min-height: 82px; }
+.chat-compose-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.chat-refresh { margin-top: 14px; }
+.chat-boundary { margin: 18px 0 0; }
+@media (max-width: 600px) {
+  .text-chat { padding: 16px; }
+  .chat-heading > .btn { width: 100%; }
+  .chat-message { gap: 8px; }
+  .chat-message.user { padding-left: 24px; }
+  .chat-bubble { padding: 12px; max-width: 100%; }
+  .chat-message .chat-avatar { width: 30px; height: 30px; }
+  .conversation-actions { width: 100%; }
+  .conversation-actions > .btn { flex: 1; }
+}
+
 /* Voice is a focused call surface, not another settings dashboard. */
 .voice-entry { padding: 20px 24px; }
 .voice-entry-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }

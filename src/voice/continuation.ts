@@ -32,6 +32,7 @@ export class ReplyContinuation {
     const acknowledgement = !social && plain.length <= 600 && (
       /(?:^|[.!?]\s+)(?:(?:sure|okay|ok|of course)[,\s—:-]+)?(?:i(?:'ll| will)|let me|let's)\s+(?:(?:just|quickly|first|now|briefly)\s+)*(?:check|look|search|review|pull|read|find|fetch|inspect|see|have a look)\b/i.test(plain) ||
       /(?:^|[.!?]\s+)i(?:'m| am)\s+(?:(?:just|currently|now)\s+)*(?:checking|looking|searching|reviewing|pulling|reading|finding|fetching|inspecting)\b/i.test(plain) ||
+      /(?:^|[.!?]\s+)(?:checking|searching|looking up|pulling|picking up)\b/i.test(plain) ||
       /^(?:checking|searching|looking it up|okay|ok|sure(?: thing)?|alright|all right|got it|understood|certainly|you bet|will do|on it|one (?:moment|second|sec)|(?:hold|hang) on|mm[- ]?hmm|uh[- ]?huh|hmm|mhm)[.!?…]*$/i.test(plain)
     );
     if (!acknowledgement) { this.cancel(); return; }

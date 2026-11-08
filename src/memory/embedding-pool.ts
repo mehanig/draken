@@ -28,7 +28,7 @@ export class EmbeddingPool implements Embedder {
   }
   get fingerprint() { return this.files.fingerprint; }
   ready() { return this.files.ready(); }
-  setup(report?: ReportHistory) { return this.files.setup(report); }
+  setup(report?: ReportHistory, allowDownload = true) { return this.files.setup(report, allowDownload); }
   private lane(index: number): Lane {
     if (this.lanes[index]) { if (this.lanes[index].dead) throw failure(); return this.lanes[index]; }
     const worker = new Worker(path.join(__dirname, 'embedding-worker.js'), {

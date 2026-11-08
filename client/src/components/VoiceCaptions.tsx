@@ -27,8 +27,7 @@ export function VoiceCaptions({ call, historyLookup }: { call: CallState; histor
   if (call.phase === 'ended') text = '[Call ended]';
   else if (call.error) text = '[Reply unavailable]';
   else if (call.phase === 'paused') text = '[Sound paused]';
-  else if (call.phase === 'connecting') text = call.notice.startsWith('Preparing history') ? '[Preparing history...]'
-    : call.notice.includes('microphone permission') ? '[Waiting for microphone...]' : '[Connecting...]';
+  else if (call.phase === 'connecting') text = call.notice.includes('microphone permission') ? '[Waiting for microphone...]' : '[Connecting...]';
   else if (call.phase === 'hearing') { text = call.question ? excerpt(call.question) : '[Listening...]'; speaker = call.question ? 'You' : ''; }
   else if (waiting) text = historyLookup ? checking[phrase % checking.length] : thinking[phrase % thinking.length];
   else if (call.notice.startsWith('Reply muted locally;')) text = '[Reply stopped]';

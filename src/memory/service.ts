@@ -4,6 +4,8 @@ import { getDataDir, getDb } from '../db/schema';
 import { getSourceRoots } from '../sources/registry';
 import { HttpError } from '../sync/store';
 import { historyUpdate, type HistoryPage, type HistoryProgress, type HistoryQuery, type HistoryResults, type HistoryUpdate } from './types';
+import { storedHistoryReadiness } from './readiness';
+import { scanSessions } from '../sync/collector';
 
 // One owned CPU worker; ordinary concurrent requests wait rather than requiring
 // the user to manage an index. No model/runtime is loaded in the dashboard.
@@ -32,7 +34,7 @@ function retire() {
 }
 function watch(work: Work) {
   clearTimeout(work.timer);
-  work.timer = setTimeout(() => { if (active === work) { settle(work, failure()); retire(); } }, work.method === 'read' ? 30000 : 10 * 60000);
+  work.timer = setTimeout(() => { if (active === work) { settle(work, failure()); retire(); } }, work.method.startsWith('read') ? 30000 : 10 * 60000);
 }
 function progressValue(value: any): HistoryUpdate | undefined {
   if (!value || !['scanning', 'downloading', 'loading', 'indexing', 'searching', 'reading'].includes(value.stage)) return;
@@ -80,7 +82,7 @@ function pump() {
   active = work;
   try {
     start();
-    work.started = work.updated = Date.now(); work.progress = historyUpdate(work.method === 'read' ? 'reading' : 'scanning');
+    work.started = work.updated = Date.now(); work.progress = historyUpdate(work.method.startsWith('read') ? 'reading' : 'scanning');
     watch(work);
     // A healthy first index can exceed an interactive-query timeout. Progress
     // renews its stall deadline, but total work remains bounded to two hours.
@@ -114,16 +116,31 @@ export function stopHistory() {
 export function validateHistoryQuery(value: unknown): HistoryQuery {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'A history query is required');
   const query = value as Record<string, unknown>;
-  if (Object.keys(query).some(key => !['question', 'session_id', 'sync_id', 'before'].includes(key))) throw new HttpError(400, 'Unknown history query option');
+  if (Object.keys(query).some(key => !['question', 'session_id', 'session_ids', 'kind', 'recent', 'reconcile', 'topics', 'sync_id', 'before'].includes(key))) throw new HttpError(400, 'Unknown history query option');
   if (typeof query.question !== 'string' || !query.question.trim() || query.question.length > 2000) throw new HttpError(400, 'History question must be 1 to 2000 characters');
   if (query.session_id !== undefined && (typeof query.session_id !== 'string' || !/^(?:(?:codex|claude):)?[\w-]{1,128}(?::[\w-]{1,128})?$/.test(query.session_id))) throw new HttpError(400, 'Invalid session filter');
+  if (query.session_ids !== undefined && (!Array.isArray(query.session_ids) || !query.session_ids.length || query.session_ids.length > 8 || query.session_ids.some(id => typeof id !== 'string' || !/^(?:(?:codex|claude):)?[\w-]{1,128}(?::[\w-]{1,128})?$/.test(id)))) throw new HttpError(400, 'Invalid session filters');
+  if (query.kind !== undefined && query.kind !== 'sources' && query.kind !== 'conversation') throw new HttpError(400, 'Invalid history kind');
+  if (query.topics !== undefined && (!Array.isArray(query.topics) || query.topics.length > 2 || query.topics.some(topic => typeof topic !== 'string' || !topic.trim() || topic.length > 200))) throw new HttpError(400, 'Invalid history topics');
+  if (query.reconcile !== undefined && typeof query.reconcile !== 'boolean') throw new HttpError(400, 'Invalid reconciliation option');
+  if (query.recent !== undefined && typeof query.recent !== 'boolean') throw new HttpError(400, 'Invalid history ordering');
   if (query.sync_id !== undefined && (!Number.isSafeInteger(query.sync_id) || (query.sync_id as number) < 1)) throw new HttpError(400, 'Invalid sync filter');
   if (query.before !== undefined && (typeof query.before !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(query.before) || !Number.isFinite(Date.parse(query.before)) || new Date(query.before).toISOString() !== query.before)) throw new HttpError(400, 'Invalid history cutoff');
   return { ...query, question: query.question.trim() } as HistoryQuery;
 }
-export const prepareHistory = (before: string, signal: AbortSignal, background = false) => request<void>('prepare', { before }, signal, background);
+export const historyReadiness = (capturedOnly = false) => storedHistoryReadiness(getDataDir(), getDb(), capturedOnly);
+export async function prepareHistory(before: string, signal: AbortSignal, background = false) {
+  if (!background) {
+    const scan = await scanSessions(signal);
+    if (scan.warnings.length) throw new HttpError(409, 'History import is incomplete. Check session sources before calling.');
+  }
+  signal.throwIfAborted();
+  return request<void>('prepare', { before }, signal, background);
+}
+export const searchPreparedHistory = (query: HistoryQuery, signal?: AbortSignal) => request<HistoryResults>('search-prepared', { query: validateHistoryQuery(query) }, signal);
 export const searchHistory = (query: HistoryQuery, signal?: AbortSignal) => request<HistoryResults>('search', { query: validateHistoryQuery(query) }, signal);
-export function readHistory(ref: string, offset = 0, signal?: AbortSignal) {
+export function readHistory(ref: string, offset = 0, signal?: AbortSignal, preparedBefore?: string) {
   if (!/^H[a-f0-9]{24}$/.test(ref) || !Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) throw new HttpError(400, 'Invalid historical source or offset');
-  return request<HistoryPage>('read', { ref, offset }, signal);
+  if (preparedBefore !== undefined) validateHistoryQuery({ question: 'source', before: preparedBefore });
+  return request<HistoryPage>(preparedBefore ? 'read-prepared' : 'read', { ref, offset, before: preparedBefore }, signal);
 }

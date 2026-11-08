@@ -121,7 +121,7 @@ test('native calls retain ordered generated messages, not playback claims or gue
   const history = live.liveHistory(syncId)[0]; assert.equal(history.turns.length, 2, 'typed echo and idempotent retry do not duplicate messages');
   assert.equal(history.turns[0].question, 'Did the export tests pass?'); assert.equal(history.turns[0].answer, '');
   const answer = history.turns[1]; assert.equal(answer.question, ''); assert.match(answer.answer, /Deployment remains unverified/);
-  assert.equal(answer.status, 'generated'); assert.equal(answer.heard_text, ''); assert.ok(JSON.parse(answer.evidence_json).includes('E2'));
+  assert.equal(answer.status, 'generated'); assert.equal(answer.heard_text, ''); assert.deepEqual(JSON.parse(answer.evidence_json), [], 'Do not inherit the initial packet as per-answer citations when this turn retrieved no sources');
   live.observeLiveAudio(call.id, answer.id, 1000); live.observeLiveAudio(call.id, answer.id, 20);
   assert.equal(live.liveHistory(syncId)[0].turns[1].observed_audio_ms, 1000);
   assert.equal(live.liveHistory(syncId)[0].turns[1].heard_text, '', 'audio energy does not establish exact played wording');
@@ -154,6 +154,25 @@ test('explicit typed and spoken recall supplies bounded context without waiting 
 
 const requests = () => fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
 const until = async check => { for (let i = 0; i < 100; i++) { if (check()) return; await wait(20); } assert.fail('Synthetic voice condition timed out'); };
+
+test('native refinement reaches source search, is bounded and deduplicated, and source IDs do not accumulate across answers',async()=>{
+  evidence();fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'scenario.txt'),'refinement');
+  const context=require('../dist/memory/context'),original=context.historyContext,lookups=[];
+  context.historyContext=async(...args)=>{lookups.push(args);return {text:'Synthetic original evidence',refs:[`Hturn${lookups.length}`]};};
+  try{
+    const call=await connected();
+    await live.sendLiveText(call.id,'What are we uploading?',randomUUID());
+    await until(()=>live.liveHistory(syncId)[0].turns.some(row=>row.answer==='Synthetic evidence supplied for this question.'));
+    assert.equal(lookups.length,3,'one base query plus two distinct refinements; repeated requests reuse their result');
+    assert.match(lookups[1][0],/GPS points and recording events/);assert.doesNotMatch(lookups[1][0],/SYSTEM_INPUT/);
+    assert.equal(lookups[1][5].kind,'sources');assert.equal(lookups[1][4],true);
+    assert.deepEqual(JSON.parse(live.liveHistory(syncId)[0].turns.at(-1).evidence_json),['Hturn1','Hturn2','Hturn3']);
+    await live.sendLiveText(call.id,'What else is recorded?',randomUUID());
+    await until(()=>live.liveHistory(syncId)[0].turns.filter(row=>row.answer==='Synthetic evidence supplied for this question.').length===2);
+    assert.deepEqual(JSON.parse(live.liveHistory(syncId)[0].turns.at(-1).evidence_json),['Hturn4','Hturn5','Hturn6']);
+    await live.endLiveCall(call.id);
+  }finally{context.historyContext=original;}
+});
 
 test('a spoken acknowledgement automatically continues after slow retrieval without another user message', async () => {
   evidence(); fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'scenario.txt'), 'spoken-ack');
@@ -243,20 +262,39 @@ test('interrupted output retains generated fragments but never claims completion
   assert.match(store.getSync(syncId).messages.at(-1).content, /Live voice interrupted/);
 });
 
-test('ordinary calls await automatic history preparation, cancel it on close and release their lock', async () => {
-  const memory = require('../dist/memory/service'), prepare = memory.prepareHistory;
-  let started; const preparing = new Promise(resolve => { started = resolve; });
+test('unprepared calls fail without reserving or indexing; separate preparation can be cancelled', async () => {
+  const memory = require('../dist/memory/service'), prepare = memory.prepareHistory, ready = memory.historyReadiness;
+  const { prepareCallAndWait, callReadiness } = require('../dist/voice/preparation');
+  let started, count = 0; const preparing = new Promise(resolve => { started = resolve; });
+  memory.historyReadiness = () => ({ ready: false, before: null });
   memory.prepareHistory = (_before, signal) => new Promise((_resolve, reject) => {
-    started(); signal.addEventListener('abort', () => reject(new Error('Synthetic preparation cancelled')), { once: true });
+    count++; started(); signal.addEventListener('abort', () => reject(new Error('Synthetic preparation cancelled')), { once: true });
   });
   try {
-    const controller = new AbortController(), call = live.createLiveCall(syncId, controller.signal);
-    await preparing;
-    await assert.rejects(live.createLiveCall(syncId, signal()), /existing call/);
-    controller.abort(); await assert.rejects(call, /preparation cancelled/);
-    assert.equal(store.activeVoiceSyncs.size, 0); assert.equal(live.liveHistory(syncId)[0].status, 'ended');
+    await assert.rejects(live.createLiveCall(syncId, signal()), /Prepare history before calling/);
+    assert.equal(count, 0); assert.equal(live.liveHistory(syncId).length, 0);
+    assert.equal(callReadiness(syncId).ready, false);
+    const pending = prepareCallAndWait(syncId); await preparing;
+    assert.equal(callReadiness(syncId).preparing, true); assert.equal(store.activeVoiceSyncs.size, 0);
+    require('../dist/sync/manager').cancelReply(syncId); await pending;
+    assert.equal(store.busySyncs.size, 0); assert.match(callReadiness(syncId).error, /stopped/);
+    assert.equal(live.liveHistory(syncId).length, 0);
     assert.equal(store.getSync(syncId).decisions, ''); assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
-  } finally { memory.prepareHistory = prepare; }
+  } finally { memory.prepareHistory = prepare; memory.historyReadiness = ready; }
+});
+
+test('a ready call never invokes history preparation and uses the prepared cutoff for retrieval', async () => {
+  const memory = require('../dist/memory/service'), prepare = memory.prepareHistory, ready = memory.historyReadiness;
+  const context = require('../dist/memory/context'), original = context.historyContext;
+  const before = '2025-01-01T00:00:00.000Z'; let lookup;
+  memory.historyReadiness = () => ({ ready: true, before });
+  memory.prepareHistory = async () => { throw Error('Call must not prepare history'); };
+  context.historyContext = async (...args) => { lookup = args; return { text: 'Synthetic prepared history', refs: [] }; };
+  try {
+    const call = await connected(); await live.sendLiveText(call.id, 'What did we discuss?', randomUUID());
+    assert.equal(lookup[1], before); assert.equal(lookup[4], true, 'Voice uses prepared-only retrieval');
+    await live.endLiveCall(call.id);
+  } finally { memory.prepareHistory = prepare; memory.historyReadiness = ready; context.historyContext = original; }
 });
 
 test('abort during native setup prevents a late connection and releases helper and sync locks', async () => {

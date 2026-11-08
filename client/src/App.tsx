@@ -26,12 +26,12 @@ function AppContent() {
   }, []);
   if (isLoading) return <div className="app-loading"><span className="spinner" />Opening Draken…</div>;
   if (!isAuthenticated) return <Login />;
-  const match = /^\/syncs\/([1-9]\d*)\/?$/.exec(path), id = match ? Number(match[1]) : null;
+  const match = /^\/syncs\/([1-9]\d*)(\/chat)?\/?$/.exec(path), id = match ? Number(match[1]) : null;
   return <div className="app-container">
     <header className="header"><a className="brand" href="/" onClick={event => linkClick(event, navigate, '/')} aria-label="Draken sync history"><img src="/favicon.png" alt="" /><div><strong>Draken</strong><span>Session sync</span></div></a>
       <div className="header-right"><a href="/history" onClick={event => linkClick(event, navigate, '/history')}>Search history</a><IndexSettings />{authEnabled && <><span className="muted small">{username}</span><button className="icon-button" onClick={() => { if (!guard.current || guard.current()) logout(); }} aria-label="Sign out"><LogOut size={18} /></button></>}</div>
     </header>
-    {id && Number.isSafeInteger(id) ? <Sync key={id} id={id} callIntent={callIntent === id} consumeIntent={() => setCallIntent(null)} navigate={navigate} setGuard={setGuard} />
+    {id && Number.isSafeInteger(id) ? <Sync key={id} id={id} chat={Boolean(match?.[2])} callIntent={callIntent === id} consumeIntent={() => setCallIntent(null)} navigate={navigate} setGuard={setGuard} />
       : /^\/history(?:\/H[a-f0-9]{24})?\/?$/.test(path) ? <History key={path} navigate={navigate} reference={path.split('/')[2]} />
       : path === '/' ? <Home navigate={navigate} /> : <main className="sync-home"><h1>Page not found</h1><a href="/" onClick={event => linkClick(event, navigate, '/')}>All syncs</a></main>}
   </div>;

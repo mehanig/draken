@@ -178,7 +178,7 @@ export class NativeVoice {
     await this.#rpc.request('thread/realtime/appendText', { threadId: this.#thread, role: 'user', text });
   }
   async context(text) {
-    if (!this.#thread || this.#closed || typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > 4096) throw new Error('Cannot supply this native voice context.');
+    if (!this.#thread || this.#closed || typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > 8192) throw new Error('Cannot supply this native voice context.');
     // In v3 this becomes session context, without the user-text prefix.
     await this.#rpc.request('thread/realtime/appendText', { threadId: this.#thread, role: 'developer', text });
   }

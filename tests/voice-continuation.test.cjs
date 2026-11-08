@@ -72,7 +72,7 @@ test('honest limitations and historical quotes are not mistaken for current look
 
 test('brief acknowledgements keep a real question pending, but do not revive social replies', t => {
   const f = fixture(t);
-  for (const ack of ['Alright.', 'Will do.', 'One sec.', 'Mm-hmm.', 'Uh‑huh.', 'I’m looking through the records.']) {
+  for (const ack of ['Alright.', 'Will do.', 'One sec.', 'Mm-hmm.', 'Uh‑huh.', 'I’m looking through the records.', 'Okay, I’m taking that as the demo rewrite. Checking what’s recorded.', 'Picking up your latest status now.']) {
     let calls = 0; const turn = new ReplyContinuation(async () => { calls++; }, () => {}, () => 'Did the export tests pass?');
     turn.inputStarted(); turn.response(ack, true); turn.contextReady(); f.tick(400);
     assert.equal(calls, 1); turn.cancel();

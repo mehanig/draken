@@ -8,12 +8,13 @@ const service = require('../dist/memory/service');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { getSync } = require('../dist/sync/store');
 const { scanSessions } = require('../dist/sync/collector');
-const { generateReply } = require('../dist/sync/manager');
+const { generateReply, launchChat } = require('../dist/sync/manager');
 const live = require('../dist/voice/live');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const modelDirectory = process.argv.find(arg => arg.startsWith('--model-dir='))?.slice(12) || path.join(os.tmpdir(), 'draken-synthetic-memory-model');
 const model = new LocalEmbedder(path.resolve(modelDirectory));
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-memory-local-proof-')); fs.chmodSync(root, 0o700);
+let cache;
 (async () => {
   if (process.argv.includes('--download-model')) await model.setup();
   if (!model.ready()) throw new Error('Model absent. Pass --download-model explicitly, or --model-dir=<existing pinned model directory>.');
@@ -55,6 +56,10 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-memory-local-proof-')
   const warmStart = Date.now(); await service.searchHistory({ question: 'Why did we stop using the speech pipeline on our machine?' });
   const warmLookupMs = Date.now() - warmStart;
   const unrelated = await service.searchHistory({ question: 'How many moons orbit Jupiter?' }); assert.equal(unrelated.results.length, 0);
+  service.stopHistory(); await delay(150); // Readiness survives worker retirement; call creation cannot prepare it again.
+  assert.equal(service.historyReadiness().ready, true);
+  cache = new (require('better-sqlite3'))(path.join(process.env.DRAKEN_DATA_DIR, 'memory/index.sqlite'), { readonly: true });
+  const cacheVersion = cache.pragma('data_version', { simple: true });
   const call = await live.createLiveCall(syncId, new AbortController().signal);
   await live.connectLiveCall(call.id, 'v=0\r\nm=audio 9 test', new AbortController().signal);
   await live.sendLiveText(call.id, 'Why did we stop using the speech pipeline on our machine?', randomUUID()); await delay(60);
@@ -63,9 +68,23 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-memory-local-proof-')
   assert.ok(context); assert.match(context.params.text, /read_only_history/); assert.match(context.params.text, /Whisper/); assert.ok(Buffer.byteLength(context.params.text) <= 4096);
   assert.ok(live.liveHistory(syncId)[0].turns.some(row => JSON.parse(row.evidence_json).some(ref => /^H[a-f0-9]{24}$/.test(ref))));
   await live.endLiveCall(call.id);
+  assert.equal(cache.pragma('data_version', { simple: true }), cacheVersion, 'Cold voice lookup must not write the corpus index'); cache.close(); cache = null;
   await generateReply(syncId, 'Why did we change the speech approach?');
   assert.match(getSync(syncId).messages.at(-1).content, /\[H[a-f0-9]{24}\]/);
   assert.equal(getSync(syncId).tree.run.history_scope, undefined);
+  const chatCutoff = service.historyReadiness(true); assert.equal(chatCutoff.ready, true);
+  cache = new (require('better-sqlite3'))(path.join(process.env.DRAKEN_DATA_DIR, 'memory/index.sqlite'), { readonly: true });
+  const chatVersion = cache.pragma('data_version', { simple: true }), callCount = live.liveHistory(syncId).length;
+  for (const question of ['Why did we retire Whisper and Kokoro?', 'What did they replace?']) {
+    launchChat(syncId, question, randomUUID());
+    const deadline = Date.now() + 30000;
+    while (getSync(syncId).busy) { assert.ok(Date.now() < deadline); await delay(30); }
+    assert.equal(getSync(syncId).tree.run.status, 'completed');
+    assert.match(getSync(syncId).messages.at(-1).content, /\[H[a-f0-9]{24}\]/);
+    assert.deepEqual(service.historyReadiness(true), chatCutoff);
+  }
+  assert.equal(live.liveHistory(syncId).length, callCount);
+  assert.equal(cache.pragma('data_version', { simple: true }), chatVersion, 'Chat must not write the corpus index'); cache.close(); cache = null;
   assert.equal(protectedRows(), original); assert.equal(getSync(syncId).decisions, '');
   assert.equal(getSync(syncId).status, 'open');
   service.stopHistory();
@@ -75,8 +94,8 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-memory-local-proof-')
   const resumed = await service.searchHistory({ question: 'Whisper Kokoro' });
   assert.ok(resumed.results.some(item => /Whisper/.test(item.text)), 'next ordinary lookup resumes automatically');
   console.log(JSON.stringify({ realLocalModel: true, offlineInference: true, multilingualMatch: true, automaticPreparation: true, liveProgress: true, firstLookupMs, warmLookupMs, topHit: found.results[0].kind,
-    unrelatedQuestionAbstained: true, nativeContextAndHistoryLinked: true, textReplyCitationsValidated: true, cancelResume: true,
+    unrelatedQuestionAbstained: true, nativeContextAndHistoryLinked: true, callReadyAfterWorkerRestart: true, callCorpusWrites: 0, textReplyCitationsValidated: true, preparedChatFollowup: true, chatCorpusWrites: 0, chatCreatedVoiceCall: false, cancelResume: true,
     canonicalEvidenceUnchanged: true, coverage: 0, productionWrites: 0, realProviderCalls: 0 }, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
-  await live.stopLiveCalls(); service.stopHistory(); await delay(150); closeDb(); fs.rmSync(root, { recursive: true, force: true });
+  await live.stopLiveCalls(); service.stopHistory(); await delay(150); cache?.close(); closeDb(); fs.rmSync(root, { recursive: true, force: true });
 });

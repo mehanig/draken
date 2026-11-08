@@ -46,6 +46,70 @@ function change(id, text) { editEntry(db, process.env.DRAKEN_PI_SESSIONS_DIR, id
 function sync() { return Number(db.prepare("INSERT INTO syncs(created_at,snapshot_at,snapshot_version,status) VALUES(?,?,2,'completed')").run(at, at).lastInsertRowid); }
 function protectedRows() { return JSON.stringify(['agent_sessions', 'agent_entries', 'syncs', 'sync_items', 'sync_messages', 'sync_coverage', 'summary_cache', 'sync_runs'].map(table => db.prepare(`SELECT * FROM ${table}`).all())); }
 
+test('call readiness is metadata-only, survives reopening, and invalidates on new records and original file changes', async () => {
+  const {indexReadiness,storedHistoryReadiness}=require('../dist/memory/readiness');
+  assert.equal(storedHistoryReadiness(root,db).ready,false);assert.equal(fs.existsSync(path.join(root,'memory')),false);
+  entry('Whisper was retired.');const before=protectedRows();
+  assert.equal(indexReadiness(cache,db).ready,false);assert.equal(model.calls,0);
+  await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);assert.equal(protectedRows(),before);
+  const calls=model.calls,changes=cache.prepare('SELECT total_changes() n').get().n;
+  for(let i=0;i<3;i++)assert.equal(indexReadiness(cache,db).ready,true);
+  await index.prepare();assert.equal(model.calls,calls);assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes,'no timestamp-only receipt rewrite');
+  entry('A small new tail.');assert.equal(indexReadiness(cache,db).ready,false);
+  await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);
+  const file=db.prepare("SELECT path FROM agent_sessions WHERE id='session-a'").get().path;
+  fs.renameSync(file,file+'.missing');assert.equal(indexReadiness(cache,db).ready,false);
+  fs.renameSync(file+'.missing',file);await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);
+  const fileCache=path.join(root,'copied-index.sqlite');await cache.backup(fileCache);const reopened=new Database(fileCache,{readonly:true});
+  try{assert.equal(indexReadiness(reopened,db).ready,true);}finally{reopened.close();}
+});
+
+test('empty history needs no model and new frozen aliases require links, not new vectors',async()=>{
+  const {indexReadiness}=require('../dist/memory/readiness');
+  await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);assert.equal(model.calls,0);assert.equal(model.setups,0);
+  const id=entry('Whisper proposal; tests unverified.');await index.prepare();const calls=model.calls;
+  const e=db.prepare('SELECT * FROM agent_entries WHERE id=?').get(id),s=sync();
+  db.prepare('INSERT INTO sync_items VALUES(?,?,?)').run(s,e.event_key,frozen(e));assert.equal(indexReadiness(cache,db).ready,false);
+  await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);assert.equal(model.calls,calls,'a new alias reuses the same vector');
+});
+
+test('prepared-only voice searches never embed missing passages and still verify original bytes',async()=>{
+  entry('Whisper was retired.');await index.prepare();const before=new Date().toISOString(),calls=model.calls;
+  const found=await index.search({question:'speech',before},undefined,true);assert.ok(found.results.length);assert.equal(model.calls,calls+1,'query embedding only');
+  const changes=cache.prepare('SELECT total_changes() n').get().n;
+  entry('A later arrival must not be indexed by source readback.','session-a',new Date(Date.now()+60000).toISOString());
+  const page=index.read(found.results[0].ref,0,before);assert.ok(page.neighbors.every(row=>row.at<=before));
+  assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes,'prepared source reads do not add corpus records');
+  entry('Another older passage needing preparation.');const count=model.calls;
+  await assert.rejects(index.search({question:'speech',before},undefined,true),/preparation/);assert.equal(model.calls,count);
+  await index.prepare();const file=db.prepare("SELECT path FROM agent_sessions WHERE id='session-a'").get().path;
+  fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace('Whisper','Changed'));
+  const preparedCalls=model.calls;await assert.rejects(index.search({question:'speech',before},undefined,true));assert.equal(model.calls,preparedCalls);
+});
+
+test('missing model files are restored before calling, while prepared-only lookup forbids downloads',async()=>{
+  entry('Whisper proposal.');await index.prepare();const calls=model.calls;
+  let available=false,setups=0;model.ready=()=>available;model.setup=async(_report,allowDownload)=>{assert.equal(allowDownload,true);setups++;available=true;};
+  await index.prepare();assert.equal(setups,1);assert.equal(model.calls,calls,'restore files without rebuilding cached vectors');
+  index=new HistoryIndex(cache,db,model);model.setup=async(_report,allowDownload)=>{assert.equal(allowDownload,false);};
+  assert.ok((await index.search({question:'speech',before:new Date().toISOString()},undefined,true)).results.length);
+  const {LocalEmbedder}=require('../dist/memory/model'),missing=path.join(root,'missing-model');
+  const fetch=global.fetch;let network=0;global.fetch=async()=>{network++;throw Error('Unexpected network request');};
+  try{await assert.rejects(new LocalEmbedder(missing).setup(undefined,false),/Prepare history before calling/);assert.equal(network,0);assert.equal(fs.existsSync(missing),false);}
+  finally{global.fetch=fetch;}
+});
+
+test('failed preparation cannot grant readiness and a retry reuses completed vectors',async()=>{
+  const {indexReadiness}=require('../dist/memory/readiness');entry('Whisper was retired.');await index.prepare();
+  const vector=cache.prepare('SELECT embedding FROM passage_vectors LIMIT 1').get().embedding;
+  entry('New history.');const embed=model.embed;model.embed=async()=>{throw Error('Synthetic failure');};
+  await assert.rejects(index.prepare(),/Synthetic failure/);assert.equal(indexReadiness(cache,db).ready,false);
+  model.embed=embed;await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);
+  assert.deepEqual(cache.prepare('SELECT embedding FROM passage_vectors LIMIT 1').get().embedding,vector);
+  cache.prepare("UPDATE meta SET value='invalid receipt' WHERE key='call-history-ready-v1'").run();assert.equal(indexReadiness(cache,db).ready,false);
+  const calls=model.calls;await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);assert.equal(model.calls,calls);
+});
+
 test('ordinary search automatically prepares hybrid retrieval; semantic matches need no shared words; no canonical writes', async () => {
   entry('Retire Whisper and Kokoro. This was a proposal, not a deployment.');
   entry('The copper desk lamp supplier is unresolved.', 'session-b'); entry('HTTP 403 in export_request_17.');

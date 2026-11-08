@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
-import type { SyncDetail } from '../types';
+import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, MessageSquare, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
+import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
 import { HistorySource } from '../pages/History';
 import { HistoryProgress } from './HistoryProgress';
@@ -16,9 +16,9 @@ const labels = {
 };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
-export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClosed, autoStart = false, onAutoStartHandled }: {
-  sync: SyncDetail; disabled: boolean; beforeStart: () => Promise<void>;
-  onActiveChange: (active: boolean) => void; onClosed: () => Promise<void>;
+export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeStart, onActiveChange, onClosed, onChat, autoStart = false, onAutoStartHandled }: {
+  sync: SyncDetail; readiness: CallReadiness | null; onPrepareHistory: () => void; disabled: boolean; beforeStart: () => Promise<void>;
+  onActiveChange: (active: boolean) => void; onClosed: () => Promise<void>; onChat: () => void;
   autoStart?: boolean; onAutoStartHandled?: () => void;
 }) {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
@@ -39,10 +39,11 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
   const playback = useRef<PlaybackCue | null>(null);
   const session = useRef<LiveVoiceSession | null>(null);
   const mounted = useRef(true);
-  const closing = useRef(false);
+  const closing = useRef(false), starting = useRef(false);
+  const [checking, setChecking] = useState(false);
   const evidence = [...sync.items, ...sync.context];
   const selected = evidence.find(item => item.ref === source);
-  const prepared = sync.status === 'open' && (sync.tree.complete || !sync.items.length);
+  const prepared = readiness?.ready === true;
   const secure = window.isSecureContext;
   const httpsUrl = new URL(window.location.href);
   httpsUrl.protocol = 'https:'; httpsUrl.port = String(status?.httpsPort || 443);
@@ -73,9 +74,12 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
   }, [open, call.startedAt, call.phase === 'ended']);
 
   const start = async () => {
-    if (session.current || closing.current) return;
-    setCall({ ...INITIAL_CALL }); setElapsed(0); setTranscript([]); setDraft(''); setSource(''); setTyping(false); setShowDetails(false); setHistoryLookup(false); setOpen(true); onActiveChange(true);
+    if (session.current || closing.current || starting.current || !prepared) return;
+    starting.current = true; setChecking(true); setSetupError('');
     try {
+      await beforeStart();
+      if (!mounted.current || document.visibilityState !== 'visible') return;
+      setCall({ ...INITIAL_CALL }); setElapsed(0); setTranscript([]); setDraft(''); setSource(''); setTyping(false); setShowDetails(false); setHistoryLookup(false); setOpen(true); onActiveChange(true);
       const controller = new LiveVoiceSession({
         onState: state => { if (mounted.current) { setCall(state); if (!state.microphone && state.muted) setTyping(true); } },
         onLevel: () => {}, // Captions replace the old standalone input meter.
@@ -87,12 +91,15 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
         },
       });
       session.current = controller;
-      await beforeStart();
       if (session.current === controller) await controller.start(sync.id);
     } catch (error) {
       await session.current?.end();
-      if (mounted.current) setCall(old => ({ ...old, phase: 'ended', error: error instanceof Error ? error.message : 'The call could not start' }));
-    }
+      if (mounted.current) {
+        const message = error instanceof Error ? error.message : 'The call could not start';
+        setSetupError(message);
+        if (session.current) setCall(old => ({ ...old, phase: 'ended', error: message }));
+      }
+    } finally { starting.current = false; if (mounted.current) setChecking(false); }
   };
   useEffect(() => {
     if (!autoStart || disabled || !prepared || !status) return;
@@ -132,8 +139,9 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
       <div className="voice-entry-main">
         <div className="voice-entry-icon" aria-hidden="true"><Phone size={22} /></div>
         <div><h2>Talk it through. Out loud.</h2><p className="muted small">Live voice through ChatGPT. Audio goes to OpenAI; replies may paraphrase.</p></div>
+        <div className="conversation-actions"><button className="btn btn-secondary" disabled={open || checking} onClick={onChat}><MessageSquare size={16} />Chat instead</button>
         {!secure && status?.httpsPort ? <a className="btn btn-primary" href={httpsUrl.href}>Open secure call page <ExternalLink size={15} /></a> :
-          <button className="btn btn-primary" disabled={disabled || !prepared || !status?.installed || Boolean(status?.activeCall) || !secure} onClick={() => void start()}><Phone size={16} />Call Draken</button>}
+          <button className="btn btn-primary" disabled={disabled || checking || !prepared || !status?.installed || Boolean(status?.activeCall) || !secure} onClick={() => void start()}><Phone size={16} />Call Draken</button>}</div>
       </div>
       <p className="small muted">Relevant earlier history is found automatically. Retrieved excerpts go to ChatGPT, separately from this frozen snapshot; no review or saved decisions change.</p>
       {!secure && <p className="small muted">The microphone needs trusted HTTPS. {status?.httpsPort ? 'The secure page uses your existing dashboard login. Install the local certificate once on this device before opening it.' : 'Use localhost, or enable HTTPS on the server.'}</p>}
@@ -145,7 +153,9 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
           <li><strong>Firefox/Linux:</strong> Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import. Trust it to identify websites.</li></ul>
         <p className="small muted">Restart the browser if needed, open the secure page, sign in, and allow the microphone when you start a call. Keep the server’s private keys private. See <code>VOICE.md</code> for an SSH-tunnel alternative.</p>
       </details>}
-      {sync.status === 'open' && !prepared && <p className="small muted">Prepare the briefing first so the call starts with the full picture.</p>}
+      {sync.status === 'open' && <p className="small muted" role="status">{prepared ? `Ready to call. History cutoff: ${readiness?.before ? new Date(readiness.before).toLocaleString() : 'prepared snapshot'}. Refresh history for later work.` : !readiness ? 'Checking call readiness…' : readiness.preparing ? 'Preparing history before calling. Your microphone is off.' : !readiness.briefingReady ? 'Prepare the briefing first.' : 'History needs preparation before you can call.'}</p>}
+      {sync.status === 'open' && readiness?.briefingReady && !readiness.preparing && <button className="btn btn-secondary" disabled={disabled || checking} onClick={onPrepareHistory}>{prepared ? 'Refresh history' : 'Prepare history'}</button>}
+      {readiness?.error && !prepared && <p className="small" role="alert">{readiness.error}</p>}
       {sync.status !== 'open' && <p className="small muted">This sync is closed. Start a new sync for another call.</p>}
       {status && !status.installed && <p className="small muted">ChatGPT voice needs server setup and sign-in: <code>npm run voice:realtime:setup</code>, then <code>npm run voice:realtime:login</code>.</p>}
       {setupError && <p className="small" role="alert">{setupError} <button className="btn btn-secondary" onClick={() => void refreshStatus()}>Retry</button></p>}
@@ -177,9 +187,8 @@ export function VoiceCall({ sync, disabled, beforeStart, onActiveChange, onClose
       </div>
       <div className="voice-call-body">
         {!call.historyReady ? <section className="voice-preparation" aria-label="Call preparation">
-          <h3>{call.phase === 'ended' ? 'Preparation stopped' : 'Preparing history'}</h3>
-          <p className="small muted">Your microphone is off. Draken will appear when indexing is ready.</p>
-          <HistoryProgress enabled={open && call.phase !== 'ended'} waiting />
+          <h3>{call.phase === 'ended' ? 'Call could not start' : 'Connecting your call'}</h3>
+          <p className="small muted">Your microphone is off until the call is ready.</p>
         </section> : <div className="voice-scene">{open && call.phase !== 'ended' ? <PersonaStage playback={playback}
           mode={call.phase === 'speaking' ? 'speaking' : call.phase === 'hearing' ? 'listening' : call.replyPendingSince && !call.error ? 'thinking' : 'idle'} />
           : <img loading="lazy" className="voice-scene-poster" src="/persona/call-poster.webp" alt="Draken’s workshop" />}

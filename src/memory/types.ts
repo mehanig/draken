@@ -10,17 +10,32 @@ export interface HistoryRecord {
   at: string | null;
   qualification: string;
   text: string;
+  /** Comparable only within one original source session. */
+  sequence?: number;
 }
 export interface HistoryQuery {
   question: string;
   session_id?: string;
+  session_ids?: string[];
+  kind?: 'sources' | 'conversation';
+  recent?: boolean;
+  /** Bounded status follow-ups; intended for the larger text-answer packet. */
+  reconcile?: boolean;
+  topics?: string[];
   sync_id?: number;
   before?: string;
 }
 export interface HistoryResults {
   mode: 'hybrid';
-  results: (HistoryRecord & { offset: number; score: number })[];
+  results: (HistoryRecord & { offset: number; score: number; lead?: string })[];
   limitations: string;
+  reconciliation?: {
+    checked_narratives: number;
+    omitted_narratives: number;
+    omitted_threads: number;
+    threads: { earlier_ref: string; later_refs: string[]; matched_terms: string[]; other_candidates: number }[];
+    qualification: string;
+  };
 }
 export interface HistoryPage {
   record: HistoryRecord;
@@ -53,7 +68,7 @@ export const historyUpdate = (stage: HistoryUpdate['stage'], fields: Partial<Omi
 export interface Embedder {
   readonly fingerprint: string;
   ready(): boolean;
-  setup(report?: ReportHistory): Promise<void>;
+  setup(report?: ReportHistory, allowDownload?: boolean): Promise<void>;
   embed(text: string, query: boolean): Promise<Float32Array>;
   embedMany?(texts: string[], parallel?: boolean): Promise<Float32Array[]>;
   readonly parallelism?: { workers: number; threads: number };

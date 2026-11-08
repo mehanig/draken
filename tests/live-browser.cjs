@@ -24,7 +24,7 @@ async function fixture({ denied = false, lateMic = false, slowOffer = false, slo
         res.on('close', () => { if (!res.writableEnded) { preparationAborted = true; active = false; } });
         if (holdPreparation) await new Promise(resolve => releasePreparation = resolve);
         if (res.destroyed) return;
-        if (failPreparation) { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Synthetic history preparation failed' })); return; }
+        if (failPreparation) { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Synthetic call reservation failed' })); return; }
         value = { id: JSON.parse(raw).requestId, startedAt: Date.now() };
       }
       else if (url.pathname.endsWith('/connect')) {
@@ -217,7 +217,7 @@ test('a typed request finishing after Stop cannot unmute old output', { timeout:
   } finally { await f.close(); }
 });
 
-test('history preparation finishes before microphone permission or voice negotiation starts', { timeout: 15000 }, async () => {
+test('call reservation finishes before microphone permission or voice negotiation starts', { timeout: 15000 }, async () => {
   const f = await fixture({ holdPreparation: true });
   try {
     await f.page.click('#start');
@@ -225,7 +225,7 @@ test('history preparation finishes before microphone permission or voice negotia
     assert.equal(f.requests.filter(item => item.path.endsWith('/calls')).length, 1);
     assert.equal(await f.page.evaluate(() => window.captureCalls), 0);
     assert.equal(await f.page.evaluate(() => window.tracks.length), 0);
-    assert.match(await f.page.evaluate(() => window.state.notice), /Preparing history.*microphone.*off/);
+    assert.match(await f.page.evaluate(() => window.state.notice), /Connecting your call.*microphone.*off/);
     assert.equal(f.requests.some(item => item.path.endsWith('/connect')), false);
     f.releasePreparation(); await f.page.waitForFunction(() => window.state?.phase === 'listening');
     assert.equal(await f.page.evaluate(() => window.captureCalls), 1);
@@ -235,17 +235,17 @@ test('history preparation finishes before microphone permission or voice negotia
   } finally { await f.close(); }
 });
 
-test('failed history preparation never requests the microphone or connects voice', { timeout: 10000 }, async () => {
+test('failed call reservation never requests the microphone or connects voice', { timeout: 10000 }, async () => {
   const f = await fixture({ failPreparation: true });
   try {
     await f.page.click('#start'); await f.page.waitForFunction(() => window.state?.phase === 'ended');
-    assert.match(await f.page.evaluate(() => window.state.error), /history preparation failed/);
+    assert.match(await f.page.evaluate(() => window.state.error), /call reservation failed/);
     assert.equal(await f.page.evaluate(() => window.captureCalls), 0);
     assert.equal(f.requests.some(item => item.path.endsWith('/connect')), false); assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });
 
-test('closing during indexing aborts preparation without microphone access or a late connection', { timeout: 10000 }, async () => {
+test('closing during reservation aborts setup without microphone access or a late connection', { timeout: 10000 }, async () => {
   const f = await fixture({ holdPreparation: true });
   try {
     await f.page.click('#start');

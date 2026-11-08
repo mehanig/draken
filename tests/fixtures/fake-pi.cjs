@@ -24,6 +24,7 @@ process.stdin.on('end', () => {
     task: value.task, stage: value.stage, model, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree,
     input_characters: input.length, input_bytes: Buffer.byteLength(input), system: args[args.indexOf('--system-prompt') + 1],
     verification_evidence: value.verification_evidence, retrieved_evidence: value.retrieved_evidence, historical_evidence: value.historical_evidence,
+    recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, reconciliation_repair: value.reconciliation_repair,
     allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair, citation_repairs: value.citation_repairs,
   }) + '\n');
   if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage)) {
@@ -88,6 +89,10 @@ process.stdin.on('end', () => {
   } else if (value.task === 'final_verdict') {
     if (value.user_question === 'SHOW MEMORY') return emit(JSON.stringify(value.previous_sync_memory));
     if (value.user_question === 'INVALID_CITATION') return emit('Invented outcome [E9999999]');
+    if (control.staleCheckpoint && value.historical_evidence?.reconciliation?.threads?.length) {
+      if (!value.reconciliation_repair || control.ignoreReconciliation) return emit(`The old client wiring is still blocked. [${value.historical_evidence.reconciliation.threads[0].earlier_ref}]`);
+      return emit(`Corrected synthetic answer: client wiring and job foundations were reported implemented; delivery remains disabled. ${value.historical_evidence.sources.map(source => `[${source.ref}]`).join(' ')}`);
+    }
     if (value.historical_evidence?.sources?.length) return emit(`Historical source reports a speech-path change; not proof of deployment. [${value.historical_evidence.sources[0].ref}]`);
     const refs = value.verification_evidence || [];
     const reference = refs[0] ? ` [${refs[0].ref}]` : '';

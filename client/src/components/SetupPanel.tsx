@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { setup } from '../api';
 import { voiceRequest, type VoiceStatus } from '../voice/api';
 
-export function SetupPanel({ active = true, firstRun = false, always = false, onReady }: { active?: boolean; firstRun?: boolean; always?: boolean; onReady?: (ready: boolean) => void }) {
+export function SetupPanel({ active = true, firstRun = false, always = false, onReady, onTextReady }: { active?: boolean; firstRun?: boolean; always?: boolean; onReady?: (ready: boolean) => void; onTextReady?: (ready: boolean) => void }) {
   const [value, setValue] = useState<Awaited<ReturnType<typeof setup>> | null>(null);
   const [voice, setVoice] = useState<VoiceStatus | null>(null), [error, setError] = useState(''), [checking, setChecking] = useState(false), [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -11,21 +11,21 @@ export function SetupPanel({ active = true, firstRun = false, always = false, on
     const load = async (fresh = false) => {
       setChecking(true);
       try {
-        const [next, audio] = await Promise.all([setup(fresh), voiceRequest<VoiceStatus>('/status')]);
+        const [next, audio] = await Promise.all([setup(fresh), voiceRequest<VoiceStatus>('/status').catch(() => null)]);
         if (!alive) return;
-        setValue(next); setVoice(audio); setError(''); onReady?.(next.pi.state === 'configured' && audio.installed);
-      } catch { if (alive) { setError('Could not check setup or reach Draken. The last displayed state may be stale. Check the server terminal, then retry.'); onReady?.(false); } }
+        setValue(next); setVoice(audio); setError(audio ? '' : 'Voice status is unavailable. Configured text chat can still be used.'); onReady?.(next.pi.state === 'configured' && Boolean(audio?.installed)); onTextReady?.(next.pi.state === 'configured');
+      } catch { if (alive) { setError('Could not check setup or reach Draken. The last displayed state may be stale. Check the server terminal, then retry.'); onReady?.(false); onTextReady?.(false); } }
       finally { if (alive) setChecking(false); }
     };
     void load(refresh > 0);
     const timer = setInterval(() => void load(), 60_000);
     return () => { alive = false; clearInterval(timer); };
-  }, [active, refresh, onReady]);
+  }, [active, refresh, onReady, onTextReady]);
   if (!active || (!always && !firstRun && !error && value?.pi.state === 'configured' && voice?.installed)) return null;
   const pi = value?.pi;
   return <section className="setup-panel" aria-label="Draken setup">
     <h2>{firstRun ? 'First-time setup' : 'Runtime & sign-in'}</h2>
-    <p className="small muted">Draken reads agent histories, but pi runs all summaries. Voice uses a separate ChatGPT sign-in. Setup and login are explicit terminal commands—not browser downloads or credential forms.</p>
+    <p className="small muted">Draken reads agent histories, but pi runs summaries and text chat. Voice uses a separate ChatGPT sign-in. Setup and login are explicit terminal commands—not browser downloads or credential forms.</p>
     {!value && !error && <p className="small" role="status">Checking setup…</p>}
     {pi && <>
       <p><strong>Summarization: {pi.state === 'configured' ? 'credentials configured' : pi.state === 'missing' ? 'pi not found' : pi.state === 'needs_login' ? 'sign-in needed' : 'needs attention'}</strong><span className="small muted"> · {pi.source === 'managed' ? 'Draken-private pi' : 'Existing / external pi'}{pi.version && ` ${pi.version}`}</span></p>

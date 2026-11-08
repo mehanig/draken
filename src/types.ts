@@ -1,3 +1,4 @@
+export interface CallReadiness { ready: boolean; briefingReady: boolean; historyReady: boolean; preparing: boolean; before: string | null; error: string }
 export type AgentKind = 'pi' | 'codex' | 'claude';
 export interface AgentSource { id: AgentKind; name: string; enabled: boolean; roots: { path: string; status: 'present' | 'missing' | 'unavailable' }[] }
 export interface ObservedSession {
@@ -149,6 +150,7 @@ export interface TreeRun {
   metrics: ModelCallMetric[];
   error: string;
   question: string | null;
+  request_id: string | null;
   started_at: string;
   completed_at: string | null;
 }

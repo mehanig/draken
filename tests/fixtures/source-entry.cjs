@@ -11,7 +11,7 @@ exports.sourceEntry=(db,directory,text,options={})=>{
   const raw=options.raw||{type:'message',id,parentId:s.leaf_id||null,timestamp,message:{role:options.role||'assistant',content:text}};
   const normalized=normalizeEntry(raw,options.normalization||2),bytes=Buffer.from(JSON.stringify(raw)+'\n'),offset=fs.statSync(file).size;
   fs.appendFileSync(file,bytes);const stat=fs.statSync(file);
-  db.prepare('UPDATE agent_sessions SET path=?,file_identity=?,byte_offset=?,leaf_id=? WHERE id=?').run(file,`${stat.dev}:${stat.ino}`,stat.size,normalized.entry_id,session);
+  db.prepare('UPDATE agent_sessions SET path=?,file_identity=?,byte_offset=?,scanned_bytes=?,modified_at=?,leaf_id=? WHERE id=?').run(file,`${stat.dev}:${stat.ino}`,stat.size,stat.size,stat.mtime.toISOString(),normalized.entry_id,session);
   const result=db.prepare(`INSERT INTO agent_entries(session_id,entry_id,parent_id,timestamp,type,role,event_key,is_activity,active,present,target_id,record_offset,record_bytes,record_hash,text_length,replacement_length,effective_length,normalization)
     VALUES(@session,@entry_id,@parent_id,@timestamp,@type,@role,@event_key,@is_activity,1,1,@target_id,@offset,@bytes,@hash,@text_length,@replacement_length,@text_length,@normalization)`).run({...normalized,session,offset,bytes:bytes.length,hash:digest(bytes),text_length:normalized.text.length,replacement_length:normalized.replacement?.length||0,normalization:options.normalization||2});
   return Number(result.lastInsertRowid);

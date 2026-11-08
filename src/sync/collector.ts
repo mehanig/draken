@@ -10,7 +10,7 @@ import { identifySource, normalizeSource } from '../sources/adapters';
 interface Source {
   id: string; agent: AgentKind; external_id: string; path: string; cwd: string; name: string; byte_offset: number;
   file_identity: string; boundary_hash: string; prefix_hash: string;
-  modified_at: string; leaf_id: string | null;
+  modified_at: string; leaf_id: string | null; scanned_bytes: number;
 }
 
 function inside(candidate: string, root: string): boolean {
@@ -43,13 +43,14 @@ async function hashRegion(file: fs.promises.FileHandle, start: number, length: n
 }
 
 /** Read only complete LF-terminated records. Never mutate a pi session file. */
-async function readRecords(handle: fs.promises.FileHandle, file: string, offset: number, size: number, warnings: string[]) {
+async function readRecords(handle: fs.promises.FileHandle, file: string, offset: number, size: number, warnings: string[], signal?: AbortSignal) {
   const records: (RecordPointer & { value: any })[] = [];
   let pending = Buffer.alloc(0);
   let consumed = offset;
   const end = Math.min(size, offset + 32 * 1024 * 1024);
   if (end <= offset) return { records, offset };
   for await (const chunk of fs.createReadStream(file, { fd: handle.fd, autoClose: false, start: offset, end: end - 1 })) {
+    signal?.throwIfAborted();
     pending = Buffer.concat([pending, chunk as Buffer]);
     let newline: number;
     while ((newline = pending.indexOf(10)) !== -1) {
@@ -67,8 +68,7 @@ async function readRecords(handle: fs.promises.FileHandle, file: string, offset:
       break;
     }
   }
-  if (end < size) warnings.push(`Large session ${file}: scan again to index the remaining records.`);
-  return { records, offset: consumed };
+  return { records, offset: consumed, reachedEnd: end === size };
 }
 
 function updateProjection(sessionId: string, leaf: string | null, agent: AgentKind): void {
@@ -108,9 +108,9 @@ async function pointersMatch(file: fs.promises.FileHandle, sessionId: string): P
   return true;
 }
 
-async function indexFile(filePath: string, agent: AgentKind, root: string, warnings: string[]): Promise<{ id?: string; added: number }> {
+async function indexFile(filePath: string, agent: AgentKind, root: string, warnings: string[], signal?: AbortSignal): Promise<{ id?: string; added: number }> {
   const db = getDb();
-  const previous = db.prepare('SELECT * FROM agent_sessions WHERE path = ?').get(filePath) as Source | undefined;
+  let previous = db.prepare('SELECT * FROM agent_sessions WHERE path = ?').get(filePath) as Source | undefined;
   if (previous && previous.agent !== agent) throw new Error('Session path belongs to another agent');
   const real = fs.realpathSync(filePath), base = fs.realpathSync(root);
   if (real === base || !inside(real, base)) throw new Error('Session path is outside its source root');
@@ -122,7 +122,7 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     if (inside(path.resolve(header.cwd), getDataDir())) return { added: 0 };
     const identity = `${stat.dev}:${stat.ino}`;
     const modified = stat.mtime.toISOString();
-    let reset = !previous || previous.id !== header.id || previous.file_identity !== identity || stat.size < previous.byte_offset;
+    let reset = !previous || previous.id !== header.id || previous.file_identity !== identity || stat.size < previous.byte_offset || previous.scanned_bytes < 0 || (previous.scanned_bytes === 0 && stat.size === previous.byte_offset);
     if (previous && !reset) {
       const boundary = await hashRegion(file, Math.max(0, previous.byte_offset - 256), Math.min(256, previous.byte_offset));
       const prefix = await hashRegion(file, 0, Math.min(512, previous.byte_offset));
@@ -131,13 +131,21 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
       // A middle rewrite followed by an append can leave both prefix and old
       // tail unchanged. Verify old pointers before treating it as append-only.
       if (!reset && modified !== previous.modified_at) reset = !await pointersMatch(file, previous.id);
-      if (!reset && stat.size === previous.byte_offset && modified === previous.modified_at) {
+      if (!reset && previous.scanned_bytes > 0 && stat.size === previous.byte_offset && modified === previous.modified_at) {
+        db.prepare('UPDATE agent_sessions SET scanned_bytes=? WHERE id=? AND scanned_bytes!=?').run(stat.size, previous.id, stat.size);
         return { id: previous.id, added: 0 };
       }
     }
+    if (previous) db.prepare('UPDATE agent_sessions SET scanned_bytes=0 WHERE id=? AND scanned_bytes!=0').run(previous.id);
+    let addedTotal = 0;
+    // Drain bounded chunks to this file's captured EOF, not a moving live tail.
+    // Each committed chunk survives cancellation; partial imports never get a receipt.
+    for (;;) {
+    signal?.throwIfAborted();
     const warningStart = warnings.length;
-    const result = await readRecords(file, filePath, reset ? 0 : previous!.byte_offset, stat.size, warnings);
+    const result = await readRecords(file, filePath, reset ? 0 : previous!.byte_offset, stat.size, warnings, signal);
     if (agent !== 'pi' && warnings.slice(warningStart).some(warning => warning.startsWith('Skipped malformed JSON'))) throw new Error('Malformed agent transcript; no partial record set was admitted');
+    if (warnings.length !== warningStart) throw new Error('Session import did not complete; check the scan warnings.');
     const duplicate = db.prepare('SELECT path,agent FROM agent_sessions WHERE id = ?').get(header.id) as { path: string; agent: AgentKind } | undefined;
     if (duplicate && duplicate.agent !== agent) throw new Error('Agent session ID collision');
     if (duplicate && duplicate.path !== filePath && fs.existsSync(duplicate.path)) {
@@ -169,7 +177,7 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     }
     const boundary = await hashRegion(file, Math.max(0, result.offset - 256), Math.min(256, result.offset));
     const prefix = await hashRegion(file, 0, Math.min(512, result.offset));
-    return db.transaction(() => {
+    const committed = db.transaction(() => {
       // A replacement file may represent a different session; retain its old evidence/history.
       if (previous && previous.id !== header.id) {
         db.prepare('UPDATE agent_sessions SET path = ?, missing = 1 WHERE id = ?').run(`${filePath}#replaced:${previous.id}`, previous.id);
@@ -181,6 +189,7 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
         boundary_hash=excluded.boundary_hash, prefix_hash=excluded.prefix_hash, leaf_id=excluded.leaf_id, missing=0`).run(
         header.id, filePath, header.cwd, name, modified, identity, result.offset, boundary, prefix, leaf, agent, header.external_id,
       );
+      db.prepare('UPDATE agent_sessions SET scanned_bytes=0 WHERE id=?').run(header.id);
       if (reset) db.prepare('UPDATE agent_entries SET present = 0, active = 0 WHERE session_id = ?').run(header.id);
       const upsert = db.prepare(`INSERT INTO agent_entries
         (session_id,entry_id,parent_id,timestamp,type,role,event_key,is_activity,target_id,record_offset,record_bytes,record_hash,text_length,replacement_length,effective_length)
@@ -199,15 +208,33 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
       updateProjection(header.id, leaf, agent);
       return { id: header.id as string, added };
     })();
+    addedTotal += committed.added;
+    if (warnings.length !== warningStart) return { id: header.id, added: addedTotal };
+    if (result.reachedEnd || result.offset === stat.size) {
+      const final = await file.stat();
+      if (final.size < stat.size || (final.size === stat.size && final.mtimeMs !== stat.mtimeMs)) throw new Error('Session changed during import; retry the scan.');
+      db.prepare('UPDATE agent_sessions SET scanned_bytes=? WHERE id=?').run(stat.size, header.id);
+      return { id: header.id, added: addedTotal };
+    }
+    if (result.offset <= (reset ? 0 : previous!.byte_offset)) throw new Error('Session import made no progress.');
+    previous = db.prepare('SELECT * FROM agent_sessions WHERE id=?').get(header.id) as Source;
+    reset = false;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    }
   } finally { await file.close(); }
 }
 
 let scanning: Promise<ScanResult> | null = null;
-export function scanSessions(): Promise<ScanResult> {
-  if (scanning) return scanning;
+export function scanSessions(signal?: AbortSignal): Promise<ScanResult> {
+  if (scanning) return scanning.catch(error => {
+    signal?.throwIfAborted();
+    if (error instanceof Error && error.name === 'AbortError') return scanSessions(signal);
+    throw error;
+  });
   scanning = (async () => {
     const warnings: string[] = [];
     const db = getDb(), roots = getSourceRoots(), seen = new Set<string>();
+    db.prepare("INSERT INTO sync_settings(key,value) VALUES('source-scan-complete-v1','0') ON CONFLICT(key) DO UPDATE SET value='0'").run();
     const agents = db.prepare('SELECT id FROM agent_sources WHERE enabled=1').all() as { id: AgentKind }[];
     let added = 0, files = 0;
     for (const { id: agent } of agents) {
@@ -216,23 +243,31 @@ export function scanSessions(): Promise<ScanResult> {
         if (!fs.existsSync(root)) continue;
         foundRoot = true;
         for (const file of await discover(root, warnings)) {
+          signal?.throwIfAborted();
           if (!(db.prepare('SELECT enabled FROM agent_sources WHERE id=?').get(agent) as any)?.enabled) break;
           if (agent === 'claude' && /\.orphaned-[^/]+\.jsonl$/.test(file)) continue;
           files++;
           try {
-            const result = await indexFile(file, agent, root, warnings);
+            const result = await indexFile(file, agent, root, warnings, signal);
             if (result.id) seen.add(result.id);
             added += result.added;
-          } catch (error) { warnings.push(`Could not index ${agent} session ${file}: ${error instanceof Error ? error.message : 'unknown error'}`); }
+          } catch (error) {
+            // A malformed append is an incomplete import, not a disappeared file.
+            const known = db.prepare('SELECT id FROM agent_sessions WHERE path=? AND agent=?').get(file, agent) as { id: string } | undefined;
+            if (known) seen.add(known.id);
+            warnings.push(`Could not index ${agent} session ${file}: ${error instanceof Error ? error.message : 'unknown error'}`);
+          }
         }
       }
       if (!foundRoot) warnings.push(`Session directory not found for ${agent}: ${roots[agent].join(', ')}`);
     }
+    signal?.throwIfAborted();
     db.transaction(() => {
       for (const { id } of agents) db.prepare('UPDATE agent_sessions SET missing=1 WHERE agent=? AND agent IN (SELECT id FROM agent_sources WHERE enabled=1)').run(id);
       const mark = db.prepare('UPDATE agent_sessions SET missing = 0 WHERE id = ?');
       for (const id of seen) mark.run(id);
     })();
+    if (!warnings.length) db.prepare("UPDATE sync_settings SET value='1' WHERE key='source-scan-complete-v1'").run();
     return { files, added, warnings: warnings.slice(0, 100) };
   })().finally(() => { scanning = null; });
   return scanning;

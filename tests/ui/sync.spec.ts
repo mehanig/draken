@@ -21,7 +21,7 @@ function addActivity(sessions: string) {
 async function end(page: Page) {
   await page.getByRole('button', { name: 'End call', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await expect(page.getByRole('button', { name: 'Call Draken', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Call Draken', exact: true })).toBeVisible();
 }
 
 test.afterEach(async ({ page }) => {
@@ -64,7 +64,7 @@ test('one click scans, freezes, prepares and calls; compact cards and independen
   expect(second.items).toHaveLength(1); expect(second.memory[0].sync_id).toBe(firstId); expect(second.memory[0].recap).toContain('deployment remains unverified');
   expect((await (await page.request.get(`/api/syncs/${firstId}`)).json()).status).toBe('open');
   await end(page);
-  await page.reload(); await expect(page.getByRole('button', { name: 'Call Draken', exact: true })).toBeEnabled(); expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
+  await page.reload(); await expect(page.getByRole('button', { name: 'Call Draken', exact: true })).toBeVisible(); expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
   await page.getByText('Previous sync recaps', { exact: true }).click(); await expect(page.locator('.memory-recap')).toContainText('not marked reviewed');
   page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Mark reviewed', exact: true }).click();
   await expect(page.locator('.page-heading .status')).toHaveText('reviewed');
@@ -113,7 +113,10 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
     expect((await page.request.post('/api/voice/live/calls',{data:{syncId:sync.id}})).status()).toBe(409);
     expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
   } finally { fs.renameSync(file+'.hidden',file); }
-  await page.reload();await expect(page.getByRole('alert')).not.toBeVisible();await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled();
+  await page.reload();
+  // The exact captured file was restored, not replaced or rewritten. Its
+  // verified receipt can be reused without another preparation or capture.
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});await expect(page.getByRole('alert')).not.toBeVisible();
   expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}`)).json()).items).toEqual(original.items);
 });
 

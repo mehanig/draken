@@ -9,7 +9,7 @@ const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 64;
 type State = Pick<AutoIndexSettings, 'phase' | 'pending_records' | 'last_completed_at' | 'error'>;
 interface Operations {
   enabled(): boolean; idle(): boolean; now(): number;
-  scan(): Promise<{ warnings: string[] }>;
+  scan(signal: AbortSignal): Promise<{ warnings: string[] }>;
   stamp(before: string): Map<string, string>;
   baseline?(): Map<string, string> | undefined;
   prepare(before: string, signal: AbortSignal): Promise<void>;
@@ -44,7 +44,7 @@ class AutoIndexer {
   private async run(signal: AbortSignal) {
     try {
       this.state.phase = 'scanning'; this.state.error = '';
-      const scanned = await this.ops.scan();
+      const scanned = await this.ops.scan(signal);
       if (signal.aborted || !this.ops.enabled()) return;
       if (scanned.warnings.length) throw new Error('Scan incomplete');
       const before = new Date(this.ops.now()).toISOString();

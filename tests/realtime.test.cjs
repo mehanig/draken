@@ -168,6 +168,8 @@ test('native adapter preserves ordering, rejects API auth/provider drift, and te
         } });
       if (scenario === 'normal') {
         assert.match(await pending, /^v=0/); await voice.text('Synthetic question');
+        await voice.context('日'.repeat(2300));
+        await assert.rejects(voice.context('日'.repeat(2731)), /Cannot supply/);
         await voice.continueAnswer('日'.repeat(2000));
         await assert.rejects(voice.continueAnswer('x'.repeat(2001)), /Cannot continue/);
         const wire = fs.readFileSync(path.join(home, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);

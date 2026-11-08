@@ -9,14 +9,7 @@ import { historyUpdate, type Embedder, type ReportHistory } from './types';
 
 // CPU-only text embeddings. No speech runtime, provider credentials, downloaded
 // executable code or arbitrary model URLs. The owner prepares files on demand.
-const MODEL = 'Xenova/multilingual-e5-small';
-const REVISION = '761b726dd34fb83930e26aab4e9ac3899aa1fa78';
-const FILES = [
-  { name: 'onnx/model_quantized.onnx', size: 118308185, sha: 'f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193' },
-  { name: 'tokenizer.json', size: 17082730, sha: '0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39' },
-  { name: 'tokenizer_config.json', size: 443, sha: 'a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b' },
-];
-const MODEL_ID = `${MODEL}@${REVISION}/q8-mean-normalized-v1`;
+import { MODEL, REVISION, MODEL_ID, FILES } from './model-files';
 
 export class LocalEmbedder implements Embedder {
   readonly fingerprint = MODEL_ID;
@@ -31,11 +24,12 @@ export class LocalEmbedder implements Embedder {
     try { for await (const chunk of fs.createReadStream(path.join(this.directory, file.name))) hash.update(chunk); return hash.digest('hex') === file.sha; }
     catch { return false; }
   }
-  async setup(report?: ReportHistory) {
+  async setup(report?: ReportHistory, allowDownload = true) {
     const total = FILES.reduce((sum, file) => sum + file.size, 0);
     let completed = 0;
     for (const file of FILES) {
       if (await this.verified(file)) { completed += file.size; continue; }
+      if (!allowDownload) throw new Error('Pinned embedding files are missing or damaged. Prepare history before calling.');
       const progress = (size: number) => report?.(historyUpdate('downloading', { downloaded_bytes: completed + size, download_total_bytes: total }));
       progress(0);
       const target = path.join(this.directory, file.name), temporary = target + '.part';
