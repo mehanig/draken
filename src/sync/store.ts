@@ -12,6 +12,8 @@ export class HttpError extends Error {
 }
 
 export const busySyncs = new Set<number>();
+// Owned automatic preparation can be yielded before a foreground start.
+export const backgroundSyncs = new Set<number>();
 export const activeVoiceSyncs = new Set<number>();
 const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.briefing, s.decisions, s.carry_forward,
   s.remaining_count, s.snapshot_version, s.snapshot_at,
@@ -64,10 +66,39 @@ export function overview(): Overview {
   };
 }
 
+export function availableCount(): number {
+  return (getDb().prepare(`SELECT COUNT(DISTINCT e.event_key) AS n FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE ${availableWhere}`).get() as { n: number }).n;
+}
+
+/** Automatic snapshots are immutable too. A transport request claims one once;
+ * any conversation, call or edited notes makes it ineligible for reuse. */
+export function automaticSyncId(ready: boolean): number | undefined {
+  return (getDb().prepare(`SELECT a.id FROM syncs a JOIN sync_presentations p ON p.sync_id=a.id
+    WHERE a.status='open' AND p.request_id LIKE 'auto:%'
+    AND a.id=(SELECT MAX(id) FROM syncs WHERE status!='discarded')
+    AND ${ready ? "a.briefing!='' AND a.compression_complete=1" : "(a.briefing='' OR a.compression_complete=0)"}
+    AND a.decisions='' AND a.carry_forward=COALESCE(json_extract(a.memory_json,'$[0].carry_forward'),'')
+    AND NOT EXISTS (SELECT 1 FROM sync_messages m WHERE m.sync_id=a.id)
+    AND NOT EXISTS (SELECT 1 FROM live_calls c WHERE c.sync_id=a.id)
+    AND NOT EXISTS (SELECT 1 FROM voice_calls c WHERE c.sync_id=a.id)
+    ORDER BY a.id DESC LIMIT 1`).get() as { id: number } | undefined)?.id;
+}
+
+export function assertAutomaticScope(id: number): void {
+  const stale = getDb().prepare(`SELECT 1 FROM sync_items i WHERE i.sync_id=? AND NOT EXISTS (
+    SELECT 1 FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id
+    WHERE e.event_key=i.event_key AND ${pendingWhere}) LIMIT 1`).get(id);
+  if (stale) throw new HttpError(409, 'Automatic snapshot selection changed. Open or discard that snapshot before preparing another; excluded sources were not summarized.');
+}
+
+export function claimAutomaticSync(id: number): void {
+  getDb().prepare("UPDATE sync_presentations SET request_id=NULL WHERE sync_id=? AND request_id LIKE 'auto:%'").run(id);
+}
+
 export function homeOverview(before?: number): HomeOverview {
   const db = getDb();
   const rows = db.prepare(`${summaryQuery} WHERE s.id < ? ORDER BY s.id DESC LIMIT 21`).all(before || Number.MAX_SAFE_INTEGER) as SyncSummary[];
-  const available = (db.prepare(`SELECT COUNT(DISTINCT e.event_key) AS n FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE ${availableWhere}`).get() as any).n;
+  const available = availableCount();
   return { syncs: rows.slice(0, 20).map(row => ({ aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)), id: row.id, status: row.status, created_at: row.created_at, item_count: row.item_count,
     preview: row.recap || row.briefing.replace(/\[([EC]\d+)\]/g, '').replace(/\s+/g, ' ').slice(0, 600),
     preview_kind: row.recap ? row.recap_state === 'ready' ? 'recap' : 'previous_recap' : row.briefing ? 'briefing' : 'empty', busy: busySyncs.has(row.id), active_call: activeVoiceSyncs.has(row.id),
@@ -75,7 +106,7 @@ export function homeOverview(before?: number): HomeOverview {
     calls: (db.prepare('SELECT (SELECT COUNT(*) FROM voice_calls WHERE sync_id=?) + (SELECT COUNT(*) FROM live_calls WHERE sync_id=?) AS n').get(row.id, row.id) as any).n })),
     available, included_unreviewed: pendingCount() - available,
     covered: (db.prepare('SELECT COUNT(*) AS n FROM sync_coverage').get() as any).n,
-    busy: busySyncs.size > 0, active_call: activeVoiceSyncs.size > 0, next_cursor: rows.length > 20 ? rows[19].id : null };
+    busy: [...busySyncs].some(id => !backgroundSyncs.has(id)), active_call: activeVoiceSyncs.size > 0, next_cursor: rows.length > 20 ? rows[19].id : null };
 }
 
 export function setAgentEnabled(agent: string, enabled: boolean): Overview {
@@ -215,12 +246,25 @@ export function startSync(since?: string | null): SyncDetail {
 
 /** New one-click workflow: reserve previously unassigned entries, never review them.
  * Repeated transport requests reuse the same immutable snapshot. */
-export function startConversationSync(requestId: string): SyncDetail {
+export function startConversationSync(requestId: string, automatic = false): SyncDetail {
   const db = getDb();
   return db.transaction(() => {
     const existing = db.prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
     if (existing) return getSync(existing.sync_id);
     if (activeVoiceSyncs.size || busySyncs.size) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
+    if (!automatic) {
+      const prepared = automaticSyncId(false) ?? (availableCount() === 0 ? automaticSyncId(true) : undefined);
+      if (prepared !== undefined) {
+        assertAutomaticScope(prepared);
+        const sync = getSync(prepared); assertEvidenceAvailable(sync);
+        db.prepare("UPDATE sync_presentations SET request_id=NULL WHERE request_id LIKE 'auto:%'").run();
+        db.prepare('UPDATE sync_presentations SET request_id=? WHERE sync_id=?').run(requestId, prepared);
+        return sync;
+      }
+      // Prior automatic batches now become historical context for this user's
+      // new snapshot, not candidates to reopen on a later Home action.
+      db.prepare("UPDATE sync_presentations SET request_id=NULL WHERE request_id LIKE 'auto:%'").run();
+    }
     db.prepare("INSERT OR IGNORE INTO sync_settings(key,value) VALUES ('history_since','')").run();
     const prior = (db.prepare("SELECT id FROM syncs WHERE status != 'discarded' ORDER BY id DESC LIMIT 3").all() as { id: number }[]).map(row => getSync(row.id));
     const inputs: RecapInput[] = prior.map(recapInput);

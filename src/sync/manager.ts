@@ -108,16 +108,19 @@ function discussionHistory(sync: SyncDetail, question: string, currentUserId = -
   return voiceHistoryQuery(db, question, focus).query;
 }
 
-export async function generateReply(id: number, question?: string, requestId?: string): Promise<SyncDetail> {
+export async function generateReply(id: number, question?: string, requestId?: string, options: { signal?: AbortSignal; deferHistory?: boolean } = {}): Promise<SyncDetail> {
+  options.signal?.throwIfAborted();
   let sync = requireOpen(id);
   assertEvidenceAvailable(sync);
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand this legacy partial snapshot before generating a new briefing. Your notes and previous discussion are preserved.');
-  if (!question && sync.briefing) return prepareCallAndWait(id);
+  if (!question && sync.briefing) return options.deferHistory ? sync : prepareCallAndWait(id);
   const prepared = requestId ? historyReadiness(true) : undefined;
   if (requestId && (!sync.briefing || !sync.tree.complete || !prepared?.ready || !prepared.before)) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
   sync = configureModels(id, sync.models);
   busySyncs.add(id);
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
   controllers.set(id, controller);
   const db = getDb();
   let runId = 0, currentUserId = -1;
@@ -195,10 +198,11 @@ export async function generateReply(id: number, question?: string, requestId?: s
       .run(controller.signal.aborted ? 'cancelled' : 'failed', cleanText(error instanceof Error ? error.message : 'Generation failed', 1500), new Date().toISOString(), runId);
     throw error;
   } finally {
+    options.signal?.removeEventListener('abort', abort);
     controllers.delete(id);
     busySyncs.delete(id);
   }
-  return question ? getSync(id) : prepareCallAndWait(id);
+  return question || options.deferHistory ? getSync(id) : prepareCallAndWait(id);
 }
 
 /** Derived call/sync recap only. Never writes notes, status, snapshot evidence or coverage. */

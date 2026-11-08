@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getDb, getDataDir } from '../db/schema';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, HttpError, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs } from '../sync/store';
+import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, HttpError, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs, claimAutomaticSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
 import { callReadiness, prepareCall } from '../voice/preparation';
@@ -26,10 +26,14 @@ router.get('/setup', route(async (req, res) => {
 }));
 router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettings())));
 router.patch('/settings/auto-index', route((req, res) => {
-  if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, 'enabled')) throw new HttpError(400, 'Only enabled is accepted');
+  if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => !['enabled', 'preparation_scope'].includes(key))) throw new HttpError(400, 'Only enabled and preparation_scope are accepted');
+  if (req.body.enabled && req.body.preparation_scope !== 'index-and-briefing-v1') throw new HttpError(409, 'Refresh Draken before enabling automatic preparation. This mode includes summary and briefing model usage, not only local indexing.');
   res.json(setAutoIndex(req.body.enabled));
 }));
-router.use((req, _res, next) => { if (['POST', 'PATCH', 'DELETE'].includes(req.method)) yieldBackgroundIndexing(); next(); });
+router.use((req, _res, next) => {
+  if (['POST', 'PATCH', 'DELETE'].includes(req.method)) void yieldBackgroundIndexing().then(() => next(), next);
+  else next();
+});
 
 router.get('/home', route((req, res) => {
   const before = req.query.before === undefined ? undefined : Number(req.query.before);
@@ -51,12 +55,16 @@ router.post(['/syncs/start-call', '/syncs/start-chat'], route(async (req, res) =
   if (prior) { res.status(202).json({ sync: getSync(prior.sync_id), scan: { files: 0, added: 0, warnings: [] } }); return; }
   if (busySyncs.size || activeVoiceSyncs.size) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
   starting = true;
+  busySyncs.add(0); // Reserve foreground ownership during async setup and scanning.
   try {
     const setup = await piSetupStatus(true);
     if (setup.state !== 'configured') throw new HttpError(503, setup.message);
-    const scan = await completeScan(), sync = startConversationSync(requestId);
-    res.status(202).json({ sync: launchReply(sync.id), scan });
-  } finally { starting = false; }
+    const scan = await completeScan();
+    busySyncs.delete(0);
+    const sync = startConversationSync(requestId);
+    const ready = callReadiness(sync.id, req.path.endsWith('/start-chat')).ready;
+    res.status(202).json({ sync: ready ? sync : launchReply(sync.id), scan });
+  } finally { busySyncs.delete(0); starting = false; }
 }));
 router.post('/syncs/:id/recap', route((req, res) => res.status(202).json(launchRecap(id(req)))));
 router.get('/overview', route((_req, res) => res.json(overview())));
@@ -95,13 +103,16 @@ router.patch('/syncs/:id/models', route((req, res) => {
 }));
 router.post('/syncs/:id/cancel', route((req, res) => {
   cancelReply(id(req));
+  claimAutomaticSync(id(req));
   res.status(202).json(getProgress(id(req)));
 }));
 router.patch('/syncs/:id/notes', route((req, res) => {
   res.json(saveNotes(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward')));
 }));
 router.post('/syncs/:id/briefing', route((req, res) => {
-  res.status(202).json(launchReply(id(req)));
+  const sync = launchReply(id(req));
+  claimAutomaticSync(sync.id);
+  res.status(202).json(sync);
 }));
 router.post('/syncs/:id/messages', route((req, res) => {
   const question = text(req.body?.message, 'Message');

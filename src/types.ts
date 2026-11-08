@@ -33,8 +33,10 @@ export interface Evidence {
 
 export interface AutoIndexSettings {
   enabled: boolean; check_seconds: number; batch_records: number;
-  phase: 'off' | 'waiting' | 'scanning' | 'indexing' | 'paused' | 'stopping' | 'error';
+  phase: 'off' | 'waiting' | 'scanning' | 'indexing' | 'briefing' | 'paused' | 'stopping' | 'error';
   pending_records: number; last_completed_at: string | null; error: string;
+  pending_entries: number; sync_id: number | null; ready_sync_id: number | null;
+  progress: { stage: string; completed: number; total: number; invocations: number; max_invocations: number } | null;
 }
 export interface SyncCost { usd: number | null; complete: boolean }
 export interface PiAccounting {

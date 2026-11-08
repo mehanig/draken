@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { HttpError } from '../sync/store';
 import { createLiveCall, connectLiveCall, liveEvents, sendLiveText, interruptLiveCall, endLiveCall, observeLiveAudio } from '../voice/live';
+import { yieldBackgroundIndexing } from '../memory/automatic';
 const router = Router();
 const route = (fn: (req: Request, res: Response) => unknown | Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { Promise.resolve().then(() => fn(req, res)).catch(next); };
 const id = (value: unknown) => { if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/.test(value)) throw new HttpError(400, 'Invalid call identifier'); return value; };
@@ -13,7 +14,11 @@ async function connected(res: Response, fn: (signal: AbortSignal) => Promise<unk
 router.post('/calls', route(async (req, res) => {
   if (Object.keys(req.body || {}).some(key => !['syncId', 'requestId'].includes(key))) throw new HttpError(400, 'Unknown call option. Refresh the page.');
   const requestId = req.body?.requestId === undefined ? undefined : id(req.body.requestId);
-  const result = await connected(res, signal => createLiveCall(number(req.body?.syncId, 1), signal, requestId)); res.status(201).json(result);
+  const syncId = number(req.body?.syncId, 1);
+  const result = await connected(res, async signal => {
+    await yieldBackgroundIndexing(); signal.throwIfAborted();
+    return createLiveCall(syncId, signal, requestId);
+  }); res.status(201).json(result);
 }));
 router.post('/calls/:id/connect', route(async (req, res) => {
   if (typeof req.body?.sdp !== 'string' || req.body.sdp.length > 28000) throw new HttpError(400, 'Invalid audio offer');

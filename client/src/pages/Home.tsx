@@ -6,6 +6,7 @@ import { voiceRequest, type VoiceStatus } from '../voice/api';
 import type { HomeOverview } from '../types';
 import { SyncCost } from '../components/SyncCost';
 import { SetupPanel } from '../components/SetupPanel';
+import { AutomaticPreparation } from '../components/AutomaticPreparation';
 
 export type Navigate = (path: string, call?: boolean) => void;
 export const linkClick = (event: React.MouseEvent<HTMLAnchorElement>, navigate: Navigate, path: string) => {
@@ -52,8 +53,9 @@ export function Home({ navigate }: { navigate: Navigate }) {
       <div className="conversation-actions"><button className="btn btn-secondary" disabled={!home || !textReady || Boolean(work || home?.busy || home?.active_call)} onClick={() => void start('chat')}><MessageSquare size={17} />Chat instead</button>
       {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div></div>
     {!window.isSecureContext && <p className="small muted">Use trusted HTTPS or localhost for the combined sync and call.</p>}
-    <p className="home-hint muted small">New entries → a prepared snapshot → your conversation. Chat uses your configured text model, without a microphone. Previous syncs come along as short recaps.</p>
-    <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> waiting</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> included, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
+    <p className="home-hint muted small">With automatic preparation enabled, new history becomes a ready briefing before you arrive. Join the prepared conversation, or catch up the newest entries in one final preparation. Nothing is marked reviewed until you confirm it.</p>
+    <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> awaiting preparation</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> included, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
+    <AutomaticPreparation />
     {work && <p role="status" className="working"><span className="spinner" />{work}</p>}
     {home?.busy && !work && <p className="small muted" role="status">Draken is updating a sync. Open its card to follow progress.</p>}
     {home?.active_call && <p className="small muted">A call is active. End it before starting another sync.</p>}
