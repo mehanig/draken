@@ -10,6 +10,8 @@ export interface HistoryRecord {
   at: string | null;
   qualification: string;
   text: string;
+  /** Comparable only within one original source session. */
+  sequence?: number;
 }
 export interface HistoryQuery {
   question: string;
@@ -17,6 +19,8 @@ export interface HistoryQuery {
   session_ids?: string[];
   kind?: 'sources' | 'conversation';
   recent?: boolean;
+  /** Bounded status follow-ups; intended for the larger text-answer packet. */
+  reconcile?: boolean;
   topics?: string[];
   sync_id?: number;
   before?: string;
@@ -25,6 +29,13 @@ export interface HistoryResults {
   mode: 'hybrid';
   results: (HistoryRecord & { offset: number; score: number; lead?: string })[];
   limitations: string;
+  reconciliation?: {
+    checked_narratives: number;
+    omitted_narratives: number;
+    omitted_threads: number;
+    threads: { earlier_ref: string; later_refs: string[]; matched_terms: string[]; other_candidates: number }[];
+    qualification: string;
+  };
 }
 export interface HistoryPage {
   record: HistoryRecord;

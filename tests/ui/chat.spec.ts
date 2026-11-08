@@ -107,6 +107,34 @@ test('failed replies are retryable and sending chat never implicitly saves note 
   stored = await (await page.request.get(`/api/syncs/${id}`)).json(); expect(stored.status).toBe('open'); expect(stored.decisions).toBe(''); expect(stored.messages).toHaveLength(3);
 });
 
+test('a checkpoint repair shows its real stage without exposing the rejected draft or starting audio', async ({ page }) => {
+  await noAudio(page);
+  const id = crypto.randomUUID(), timestamp = new Date(Date.now() - 60000).toISOString();
+  const texts = [
+    ['user', 'Check Trailboard reconciliation'],
+    ['assistant', 'Permission/token/tap/badge callbacks and account cleanup remain unfinished. Durable backend delivery jobs are pending.'],
+    ['assistant', 'Client wiring implemented: permission/token/tap/badge callbacks and account cleanup. Remaining: durable backend delivery jobs.'],
+    ['assistant', 'Implemented durable backend delivery jobs with leases and bounded retries. Delivery remains disabled; shared dispatcher and device acceptance are unfinished.'],
+  ];
+  fs.writeFileSync(path.join(sessions, `${id}.jsonl`), [
+    { type: 'session', version: 3, id, cwd: '/demo/Trailboard', timestamp },
+    ...texts.map(([role, content], i) => ({ type: 'message', id: String(i), parentId: i ? String(i - 1) : null, timestamp, message: { role, content } })),
+  ].map(JSON.stringify).join('\n') + '\n');
+  await page.goto('/'); await page.getByRole('button', { name: 'Chat instead', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Message Draken' })).toBeEnabled({ timeout: 20000 });
+  fs.writeFileSync(control, JSON.stringify({ staleCheckpoint: true, delay: 2000 }));
+  await page.getByRole('textbox', { name: 'Message Draken' }).fill('What is still blocked in Trailboard reconciliation?');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Checking later updates', { timeout: 15000 });
+  await expect(page.locator('.chat-thread')).not.toContainText('The old client wiring is still blocked.');
+  await expect(page.locator('.chat-thread')).toContainText('Corrected synthetic answer', { timeout: 15000 });
+  const syncId = new URL(page.url()).pathname.split('/')[2];
+  const stored = await (await page.request.get(`/api/syncs/${syncId}`)).json();
+  expect(stored.messages).toHaveLength(2); expect(stored.status).toBe('open'); expect(stored.decisions).toBe('');
+  expect(await page.evaluate(() => (window as any).__chatMedia)).toEqual({ microphone: 0, audio: 0, peers: 0 });
+  await expect(page.locator('.chat-model')).toHaveCount(0);
+});
+
 test('Chat instead consumes an auto-call intent while preparation is still running', async ({ page }) => {
   await noAudio(page); activity(); fs.writeFileSync(control, JSON.stringify({ delay: 1200 })); const calls: string[] = [];
   page.on('request', request => { if (request.url().includes('/voice/live/')) calls.push(request.url()); });

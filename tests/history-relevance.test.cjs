@@ -37,8 +37,8 @@ function fixture() {
   }
 }
 test('project scope follows generic follow-ups, changes on an explicit switch, and still permits conversation recall', () => {
-  fixture(); db.prepare("UPDATE agent_sessions SET name='Beacon indexing: upload safety, visual parity and screen tests' WHERE id='beacon'").run(); let focus;
-  for (const question of ["What's happening with iOS Trailboard rewrite?", 'So, have you checked', 'What is it working on at the moment?', 'What does it mean upload safety and missing links?', 'What are we uploading here? Images?', 'How is visual parity progressing?', 'Which screens match and what remains?']) {
+  fixture(); db.prepare("UPDATE agent_sessions SET name='Beacon indexing: upload safety, visual parity, screen tests and remaining blockers' WHERE id='beacon'").run(); let focus;
+  for (const question of ["What's happening with iOS Trailboard rewrite?", 'So, have you checked', 'What is it working on at the moment?', 'What does it mean upload safety and missing links?', 'What are we uploading here? Images?', 'How is visual parity progressing?', 'Which screens match and what remains?', 'What is still blocked?']) {
     const plan = voiceHistoryQuery(db, question, focus); focus = plan.focus;
     assert.deepEqual(plan.query.session_ids, ['trailboard']); assert.equal(plan.query.kind, 'sources');
     if (question.includes('uploading here')) assert.deepEqual(plan.query.topics, ['upload safety', 'missing links']);

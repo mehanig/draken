@@ -116,12 +116,13 @@ export function stopHistory() {
 export function validateHistoryQuery(value: unknown): HistoryQuery {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'A history query is required');
   const query = value as Record<string, unknown>;
-  if (Object.keys(query).some(key => !['question', 'session_id', 'session_ids', 'kind', 'recent', 'topics', 'sync_id', 'before'].includes(key))) throw new HttpError(400, 'Unknown history query option');
+  if (Object.keys(query).some(key => !['question', 'session_id', 'session_ids', 'kind', 'recent', 'reconcile', 'topics', 'sync_id', 'before'].includes(key))) throw new HttpError(400, 'Unknown history query option');
   if (typeof query.question !== 'string' || !query.question.trim() || query.question.length > 2000) throw new HttpError(400, 'History question must be 1 to 2000 characters');
   if (query.session_id !== undefined && (typeof query.session_id !== 'string' || !/^(?:(?:codex|claude):)?[\w-]{1,128}(?::[\w-]{1,128})?$/.test(query.session_id))) throw new HttpError(400, 'Invalid session filter');
   if (query.session_ids !== undefined && (!Array.isArray(query.session_ids) || !query.session_ids.length || query.session_ids.length > 8 || query.session_ids.some(id => typeof id !== 'string' || !/^(?:(?:codex|claude):)?[\w-]{1,128}(?::[\w-]{1,128})?$/.test(id)))) throw new HttpError(400, 'Invalid session filters');
   if (query.kind !== undefined && query.kind !== 'sources' && query.kind !== 'conversation') throw new HttpError(400, 'Invalid history kind');
   if (query.topics !== undefined && (!Array.isArray(query.topics) || query.topics.length > 2 || query.topics.some(topic => typeof topic !== 'string' || !topic.trim() || topic.length > 200))) throw new HttpError(400, 'Invalid history topics');
+  if (query.reconcile !== undefined && typeof query.reconcile !== 'boolean') throw new HttpError(400, 'Invalid reconciliation option');
   if (query.recent !== undefined && typeof query.recent !== 'boolean') throw new HttpError(400, 'Invalid history ordering');
   if (query.sync_id !== undefined && (!Number.isSafeInteger(query.sync_id) || (query.sync_id as number) < 1)) throw new HttpError(400, 'Invalid sync filter');
   if (query.before !== undefined && (typeof query.before !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(query.before) || !Number.isFinite(Date.parse(query.before)) || new Date(query.before).toISOString() !== query.before)) throw new HttpError(400, 'Invalid history cutoff');

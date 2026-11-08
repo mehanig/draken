@@ -82,3 +82,38 @@ test('searching and thinking are real durable stages; cancellation retains the u
  const until=Date.now()+5000;while(store.getProgress(id).run.stage!=='Thinking about your question'){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
  assert.equal(store.getProgress(id).run.status,'running');await idle();assert.equal(store.getSync(id).messages.length,3);assert.equal(store.homeOverview().covered,0);
 });
+function reconciliationFixture(session){
+ const ids=['a','b','c'].map(letter=>'H'+letter.repeat(24));
+ memory.searchPreparedHistory=async query=>{assert.equal(query.reconcile,true);return {mode:'hybrid',limitations:'Synthetic original reports, not independently verified.',results:ids.map((ref,i)=>({ref,kind:'session',session_id:session,sync_id:null,origin_ref:null,title:'Trailboard',workspace:'/demo/Trailboard',role:'assistant',at:`2026-01-0${i+1}T00:00:00.000Z`,sequence:i+1,offset:0,score:1,qualification:'Agent report.',text:['Client wiring and durable jobs remain unfinished.','Client wiring implemented; delivery disabled.','Durable job foundations implemented; delivery remains disabled.'][i]})),reconciliation:{checked_narratives:3,omitted_narratives:0,omitted_threads:0,threads:[{earlier_ref:ids[0],later_refs:ids.slice(1),matched_terms:['wiring','jobs'],other_candidates:0}],qualification:'Candidates, not automatic proof of completion.'}};};
+ return ids;
+}
+test('an unreconciled draft gets one bounded same-model repair and only the corrected answer is saved',async()=>{
+ const {id,trail}=await ready(),refs=reconciliationFixture(trail),before=calls().length;
+ fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true}));
+ launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
+ const sync=store.getSync(id),attempts=calls().slice(before);
+ assert.equal(sync.tree.run.status,'completed');assert.equal(sync.messages.length,2);assert.match(sync.messages[1].content,/Corrected synthetic answer/);
+ assert.equal(attempts.length,2);assert.ok(attempts.every(call=>call.model==='test/strong'&&call.task==='final_verdict'));
+ assert.ok(attempts[1].reconciliation_repair);assert.equal(attempts[0].reconciliation_repair,undefined);
+ assert.ok(refs.slice(1).every(ref=>sync.messages[1].content.includes(ref)));
+ assert.equal(store.homeOverview().covered,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
+});
+test('a second unreconciled answer fails visibly without saving either draft or retrying indefinitely',async()=>{
+ const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length,key=randomUUID();
+ fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true,ignoreReconciliation:true}));
+ launchChat(id,'What is still blocked in Trailboard?',key);await idle();
+ const sync=store.getSync(id);assert.equal(sync.tree.run.status,'failed');assert.match(sync.tree.run.error,/did not reconcile/);
+ assert.equal(sync.messages.length,1);assert.equal(sync.messages[0].role,'user');assert.equal(calls().length-before,2);
+ launchChat(id,'What is still blocked in Trailboard?',key);assert.equal(calls().length-before,2,'Delivery retry cannot pay for another repair');
+});
+test('reconciliation cannot exceed the invocation ceiling or publish a draft after cancellation',async()=>{
+ const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:1});fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true}));
+ launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
+ assert.equal(calls().length-before,1);assert.equal(store.getSync(id).tree.run.status,'failed');assert.match(store.getSync(id).tree.run.error,/Invocation budget/);assert.equal(store.getSync(id).messages.length,1);
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:10});fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true,delay:300}));
+ launchChat(id,'What is still blocked in Trailboard?',randomUUID());
+ const until=Date.now()+5000;while(store.getProgress(id).run.stage!=='Reconciling later evidence'){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
+ assert.equal(store.getSync(id).messages.length,2,'Both rows are retained user questions, not the rejected draft');
+ cancelReply(id);await idle();assert.equal(store.getSync(id).tree.run.status,'cancelled');assert.ok(store.getSync(id).messages.every(message=>message.role==='user'));
+});

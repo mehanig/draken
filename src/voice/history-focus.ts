@@ -1,8 +1,9 @@
 import type Database from 'better-sqlite3';
 import type { HistoryQuery } from '../memory/types';
+import { statusQuestion } from '../memory/reconcile';
 
 export interface VoiceHistoryFocus { sessions: string[]; question: string; topics?: string[] }
-const common = new Set('hello hi hey can could would please check tell about what whats happening going latest current now doing working work trying achieve project repo repository called have with from this that those these here there where which when your our app application ios native rewrite version status update progress mean meant exactly does how the and for are was were has had you it its into written make want thinking using upload uploading safety missing links visual parity screens screen functional original remains tests testing tested implementation implemented images photos profile navigation'.split(' '));
+const common = new Set('hello hi hey can could would please check tell about what whats happening going latest current now doing working work trying achieve project repo repository called have with from this that those these here there where which when your our app application ios native rewrite version status update progress mean meant exactly does how the and for are was were has had you it its into written make want thinking using upload uploading safety missing links visual parity screens screen functional original remains tests testing tested implementation implemented images photos profile navigation blocked blocker blockers unfinished unconfirmed remaining finished completed completion left long longer'.split(' '));
 const words = (text: string) => [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])].filter(word => word.length >= 3 && !common.has(word));
 const conversationQuestion = (question: string) => /\b(?:what (?:did|have) (?:i|we|you) (?:ask|say|discuss|agree|decide)|(?:previous|earlier|last) (?:call|conversation|discussion)|remember (?:when|what)|quote (?:me|our))\b/i.test(question);
 
@@ -23,7 +24,7 @@ export function voiceHistoryQuery(db: Database.Database, question: string, previ
   const sessions = explicit || (switching ? [] : previous?.sessions || []);
   const same = previous && JSON.stringify(previous.sessions) === JSON.stringify(sessions);
   const recall = conversationQuestion(question);
-  const recent = !recall && /\b(?:happening|latest|status|current|at the moment|working on|trying to achieve|have you checked|where are we|still missing|still left|visual parity|what remains|screens match|what changed)\b/i.test(question);
+  const recent = !recall && (statusQuestion(question) || /\b(?:happening|at the moment|working on|trying to achieve|have you checked|visual parity|screens match|what changed)\b/i.test(question));
   // The preceding question supplies the referent for "those" / "uploading here".
   // Session scope is independent of this text, so a follow-up cannot drift into
   // an unrelated project merely because its wording is generic.

@@ -4,6 +4,7 @@ import { cleanText } from '../sync/normalize';
 import { getSourceRoots, type RootInput } from '../sources/registry';
 import { NormalizationCache } from '../sync/jsonl';
 import { initHistoryStorage } from './storage';
+import { reconcileHistory } from './reconcile';
 import { sourceStamps, saveSourceCheckpoint } from './stamps';
 import { historyStamp, saveHistoryReadiness } from './readiness';
 import { digest, historySources, type SourceRecord } from './sources';
@@ -273,12 +274,19 @@ export class HistoryIndex {
         if (chunk) recent.push({ score: 1, chunk });
       }
     }
-    const selected = [...recent, ...topicLeaders, ...ranked].filter((value, i, all) => all.findIndex(other => this.record(other.chunk.ref).identity === this.record(value.chunk.ref).identity) === i);
+    const explicit = query.kind === 'sources' ? [...new Set(query.question.match(/\bH[a-f0-9]{24}\b/g) || [])].slice(0, 3).map(ref => {
+      const record = this.record(ref);
+      if (!this.admitted(record, query)) throw new Error('Historical reference is outside this lookup scope or cutoff.');
+      const chunk = this.db.prepare('SELECT id,ref,offset FROM chunks WHERE ref=? AND embedded=1 ORDER BY offset LIMIT 1').get(ref) as Chunk | undefined;
+      if (!chunk) throw new Error('Historical reference has not been prepared.');
+      return { score: 1, chunk };
+    }) : [];
+    const selected = [...explicit, ...recent, ...topicLeaders, ...ranked].filter((value, i, all) => all.findIndex(other => this.record(other.chunk.ref).identity === this.record(value.chunk.ref).identity) === i);
     const results = selected.slice(0, 8).map(({ chunk, score }) => {
       const record = this.record(chunk.ref);
-      return { ...record, text: record.text.slice(chunk.offset, chunk.offset + (query.kind === 'sources' ? 1600 : 800)), offset: chunk.offset, score, ...(query.kind === 'sources' && chunk.offset > 0 ? { lead: record.text.slice(0, 400) } : {}) };
+      return { ...record, sequence: record.position, text: record.text.slice(chunk.offset, chunk.offset + (query.kind === 'sources' ? 1600 : 800)), offset: chunk.offset, score, ...(query.kind === 'sources' && chunk.offset > 0 ? { lead: record.text.slice(0, 400) } : {}) };
     });
-    return { mode: 'hybrid', results, limitations: LIMITATIONS + ' Records arriving or changing during this lookup are considered by the next lookup.' };
+    return { mode: 'hybrid', ...reconcileHistory([...this.current.values()].filter(record => this.admitted(record, query)), results, query), limitations: LIMITATIONS + ' Records arriving or changing during this lookup are considered by the next lookup.' };
   }
   private record(ref: string): SourceRecord {
     const record = this.current.get(ref);
