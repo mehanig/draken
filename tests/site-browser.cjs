@@ -36,7 +36,12 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.doesNotMatch(await page.locator('#get-started').innerText(),/not published|not been published|upcoming release/i);
   assert.equal(await page.locator('.install-command').innerText(),'npm install -g draken\ndraken');
   assert.match(await page.locator('.release-note').innerText(),/0\.1\.6.*Back up.*old task dashboard/s);
-  assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'https://github.com/mehanig/draken/releases/tag/v0.2.0');
+  assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
+  const notes=await page.locator('#release-notes').innerText();
+  assert.match(notes,/0\.3\.0/);assert.match(notes,/Not published yet/);assert.match(notes,/0\.2\.0 is still the current npm release/);
+  assert.match(notes,/Chat instead/);assert.match(notes,/one correction attempt/);assert.match(notes,/native voice keeps its separate smaller lookup/);
+  assert.equal(await page.getByRole('link',{name:'Full 0.3.0 notes',exact:true}).getAttribute('href'),'https://github.com/mehanig/draken/blob/master/CHANGELOG.md#030-unreleased');
+  assert.equal(await page.locator('a[href*="/releases/tag/v0.3.0"]').count(),0,'do not link to an unpublished release');
   assert.doesNotMatch(await page.locator('.release-note').innerText(),/draken@/i,'avoid Cloudflare treating the package version as an email address');
   assert.match(await page.locator('.findings').innerText(),/Export uploads now retry when they fail/);
   await page.getByRole('button',{name:'Inspect source E03',exact:true}).click();
