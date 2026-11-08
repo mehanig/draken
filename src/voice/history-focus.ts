@@ -29,7 +29,7 @@ export function voiceHistoryQuery(db: Database.Database, question: string, previ
   // an unrelated project merely because its wording is generic.
   const explained = question.match(/\b(?:mean|meant by|explain)\s+([^?.]{3,160})/i)?.[1];
   const followup = /\b(?:here|those|that|have you checked|screens match|what remains)\b/i.test(question);
-  const queryText = same && !explicit && followup && !explained ? `${question}\nPrevious question in this call: ${previous.question}` : question;
+  const queryText = same && !explicit && followup && !explained ? `${question}\nPrevious question in this conversation: ${previous.question}` : question;
   const namedTopics = explained?.split(/\s+(?:and|versus|vs\.?)\s+/i).map(value => value.trim()).filter(Boolean).slice(0, 2);
   const topics = namedTopics || (same && /\b(?:here|those|that|exactly)\b/i.test(question) ? previous?.topics : undefined);
   return { focus: { sessions, question: question.slice(0, 2000), topics }, query: {

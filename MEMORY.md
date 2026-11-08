@@ -26,11 +26,17 @@ A failed preparation/search reports an error. If a session file changed, moved o
 
 ## Work questions and follow-ups
 
-Voice work questions prefer original session records, not old Draken replies or repeated questions. Project names in admitted session metadata establish a scope that follows generic follow-ups; an explicit project change updates it. Explicit conversation recall still searches earlier discussion. This is a heuristic, not a guarantee that an ambiguous project name will be understood correctly.
+Voice and **Chat instead** work questions prefer original session records, not old Draken replies or repeated questions. Project names in admitted session metadata establish a scope that follows generic follow-ups; an explicit project change updates it. Explicit conversation recall still searches earlier discussion. This is a heuristic, not a guarantee that an ambiguous project name will be understood correctly.
 
 Retrieval ranks both keywords and local vectors, deduplicates shared passages before the candidate limit, and gives original agent explanations their own candidate set. Current-status questions include the latest recorded agent explanation and favor recent records. Up to two named topics in a question can be searched separately so one does not crowd out the other. All candidates remain subject to source permissions and the prepared cutoff. Useful negative or historical evidence is not confirmation of a current defect.
 
 Voice source packets contain up to four sources within 7,000 UTF-8 bytes. Excerpts keep contiguous explanatory text; tool requests may be omitted with an explicit marker. A later passage can include the beginning of its source for context. The native helper can refine a question or request an H reference (optionally with `offset 2000`); each user turn permits at most three distinct lookups and reuses duplicates. Source IDs are the context supplied for that turn, not verified per-claim citations or a cumulative claim that every earlier source supported the answer. A failed or empty work lookup is not silently replaced by an old conversation.
+
+### Separate text chat
+
+`/syncs/:id/chat` uses the same project/topic planner and prepared-only source search, with a 7,000-byte historical packet. Recent actual user questions in the sync's saved chat and native call transcripts establish follow-up scope; assistant replies cannot select a project. The text model receives qualified recent call transcripts as context, not evidence of hearing or agreement. Source-reference validation checks existence, not per-claim truth.
+
+Chat readiness checks the prepared receipt at its captured cutoff. New chat messages beyond that cutoff are passed directly as recent conversation and do not force an index rebuild on every turn. Original-file identity/import cursors, selection changes, missing originals and edits to already captured records still invalidate readiness. Fresh native-call readiness keeps its stricter current-record check. Both readiness endpoints only read metadata. Refresh is explicit; chat does not silently refresh the corpus, regenerate a briefing or switch providers.
 
 ## How it works
 

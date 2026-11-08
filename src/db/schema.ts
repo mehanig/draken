@@ -203,6 +203,8 @@ export function initSchema(database: Database.Database): void {
   }
   const runColumns = new Set((database.prepare('PRAGMA table_info(sync_runs)').all() as { name: string }[]).map(column => column.name));
   if (!runColumns.has('metrics_json')) database.exec("ALTER TABLE sync_runs ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '[]'");
+  if (!runColumns.has('request_id')) database.exec('ALTER TABLE sync_runs ADD COLUMN request_id TEXT');
+  database.exec('CREATE UNIQUE INDEX IF NOT EXISTS sync_run_request ON sync_runs(request_id) WHERE request_id IS NOT NULL');
   database.prepare('UPDATE syncs SET snapshot_at = created_at WHERE snapshot_at IS NULL').run();
   migratePointers(database); migrateSnapshotPointers(database); migrateAgents(database);
   const sessionColumns = new Set((database.prepare('PRAGMA table_info(agent_sessions)').all() as { name: string }[]).map(column => column.name));

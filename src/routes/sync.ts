@@ -3,7 +3,7 @@ import { getDb, getDataDir } from '../db/schema';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
 import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, HttpError, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs } from '../sync/store';
-import { cancelReply, launchReply, launchRecap } from '../sync/manager';
+import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
 import { callReadiness, prepareCall } from '../voice/preparation';
 
@@ -42,7 +42,7 @@ async function completeScan() {
   return scan;
 }
 let starting = false;
-router.post('/syncs/start-call', route(async (req, res) => {
+router.post(['/syncs/start-call', '/syncs/start-chat'], route(async (req, res) => {
   const requestId = req.body?.request_id;
   if (typeof requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestId)) throw new HttpError(400, 'A request ID is required');
   // One scan/start operation at a time, including the async indexing interval.
@@ -79,6 +79,7 @@ router.post('/syncs', route(async (req, res) => {
 router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req)))));
 router.get('/syncs/:id/progress', route((req, res) => res.json(getProgress(id(req)))));
 router.get('/syncs/:id/call-readiness', route((req, res) => res.json(callReadiness(id(req)))));
+router.get('/syncs/:id/chat-readiness', route((req, res) => { res.json(callReadiness(id(req), true)); }));
 router.post('/syncs/:id/prepare-call', route((req, res) => res.status(202).json(prepareCall(id(req)))));
 router.get('/syncs/:id/tree/:key', route((req, res) => res.json(getTreeNode(id(req), String(req.params.key)))));
 router.post('/syncs/:id/expand', route(async (req, res) => {
@@ -107,6 +108,12 @@ router.post('/syncs/:id/messages', route((req, res) => {
   if (!question) throw new HttpError(400, 'Message cannot be empty');
   if (Object.keys(req.body).some(key => key !== 'message')) throw new HttpError(400, 'Unknown discussion option. Refresh the page.');
   res.status(202).json(launchReply(id(req), question));
+}));
+router.post('/syncs/:id/chat/messages', route((req, res) => {
+  const question = text(req.body?.message, 'Message');
+  if (!question) throw new HttpError(400, 'Message cannot be empty');
+  if (Object.keys(req.body).some(key => !['message', 'request_id'].includes(key)) || typeof req.body.request_id !== 'string') throw new HttpError(400, 'Only a message and chat request ID are accepted');
+  res.status(202).json(launchChat(id(req), question, req.body.request_id));
 }));
 router.post('/syncs/:id/complete', route((req, res) => {
   res.json(completeSync(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward'), req.body?.reviewed === true));

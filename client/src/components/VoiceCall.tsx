@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
+import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, MessageSquare, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
 import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
 import { HistorySource } from '../pages/History';
@@ -16,9 +16,9 @@ const labels = {
 };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
-export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeStart, onActiveChange, onClosed, autoStart = false, onAutoStartHandled }: {
+export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeStart, onActiveChange, onClosed, onChat, autoStart = false, onAutoStartHandled }: {
   sync: SyncDetail; readiness: CallReadiness | null; onPrepareHistory: () => void; disabled: boolean; beforeStart: () => Promise<void>;
-  onActiveChange: (active: boolean) => void; onClosed: () => Promise<void>;
+  onActiveChange: (active: boolean) => void; onClosed: () => Promise<void>; onChat: () => void;
   autoStart?: boolean; onAutoStartHandled?: () => void;
 }) {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
@@ -139,8 +139,9 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
       <div className="voice-entry-main">
         <div className="voice-entry-icon" aria-hidden="true"><Phone size={22} /></div>
         <div><h2>Talk it through. Out loud.</h2><p className="muted small">Live voice through ChatGPT. Audio goes to OpenAI; replies may paraphrase.</p></div>
+        <div className="conversation-actions"><button className="btn btn-secondary" disabled={open || checking} onClick={onChat}><MessageSquare size={16} />Chat instead</button>
         {!secure && status?.httpsPort ? <a className="btn btn-primary" href={httpsUrl.href}>Open secure call page <ExternalLink size={15} /></a> :
-          <button className="btn btn-primary" disabled={disabled || checking || !prepared || !status?.installed || Boolean(status?.activeCall) || !secure} onClick={() => void start()}><Phone size={16} />Call Draken</button>}
+          <button className="btn btn-primary" disabled={disabled || checking || !prepared || !status?.installed || Boolean(status?.activeCall) || !secure} onClick={() => void start()}><Phone size={16} />Call Draken</button>}</div>
       </div>
       <p className="small muted">Relevant earlier history is found automatically. Retrieved excerpts go to ChatGPT, separately from this frozen snapshot; no review or saved decisions change.</p>
       {!secure && <p className="small muted">The microphone needs trusted HTTPS. {status?.httpsPort ? 'The secure page uses your existing dashboard login. Install the local certificate once on this device before opening it.' : 'Use localhost, or enable HTTPS on the server.'}</p>}

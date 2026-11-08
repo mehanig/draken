@@ -6,6 +6,8 @@ import { SummaryNode, SummaryTree } from './tree';
 import { recapInput, recapHash, summarizeRecap, saveRecap, invalidateRecap, memoryText, type RecapInput } from './recap';
 import { invokePi } from './pi';
 import { historyContext } from '../memory/context';
+import { historyReadiness } from '../memory/service';
+import { voiceHistoryQuery, type VoiceHistoryFocus } from '../voice/history-focus';
 import { prepareCallAndWait, cancelCallPreparation } from '../voice/preparation';
 export { stopManagerProcesses } from './pi';
 
@@ -18,7 +20,7 @@ Every factual claim about session work MUST cite supplied evidence references li
 The tree may contain limitations, source excerpts may be truncated, and compression is lossy. State uncertainty, but do not call this a 55-entry/100-entry batch: all new_entries were processed. Later arrivals outside snapshot_at belong to the next sync.
 Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion. Omit empty headings. No tables/code fences unless requested.
 Remember saved decisions and the latest carry_forward list. Older lists and superseded briefings are historical. Do not blindly repeat old next steps from earlier assistant messages. The user edits and saves Decisions and Carry forward; don't claim you saved anything or promise to run work.
-Answer questions directly rather than repeating the opening briefing.`;
+Answer questions directly rather than repeating the opening briefing. For chat, do not force briefing headings onto a conversation. Prefer the latest relevant original project records to old summaries or assistant acknowledgements. A historical document's own date may differ from the date it was read; old rejections or TODOs do not prove a current defect. No match is not proof that the archive lacks the answer. Ask a specific clarification when necessary. Never expose internal reasoning; give the answer and a concise explanation.`;
 
 const controllers = new Map<number, AbortController>();
 export function cancelReply(id: number): void {
@@ -92,21 +94,46 @@ export function validateVerdict(answer: string, allowedRefs: Set<string>): void 
   if (allowedRefs.size && !cited.length) throw new HttpError(502, 'The final model did not cite its evidence. Its answer was not saved; retry will reuse the summary tree.');
 }
 
-export async function generateReply(id: number, question?: string): Promise<SyncDetail> {
+/** Actual user turns establish scope; generated replies never select a project. */
+function discussionHistory(sync: SyncDetail, question: string, currentUserId = -1) {
+  const db = getDb();
+  const users = db.prepare(`SELECT content FROM (
+    SELECT content,created_at AS at FROM sync_messages WHERE sync_id=? AND role='user' AND id!=?
+    UNION ALL SELECT m.text AS content,m.started_at AS at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
+      WHERE c.sync_id=? AND m.role='user' AND m.status='generated'
+  ) ORDER BY at DESC LIMIT 30`).all(sync.id, currentUserId, sync.id) as { content: string }[];
+  let focus: VoiceHistoryFocus | undefined;
+  for (const turn of users.reverse()) focus = voiceHistoryQuery(db, turn.content, focus).focus;
+  return voiceHistoryQuery(db, question, focus).query;
+}
+
+export async function generateReply(id: number, question?: string, requestId?: string): Promise<SyncDetail> {
   let sync = requireOpen(id);
   assertEvidenceAvailable(sync);
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand this legacy partial snapshot before generating a new briefing. Your notes and previous discussion are preserved.');
   if (!question && sync.briefing) return prepareCallAndWait(id);
+  const prepared = requestId ? historyReadiness(true) : undefined;
+  if (requestId && (!sync.briefing || !sync.tree.complete || !prepared?.ready || !prepared.before)) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
   sync = configureModels(id, sync.models);
   busySyncs.add(id);
   const controller = new AbortController();
   controllers.set(id, controller);
   const db = getDb();
-  const runId = Number(db.prepare(`INSERT INTO sync_runs(sync_id, summary_model, final_model, max_invocations, total_entries, question, started_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, sync.models.summary, sync.models.final || 'pi configured default',
-    sync.models.max_invocations, sync.items.length, question || null, new Date().toISOString()).lastInsertRowid);
-  db.prepare('DELETE FROM sync_tree_nodes WHERE sync_id = ?').run(id);
+  let runId = 0, currentUserId = -1;
   try {
+    runId = db.transaction(() => {
+      // Millisecond-equal sends still belong after the captured archive cutoff.
+      const started = new Date(Math.max(Date.now(), prepared?.before ? Date.parse(prepared.before) + 1 : 0)).toISOString();
+      const result = Number(db.prepare(`INSERT INTO sync_runs(sync_id, summary_model, final_model, max_invocations, total_entries, question, started_at, request_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, sync.models.summary, sync.models.final || 'pi configured default',
+        sync.models.max_invocations, sync.items.length, question || null, started, requestId || null).lastInsertRowid);
+      if (requestId) {
+        currentUserId = Number(db.prepare("INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,'user',?,?)").run(id, question!, started).lastInsertRowid);
+        invalidateRecap(id);
+      }
+      return result;
+    })();
+    db.prepare('DELETE FROM sync_tree_nodes WHERE sync_id = ?').run(id);
     const tree = new SummaryTree(sync, runId, controller.signal);
     if (!question) {
       const view = db.prepare('SELECT memory_inputs_json FROM sync_presentations WHERE sync_id=? AND request_id IS NOT NULL').get(id) as { memory_inputs_json: string } | undefined;
@@ -126,10 +153,14 @@ export async function generateReply(id: number, question?: string): Promise<Sync
     const roots = await tree.build();
     assertEvidenceAvailable(sync);
     const input = finalInput(sync, tree, roots, question);
-    if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Preparing and searching earlier history', runId);
-    const archive = question ? await historyContext(question, new Date().toISOString(), controller.signal, 12000) : undefined;
+    if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Searching earlier history', runId);
+    const query = question ? discussionHistory(sync, question, currentUserId) : undefined;
+    const archive = query ? await historyContext(query.question, prepared?.before || new Date().toISOString(), controller.signal, 7000, Boolean(requestId), query) : undefined;
     for (const ref of archive?.refs || []) input.allowedRefs.add(ref);
-    const answer = cleanText(await tree.call({ ...input.payload, ...(archive ? { historical_evidence: JSON.parse(archive.text) } : {}) }, systemPrompt, true), 60000);
+    const calls = question ? db.prepare(`SELECT m.role,m.text,m.status,m.started_at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
+      WHERE c.sync_id=? AND m.text!='' ORDER BY m.id DESC LIMIT 12`).all(id).reverse().map((row: any) => ({ ...row, text: cleanText(row.text, 1500), qualification: 'Call transcript, not proof of hearing or agreement.' })) : undefined;
+    if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Thinking about your question', runId);
+    const answer = cleanText(await tree.call({ ...input.payload, ...(archive ? { historical_evidence: JSON.parse(archive.text), recent_call_transcripts: calls } : {}) }, systemPrompt, true), 60000);
     validateVerdict(answer, input.allowedRefs);
     if (controller.signal.aborted) throw new HttpError(409, 'Generation cancelled');
     db.transaction(() => {
@@ -137,7 +168,7 @@ export async function generateReply(id: number, question?: string): Promise<Sync
       invalidateRecap(id);
       if (question) {
         const insert = db.prepare('INSERT INTO sync_messages(sync_id, role, content, created_at) VALUES (?, ?, ?, ?)');
-        insert.run(id, 'user', question, new Date().toISOString());
+        if (!requestId) insert.run(id, 'user', question, new Date().toISOString());
         insert.run(id, 'assistant', answer, new Date().toISOString());
       } else db.prepare('UPDATE syncs SET briefing = ? WHERE id = ?').run(answer, id);
       db.prepare('UPDATE syncs SET compression_complete = 1 WHERE id = ?').run(id);
@@ -179,6 +210,24 @@ export function launchRecap(id: number): SyncDetail {
 }
 
 function activeRecapOrVoice(id: number) { return activeVoiceSyncs.has(id) || controllers.has(id); }
+
+/** A chat request may be retried after a lost HTTP response without paying twice.
+ * Explicit retries after a failed/cancelled run use a new request ID. */
+export function launchChat(id: number, question: string, requestId: string): SyncDetail {
+  if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestId)) throw new HttpError(400, 'A chat request ID is required');
+  const prior = getDb().prepare('SELECT sync_id,question FROM sync_runs WHERE request_id=?').get(requestId) as { sync_id: number; question: string } | undefined;
+  if (prior) {
+    if (prior.sync_id !== id || prior.question !== question) throw new HttpError(409, 'Chat request ID was already used for another question');
+    return getSync(id);
+  }
+  const sync = requireOpen(id);
+  assertEvidenceAvailable(sync);
+  if (!sync.briefing || !sync.tree.complete || !historyReadiness(true).ready) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
+  void generateReply(id, question, requestId).catch(() => { /* Run status is durable and pollable. */ });
+  const started = getSync(id);
+  if (started.tree.run?.request_id !== requestId) throw new HttpError(500, 'The chat request could not be saved. Your question was not sent.');
+  return started;
+}
 
 /** A durable result + pollable job, not a multi-minute HTTP response. */
 export function launchReply(id: number, question?: string): SyncDetail {

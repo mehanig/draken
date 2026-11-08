@@ -8,7 +8,7 @@ import { MODEL_ID, FILES } from './model-files';
 
 const KEY = 'call-history-ready-v1';
 export interface HistoryReadiness { ready: boolean; before: string | null }
-const cached = new WeakMap<Database.Database, { revision: string; until: number; stamp: string }>();
+const cached = new WeakMap<Database.Database, { revision: string; until: number; stamp: string; before?: string }>();
 
 /** A scheduling/readiness hint, not evidence. Original bytes are still verified
  * when preparing and retrieving. Include frozen aliases here: unlike the
@@ -29,7 +29,7 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
   const fileStamp = files.digest('hex');
   const revision = `${source.pragma('data_version', { simple: true })}:${(source.prepare('SELECT total_changes() AS n').get() as { n: number }).n}:${fileStamp}`;
   const prior = cached.get(source);
-  if (!before && prior?.revision === revision && now < prior.until) return prior.stamp;
+  if (prior?.revision === revision && prior.before === before && now < prior.until) return prior.stamp;
   const hash = createHash('sha256').update(fileStamp).update(JSON.stringify([...sourceStamps(source, cutoff)]));
   for (const row of source.prepare("SELECT i.sync_id,i.evidence_json FROM sync_items i JOIN syncs s ON s.id=i.sync_id WHERE s.status!='discarded' ORDER BY i.rowid").iterate()) hash.update(JSON.stringify(row));
   for (const row of source.prepare("SELECT id,context_json FROM syncs WHERE status!='discarded' ORDER BY id").iterate()) hash.update(JSON.stringify(row));
@@ -40,7 +40,7 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
       UNION ALL SELECT created_at FROM sync_messages WHERE created_at>?
       UNION ALL SELECT completed_at FROM syncs WHERE completed_at>?)`).get(cutoff, cutoff, cutoff) as { at: string | null };
     cached.set(source, { revision, until: next.at ? Date.parse(next.at) : Infinity, stamp });
-  }
+  } else cached.set(source, { revision, until: Infinity, stamp, before });
   return stamp;
 }
 
@@ -58,7 +58,7 @@ export function saveHistoryReadiness(db: Database.Database, source: Database.Dat
   db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(KEY, JSON.stringify({ before, stamp, model }));
 }
 
-export function indexReadiness(db: Database.Database, source: Database.Database): HistoryReadiness {
+export function indexReadiness(db: Database.Database, source: Database.Database, capturedOnly = false): HistoryReadiness {
   const absent = { ready: false, before: null };
   try {
     if ((db.prepare("SELECT value FROM meta WHERE key='schema'").get() as { value: string } | undefined)?.value !== 'history-index-v3-contentless') return absent;
@@ -69,13 +69,16 @@ export function indexReadiness(db: Database.Database, source: Database.Database)
       || typeof marker.stamp !== 'string' || !/^[a-f0-9]{64}$/.test(marker.stamp)
       || marker.model !== (db.prepare("SELECT value FROM meta WHERE key='model'").get() as { value: string } | undefined)?.value) return absent;
     if (db.prepare('SELECT 1 FROM passages p JOIN chunk_links c ON c.passage_id=p.id JOIN records r ON r.ref=c.ref WHERE p.embedded=0 AND r.at<=? LIMIT 1').get(marker.before)) return absent;
-    return marker.stamp === historyStamp(source) ? { ready: true, before: marker.before } : absent;
+    // A text conversation may keep using its prepared cutoff while saving new
+    // messages. Those newer messages are supplied directly, not falsely claimed
+    // as indexed. Original-file/cursor/admission changes still invalidate it.
+    return marker.stamp === historyStamp(source, capturedOnly ? marker.before : undefined) ? { ready: true, before: marker.before } : absent;
   } catch { return absent; }
 }
 
 /** Read-only metadata. Never creates a cache, scans source logs, starts a worker,
  * downloads weights or infers. Missing/older receipts need explicit preparation. */
-export function storedHistoryReadiness(directory: string, source: Database.Database): HistoryReadiness {
+export function storedHistoryReadiness(directory: string, source: Database.Database, capturedOnly = false): HistoryReadiness {
   const file = path.join(directory, 'memory', 'index.sqlite');
   if (!fs.existsSync(file)) return { ready: false, before: null };
   let db: Database.Database | undefined;
@@ -85,7 +88,7 @@ export function storedHistoryReadiness(directory: string, source: Database.Datab
     if ((db.prepare("SELECT value FROM meta WHERE key='model'").get() as { value: string } | undefined)?.value !== MODEL_ID) return { ready: false, before: null };
     if (db.prepare('SELECT 1 FROM passages WHERE embedded=1 LIMIT 1').get()
       && !FILES.every(file => { try { return fs.statSync(path.join(directory, 'memory', 'model', file.name)).size === file.size; } catch { return false; } })) return { ready: false, before: null };
-    return indexReadiness(db, source);
+    return indexReadiness(db, source, capturedOnly);
   } catch { return { ready: false, before: null }; }
   finally { db?.close(); }
 }

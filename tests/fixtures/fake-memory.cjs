@@ -37,7 +37,7 @@ exports.useIndexedHistory = () => {
     if (signal?.aborted) throw new Error('Cancelled');
     await current().prepare({ before }, undefined, true);
   };
-  service.historyReadiness = () => cache ? indexReadiness(cache, getDb()) : { ready: false, before: null };
+  service.historyReadiness = (capturedOnly = false) => cache ? indexReadiness(cache, getDb(), capturedOnly) : { ready: false, before: null };
   service.searchHistory = async query => current().search(service.validateHistoryQuery(query));
   service.searchPreparedHistory = async query => current().search(service.validateHistoryQuery(query), undefined, true);
   service.readHistory = async (ref, offset = 0, _signal, before) => current().read(ref, offset, before);

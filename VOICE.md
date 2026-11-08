@@ -23,6 +23,12 @@ The helper and its credentials live under `~/.draken/realtime/`, separate from t
 
 This uses an experimental native interface, not a stable public embedding API. Successful setup or a connection handshake is not proof that an account can receive usable audio. The opt-in probe tests actual audio separately. Quota, idle accounting, coding-allowance impact and future compatibility are not established.
 
+## Chat instead
+
+For a keyboard-only conversation, choose **Chat instead** on Home or next to **Call Draken**. This is a separate `/syncs/:id/chat` surface, not a muted call. It uses the configured text model through pi and requires no microphone permission, WebRTC connection or native ChatGPT sign-in. It shows a square Draken portrait, searching/thinking status, saved messages and source links. Its model access/quota is separate from the native voice account. See [the text-chat guide](README.md#text-chat).
+
+Choosing chat while a one-click call is still preparing consumes that browser call intent; preparation can finish without opening a microphone. Returning to **Voice & call history** never automatically starts a call. Existing voice history remains preserved and separately labelled.
+
 ## Start and use a call
 
 1. Open Draken on **localhost or trusted HTTPS**. Plain LAN HTTP normally cannot access the microphone.

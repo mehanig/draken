@@ -150,6 +150,7 @@ export interface TreeRun {
   metrics: ModelCallMetric[];
   error: string;
   question: string | null;
+  request_id: string | null;
   started_at: string;
   completed_at: string | null;
 }

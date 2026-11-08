@@ -24,6 +24,7 @@ process.stdin.on('end', () => {
     task: value.task, stage: value.stage, model, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree,
     input_characters: input.length, input_bytes: Buffer.byteLength(input), system: args[args.indexOf('--system-prompt') + 1],
     verification_evidence: value.verification_evidence, retrieved_evidence: value.retrieved_evidence, historical_evidence: value.historical_evidence,
+    recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question,
     allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair, citation_repairs: value.citation_repairs,
   }) + '\n');
   if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage)) {

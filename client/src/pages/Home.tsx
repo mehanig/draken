@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Phone } from 'lucide-react';
+import { ArrowRight, MessageSquare, Phone } from 'lucide-react';
 import * as api from '../api';
+import { requestId as newRequestId } from '../request-id';
 import { voiceRequest, type VoiceStatus } from '../voice/api';
 import type { HomeOverview } from '../types';
 import { SyncCost } from '../components/SyncCost';
@@ -18,7 +19,7 @@ export function Home({ navigate }: { navigate: Navigate }) {
   const [work, setWork] = useState('');
   const [error, setError] = useState('');
   const [secureUrl, setSecureUrl] = useState('');
-  const [setupReady, setSetupReady] = useState(false);
+  const [setupReady, setSetupReady] = useState(false), [textReady, setTextReady] = useState(false);
   const alive = useRef(true), starting = useRef(false), requestId = useRef<string>();
   const refresh = async () => { const data = await api.home(); if (alive.current) setHome(current => current && current.syncs.length > 20 ? { ...data, syncs: [...data.syncs, ...current.syncs.filter(item => item.id < data.syncs[data.syncs.length - 1]?.id)], next_cursor: current.next_cursor } : data); };
   useEffect(() => {
@@ -29,16 +30,18 @@ export function Home({ navigate }: { navigate: Navigate }) {
     const timer = setInterval(() => { if (!starting.current) void refresh().catch(() => {}); }, 4000);
     return () => { alive.current = false; clearInterval(timer); };
   }, []);
-  const start = async () => {
+  const start = async (mode: 'call' | 'chat' = 'call') => {
     if (starting.current) return;
     starting.current = true; setWork('Collecting new activity…'); setError('');
-    requestId.current ||= crypto.randomUUID();
+    requestId.current ||= newRequestId();
     try {
-      const voice = await voiceRequest<VoiceStatus>('/status');
-      if (!voice.installed) throw new Error('Voice is not ready on this server. Complete voice setup before starting a sync call.');
-      if (voice.activeCall) throw new Error('End the existing call before starting another sync.');
-      const result = await api.startCall(requestId.current);
-      if (alive.current) navigate(`/syncs/${result.sync.id}`, true);
+      if (mode === 'call') {
+        const voice = await voiceRequest<VoiceStatus>('/status');
+        if (!voice.installed) throw new Error('Voice is not ready on this server. Complete voice setup before starting a sync call.');
+        if (voice.activeCall) throw new Error('End the existing call before starting another sync.');
+      }
+      const result = await (mode === 'chat' ? api.startChat : api.startCall)(requestId.current);
+      if (alive.current) navigate(`/syncs/${result.sync.id}${mode === 'chat' ? '/chat' : ''}`, mode === 'call');
     } catch (error) { if (alive.current) setError(error instanceof Error ? error.message : 'Could not start the sync'); }
     finally { starting.current = false; if (alive.current) setWork(''); }
   };
@@ -46,15 +49,16 @@ export function Home({ navigate }: { navigate: Navigate }) {
   return <main className="sync-home">
     <div className="page-heading"><div><h1>Pick up where you left off.</h1>
       <p className="muted">New activity. A little memory. One conversation.</p></div>
-      {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div>
+      <div className="conversation-actions"><button className="btn btn-secondary" disabled={!home || !textReady || Boolean(work || home?.busy || home?.active_call)} onClick={() => void start('chat')}><MessageSquare size={17} />Chat instead</button>
+      {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div></div>
     {!window.isSecureContext && <p className="small muted">Use trusted HTTPS or localhost for the combined sync and call.</p>}
-    <p className="home-hint muted small">New entries → a prepared snapshot → your call. Previous syncs come along as short recaps.</p>
+    <p className="home-hint muted small">New entries → a prepared snapshot → your conversation. Chat uses your configured text model, without a microphone. Previous syncs come along as short recaps.</p>
     <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> waiting</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> included, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
     {work && <p role="status" className="working"><span className="spinner" />{work}</p>}
     {home?.busy && !work && <p className="small muted" role="status">Draken is updating a sync. Open its card to follow progress.</p>}
     {home?.active_call && <p className="small muted">A call is active. End it before starting another sync.</p>}
     {error && <div className="alert error" role="alert">{error}</div>}
-    <SetupPanel firstRun={Boolean(home && !home.syncs.length)} onReady={setSetupReady} />
+    <SetupPanel firstRun={Boolean(home && !home.syncs.length)} onReady={setSetupReady} onTextReady={setTextReady} />
     <section className="sync-feed" aria-label="Sync history">
       {home?.syncs.map(item => <a className="card sync-tile" key={item.id} href={`/syncs/${item.id}`} onClick={event => linkClick(event, navigate, `/syncs/${item.id}`)}>
         <div className="sync-tile-heading"><strong>Sync #{item.id}</strong><span className={`status ${item.status}`}>{item.busy ? 'working' : item.active_call ? 'in call' : item.needs_retry ? 'needs retry' : item.status === 'completed' ? 'reviewed' : item.status === 'open' ? 'open' : 'discarded'}</span><ArrowRight size={17} aria-hidden="true" /></div>

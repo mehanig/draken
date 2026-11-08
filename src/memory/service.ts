@@ -127,7 +127,7 @@ export function validateHistoryQuery(value: unknown): HistoryQuery {
   if (query.before !== undefined && (typeof query.before !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(query.before) || !Number.isFinite(Date.parse(query.before)) || new Date(query.before).toISOString() !== query.before)) throw new HttpError(400, 'Invalid history cutoff');
   return { ...query, question: query.question.trim() } as HistoryQuery;
 }
-export const historyReadiness = () => storedHistoryReadiness(getDataDir(), getDb());
+export const historyReadiness = (capturedOnly = false) => storedHistoryReadiness(getDataDir(), getDb(), capturedOnly);
 export async function prepareHistory(before: string, signal: AbortSignal, background = false) {
   if (!background) {
     const scan = await scanSessions(signal);

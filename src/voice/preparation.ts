@@ -7,12 +7,12 @@ const jobs = new Map<number, { controller: AbortController; done: Promise<void> 
 const failures = new WeakMap<ReturnType<typeof getDb>, Map<number, string>>();
 function errors() { const db = getDb(); let map = failures.get(db); if (!map) { map = new Map(); failures.set(db, map); } return map; }
 
-export function callReadiness(id: number): CallReadiness {
+export function callReadiness(id: number, capturedOnly = false): CallReadiness {
   const row = getDb().prepare('SELECT status,briefing,compression_complete FROM syncs WHERE id=?').get(id) as { status: string; briefing: string; compression_complete: number } | undefined;
   if (!row) throw new HttpError(404, 'Sync not found');
   const briefingReady = row.status === 'open' && Boolean(row.briefing) && Boolean(row.compression_complete);
   const preparing = jobs.has(id), busy = busySyncs.has(id) || activeVoiceSyncs.has(id);
-  const history = briefingReady && !busy ? historyReadiness() : { ready: false, before: null };
+  const history = briefingReady && !busy ? historyReadiness(capturedOnly) : { ready: false, before: null };
   return { ready: briefingReady && history.ready && !busy, briefingReady, historyReady: history.ready, preparing, before: history.before, error: errors().get(id) || '' };
 }
 
