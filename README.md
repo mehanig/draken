@@ -10,7 +10,7 @@ A local-first engineering sync across your **pi, Codex CLI and Claude Code sessi
 
 **Sync with Draken → call or chat → keep a short recap.**
 
-This source prepares **Draken 0.3.0**, including **Chat instead**, complete history preparation and better text-status evidence reconciliation. It is not published yet; npm currently serves **0.2.0**, which does not include these changes. See [the 0.3.0 release notes](CHANGELOG.md#030-unreleased).
+**Draken 0.3.0** adds **Chat instead**, complete history preparation and better text-status evidence reconciliation. See [the release notes](CHANGELOG.md#030).
 
 The home page is compact history cards. Each sync has its own `/syncs/:id` URL, with the full briefing, conversations, notes and evidence behind it. **Search history** (`/history`) adds local semantic + keyword retrieval across retained older records, with dated source links. It prepares itself automatically—no enable/update buttons or search-mode choices. Progress counts only new or changed passages, with cached history shown separately and a measured time estimate. Local indexing reuses existing vectors and uses up to two embedding lanes/six CPU threads on sufficiently capable machines; smaller machines stay single-lane. Text questions and calls use it by default. See [MEMORY.md](MEMORY.md) for source scope, first-use download and limitations.
 
@@ -22,7 +22,7 @@ Draken remembers which evidence a finished sync covered, what you decided, and w
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-> **Version note:** the command below installs the latest published package, currently **0.2.0**. The **0.3.0** features described here become available after publication. Versions **0.1.6 and earlier** are the old task dashboard, not this application. Back up your original agent logs and Draken data before upgrading; see [what changed](CHANGELOG.md).
+> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.3.0](CHANGELOG.md#030).
 
 ```sh
 npm install -g draken

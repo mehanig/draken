@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0
 
-This release adds a separate text-chat experience and improves how Draken prepares history and checks later updates. It is not published yet; the current npm release is 0.2.0.
+This release adds a separate text-chat experience and improves how Draken prepares history and checks later updates.
 
 ### Chat without a call
 
