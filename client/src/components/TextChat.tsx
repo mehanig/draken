@@ -23,7 +23,6 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
       <div><h2>Chat with Draken</h2><p className="small muted">Same history. No microphone or audio.</p></div>
       <button type="button" className="btn btn-ghost" onClick={onVoice}>Voice &amp; call history</button>
     </header>
-    <p className="small muted chat-model">Text replies use {sync.models.final || 'your configured text model'} through pi, not the voice account. Requests use that model’s access and quota.</p>
     <div className="chat-thread" ref={thread} onScroll={() => { const element = thread.current; if (element) bottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
       {!sync.messages.length && !question && <div className="chat-welcome"><h3>What would you like to pick up?</h3><p>Ask about a project, a decision, or what still needs your attention. Draken will use the snapshot and prepared original history.</p></div>}
       {sync.messages.map(message => <article className={`chat-message ${message.role}`} key={message.id}>

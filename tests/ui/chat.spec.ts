@@ -47,6 +47,8 @@ test('chat works without voice setup or secure-context APIs, shows thinking and 
   page.on('request', request => { if (request.url().includes('/voice/live/')) nativeRequests.push(request.url()); });
   await page.route('**/api/voice/status', route => route.fulfill({ json: { installed: false, activeCall: null, httpsPort: 44433 } }));
   const id = await start(page), chat = page.getByRole('region', { name: 'Chat with Draken', exact: true });
+  await expect(chat.locator('.chat-model')).toHaveCount(0);
+  await expect(chat).not.toContainText('Text replies use');
   fs.writeFileSync(control, JSON.stringify({ delay: 4000 }));
   await page.getByRole('textbox', { name: 'Message Draken' }).fill('What is happening with Trailboard?');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();

@@ -203,7 +203,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .chat-heading h2, .chat-heading p { margin: 0; }
 .chat-heading p { margin-top: 5px; }
 .chat-avatar { flex-shrink: 0; object-fit: cover; border: 2px solid var(--line); border-radius: 0; background: var(--yellow); }
-.chat-model { padding-bottom: 16px; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
 .chat-thread { max-height: min(65dvh, 640px); min-height: 180px; overflow-y: auto; overscroll-behavior: contain; padding: 12px 4px; }
 .chat-welcome { max-width: 520px; margin: 30px auto; text-align: center; line-height: 1.7; }
 .chat-welcome h3 { font-size: 20px; }
