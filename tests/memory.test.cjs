@@ -222,7 +222,7 @@ test('history packets are byte-bounded, reference-closed, tail-preserving and ca
   const packet = historyPacket(found); assert.ok(Buffer.byteLength(packet.text) <= 3500); assert.doesNotMatch(packet.text, /\[E999\]|\[Hdeadbeef\]/);
   const refs = new Set(packet.refs); assert.deepEqual(packet.refs, JSON.parse(packet.text).sources.map(item => item.ref));
   validateVerdict('A reported claim [' + packet.refs[0] + ']', refs);
-  for (const invented of ['Haaaaaaaaaaaaaaaaaaaaaaaa', 'Hdeadbeef', 'Hmade_up']) assert.throws(() => validateVerdict(`Invented [${invented}]`, refs), /invented/);
+  for (const invented of ['Haaaaaaaaaaaaaaaaaaaaaaaa', 'Hdeadbeef', 'Hmade_up']) assert.throws(() => validateVerdict(`Invented [${invented}]`, refs), /outside the supplied evidence/);
   found.results[0].text = 'Reported success. ' + 'Intermediate detail. '.repeat(80) + 'FINAL: deployment was NOT checked.';
   assert.match(historyPacket(found).text, /FINAL: deployment was NOT checked/);
 });

@@ -238,11 +238,12 @@ test('restart marks an unfinished run interrupted and leaves original evidence/c
 test('question retrieval can reach raw evidence omitted by summaries and final citations are checked', async () => {
   const sync = await begin(220);
   assert.ok(retrieveEvidence(sync, 'Show me E220').some(item => item.ref === 'E220'));
-  assert.throws(() => validateVerdict('A claim [E999]', new Set(['E1'])), /invented/);
-  assert.throws(() => validateVerdict('A claim without evidence', new Set(['E1'])), /did not cite/);
+  assert.throws(() => validateVerdict('A claim [E999]', new Set(['E1'])), /outside the supplied evidence/);
+  assert.throws(() => validateVerdict('A claim without evidence', new Set(['E1'])), /lacked evidence citations/);
   const result = await generateReply(sync.id, 'Show me E220');
   const last = calls().at(-1);
-  assert.ok(last.retrieved_evidence.some(item => item.ref === 'E220'));
+  const original = sync.items.find(item => item.ref === 'E220');
+  assert.ok(last.retrieved_evidence.some(item => item.sequence === original.sequence && item.session === original.session_id && last.reference_labels.includes(item.ref)));
   assert.equal(result.messages.length, 2);
 });
 
