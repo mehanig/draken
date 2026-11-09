@@ -5,11 +5,11 @@ import { activeVoiceSyncs, assertEvidenceAvailable, busySyncs, configureModels, 
 import { SummaryNode, SummaryTree } from './tree';
 import { recapInput, recapHash, summarizeRecap, saveRecap, invalidateRecap, memoryText, type RecapInput } from './recap';
 import { invokePi } from './pi';
-import { historyContext } from '../memory/context';
+import { DISCUSSION_HISTORY_BYTES, historyContext } from '../memory/context';
 import { reconciliationGaps } from './reconciliation';
 import { answerReferences, verdictReferenceIssue } from './answer-references';
 import { historyReadiness } from '../memory/service';
-import { voiceHistoryQuery, type VoiceHistoryFocus } from '../voice/history-focus';
+import { discussionFocus, voiceHistoryQuery } from '../voice/history-focus';
 import { prepareCallAndWait, cancelCallPreparation } from '../voice/preparation';
 export { stopManagerProcesses } from './pi';
 
@@ -99,14 +99,7 @@ export function validateVerdict(answer: string, allowedRefs: Set<string>): void 
 /** Actual user turns establish scope; generated replies never select a project. */
 function discussionHistory(sync: SyncDetail, question: string, currentUserId = -1) {
   const db = getDb();
-  const users = db.prepare(`SELECT content FROM (
-    SELECT content,created_at AS at FROM sync_messages WHERE sync_id=? AND role='user' AND id!=?
-    UNION ALL SELECT m.text AS content,m.started_at AS at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
-      WHERE c.sync_id=? AND m.role='user' AND m.status='generated'
-  ) ORDER BY at DESC LIMIT 30`).all(sync.id, currentUserId, sync.id) as { content: string }[];
-  let focus: VoiceHistoryFocus | undefined;
-  for (const turn of users.reverse()) focus = voiceHistoryQuery(db, turn.content, focus).focus;
-  return voiceHistoryQuery(db, question, focus).query;
+  return voiceHistoryQuery(db, question, discussionFocus(db, sync.id, currentUserId)).query;
 }
 
 export async function generateReply(id: number, question?: string, requestId?: string, options: { signal?: AbortSignal; deferHistory?: boolean } = {}): Promise<SyncDetail> {
@@ -160,7 +153,7 @@ export async function generateReply(id: number, question?: string, requestId?: s
     const input = finalInput(sync, tree, roots, question);
     if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Searching earlier history', runId);
     const query = question ? discussionHistory(sync, question, currentUserId) : undefined;
-    const archive = query ? await historyContext(query.question, prepared?.before || new Date().toISOString(), controller.signal, 32000, Boolean(requestId), query) : undefined;
+    const archive = query ? await historyContext(query.question, prepared?.before || new Date().toISOString(), controller.signal, DISCUSSION_HISTORY_BYTES, Boolean(requestId), query) : undefined;
     for (const ref of archive?.refs || []) input.allowedRefs.add(ref);
     const calls = question ? db.prepare(`SELECT m.role,m.text,m.status,m.started_at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
       WHERE c.sync_id=? AND m.text!='' ORDER BY m.id DESC LIMIT 12`).all(id).reverse().map((row: any) => ({ ...row, text: cleanText(row.text, 1500), qualification: 'Call transcript, not proof of hearing or agreement.' })) : undefined;

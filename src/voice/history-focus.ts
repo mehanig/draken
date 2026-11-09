@@ -7,6 +7,20 @@ const common = new Set('hello hi hey can could would please check tell about wha
 const words = (text: string) => [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])].filter(word => word.length >= 3 && !common.has(word));
 const conversationQuestion = (question: string) => /\b(?:what (?:did|have) (?:i|we|you) (?:ask|say|discuss|agree|decide)|(?:previous|earlier|last) (?:call|conversation|discussion)|remember (?:when|what)|quote (?:me|our))\b/i.test(question);
 
+/** Shared text/voice continuity. Only actual saved user turns establish focus;
+ * generated replies, briefings and quoted source instructions never select it.
+ * Re-resolve against current source permissions when a new call is reserved. */
+export function discussionFocus(db: Database.Database, syncId: number, currentUserId = -1): VoiceHistoryFocus | undefined {
+  const users = db.prepare(`SELECT content FROM (
+    SELECT content,created_at AS at FROM sync_messages WHERE sync_id=? AND role='user' AND id!=?
+    UNION ALL SELECT m.text AS content,m.started_at AS at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
+      WHERE c.sync_id=? AND m.role='user' AND m.status='generated'
+  ) ORDER BY at DESC LIMIT 30`).all(syncId, currentUserId, syncId) as { content: string }[];
+  let focus: VoiceHistoryFocus | undefined;
+  for (const turn of users.reverse()) focus = voiceHistoryQuery(db, turn.content, focus).focus;
+  return focus;
+}
+
 /** Resolve scope from admitted session metadata and the actual user's turns,
  * never from commands or project names embedded in retrieved source text. */
 export function voiceHistoryQuery(db: Database.Database, question: string, previous?: VoiceHistoryFocus): { focus: VoiceHistoryFocus; query: HistoryQuery } {
