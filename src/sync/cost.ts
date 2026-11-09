@@ -1,6 +1,12 @@
 import type Database from 'better-sqlite3';
 import type { ModelCallMetric, SyncCost } from '../types';
 
+export function recordedCost(metric: ModelCallMetric): SyncCost {
+  const value = metric.accounting;
+  const priced = value?.source === 'pi-usage/catalog-pricing' && typeof value.cost_usd === 'number' && Number.isFinite(value.cost_usd) && value.cost_usd >= 0;
+  return { usd: priced ? value.cost_usd : null, complete: Boolean(priced && value.complete === true) };
+}
+
 /** Preparation only, across its retries/rebuilds. Follow-up questions, voice,
  * embeddings and post-conversation recaps never enter this total. No backfill
  * guesses from historical planning-token estimates or today's price catalog. */
@@ -13,11 +19,9 @@ export function aggregationCost(db: Database.Database, syncId: number, hasBriefi
     calls += Math.max(run.invocations, metrics.length);
     if (run.status === 'running' || metrics.length !== run.invocations) complete = false;
     for (const metric of metrics) {
-      const accounting = metric.accounting;
-      if (accounting?.source === 'pi-usage/catalog-pricing' && typeof accounting.cost_usd === 'number' && Number.isFinite(accounting.cost_usd) && accounting.cost_usd >= 0) {
-        usd += accounting.cost_usd; priced++;
-        if (accounting.complete !== true) complete = false;
-      } else complete = false;
+      const cost = recordedCost(metric);
+      if (cost.usd !== null) { usd += cost.usd; priced++; }
+      if (!cost.complete) complete = false;
     }
   }
   return { usd: priced || calls === 0 ? usd : null, complete };

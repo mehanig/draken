@@ -1,4 +1,4 @@
-import type { CallReadiness, PiSetupStatus, AutoIndexSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
+import type { PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -22,6 +22,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 
 // Named exports let the module graph check each endpoint wrapper independently.
 export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir: string }>(`/setup${refresh ? '?refresh=1' : ''}`);
+export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);
 export const autoIndexSettings = () => request<AutoIndexSettings>('/settings/auto-index');
 export const setAutoIndex = (enabled: boolean) => request<AutoIndexSettings>('/settings/auto-index', 'PATCH', { enabled, ...(enabled ? { preparation_scope: 'index-and-briefing-v1' } : {}) });
 export const home = (before?: number) => request<HomeOverview>(`/home${before ? `?before=${before}` : ''}`);

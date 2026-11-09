@@ -5,6 +5,7 @@ import type { AutoIndexSettings } from '../types';
 import { AutomaticProgress } from './AutomaticPreparation';
 import { AgentSources } from './AgentSources';
 import { SetupPanel } from './SetupPanel';
+import { PreparationUsageDashboard } from './PreparationUsage';
 
 export function IndexSettings() {
   const [open, setOpen] = useState(false), [settings, setSettings] = useState<AutoIndexSettings | null>(null);
@@ -26,6 +27,7 @@ export function IndexSettings() {
     <button type="button" className="btn btn-secondary header-settings" aria-haspopup="dialog" onClick={() => setOpen(true)}><Settings size={16} aria-hidden="true" />Settings</button>
     <dialog ref={dialog} className="settings-dialog" aria-labelledby="settings-title" onCancel={event => { event.preventDefault(); setOpen(false); }} onClose={event => { if (!event.currentTarget.open) setOpen(false); }}>
     <div className="section-heading"><h2 id="settings-title">Settings</h2><button type="button" className="icon-button" aria-label="Close settings" autoFocus onClick={() => setOpen(false)}><X size={18} aria-hidden="true" /></button></div>
+    <PreparationUsageDashboard active={open} />
     <label className="index-toggle"><input type="checkbox" role="switch" checked={settings?.enabled || false} disabled={!settings || saving}
       onChange={async event => { const enabled = event.target.checked, previous = settings; setSaving(true); setError('');
         setSettings(current => current ? { ...current, enabled } : current);

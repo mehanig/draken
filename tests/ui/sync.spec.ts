@@ -128,7 +128,7 @@ test('settings persist one combined preparation mode without browser capture or 
  await expect(page.getByText('LOCAL PROTOTYPE',{exact:true})).toHaveCount(0);await expect(page.locator('main .index-toggle')).toHaveCount(0);await expect.poll(() => settingsReads).toBeGreaterThan(0);
  await button.click();const dialog=page.getByRole('dialog',{name:'Settings',exact:true}),close=dialog.getByRole('button',{name:'Close settings'});
  const toggle=dialog.getByRole('switch',{name:/Automatically prepare conversations/});await expect(toggle).toBeEnabled();await expect(toggle).not.toBeChecked();
- await expect(close).toBeFocused();await page.keyboard.press('Tab');await expect(toggle).toBeFocused();await page.keyboard.press('Shift+Tab');await expect(close).toBeFocused();
+ await expect(close).toBeFocused();await page.keyboard.press('Tab');await expect(dialog.getByRole('combobox',{name:'Look back',exact:true})).toBeFocused();await page.keyboard.press('Shift+Tab');await expect(close).toBeFocused();
  await page.keyboard.press('Escape');await expect(dialog).not.toBeVisible();await expect(button).toBeFocused();expect(settingsWrites).toBe(0);
  await page.keyboard.press('Enter');await expect(dialog).toBeVisible();
  try {

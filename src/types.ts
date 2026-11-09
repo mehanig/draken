@@ -39,6 +39,17 @@ export interface AutoIndexSettings {
   progress: { stage: string; completed: number; total: number; invocations: number; max_invocations: number } | null;
 }
 export interface SyncCost { usd: number | null; complete: boolean }
+export type UsageRange = '6h' | '1d' | '7d' | '14d';
+export type UsageBucket = '1h' | '6h' | '24h';
+export interface PreparationUsageTotals {
+  cost: SyncCost; completed_batches: number; entries: number; requests: number;
+  incomplete_pricing: number; approximate_timing: number; failed_attempts: number;
+}
+export interface PreparationUsage {
+  from: string; to: string; range: UsageRange; bucket: UsageBucket;
+  active_attempts: number; totals: PreparationUsageTotals;
+  buckets: (PreparationUsageTotals & { from: string; to: string })[];
+}
 export interface PiAccounting {
   source: 'pi-usage/catalog-pricing'; cost_usd: number | null; complete: boolean; responses: number;
   tokens: { input: number; output: number; cache_read: number; cache_write: number; reasoning: number };
@@ -125,6 +136,8 @@ export interface TreeNode {
   error: string;
 }
 export interface ModelCallMetric {
+  started_at?: string;
+  finished_at?: string;
   accounting?: PiAccounting;
   task: string;
   stage: string | null;
@@ -135,7 +148,7 @@ export interface ModelCallMetric {
   input_tokens_estimate: number;
   output_characters: number | null;
   output_tokens_estimate: number | null;
-  status: 'completed' | 'cancelled' | 'failed';
+  status: 'running' | 'completed' | 'cancelled' | 'failed';
 }
 
 export interface TreeRun {

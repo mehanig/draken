@@ -6,6 +6,7 @@ import { completeSync, configureModels, discardSync, expandSnapshot, getProgress
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
 import { callReadiness, prepareCall } from '../voice/preparation';
+import { preparationUsage } from '../sync/usage';
 
 const router = Router();
 const route = (handler: (req: Request, res: Response) => unknown | Promise<unknown>) =>
@@ -24,6 +25,7 @@ router.get('/setup', route(async (req, res) => {
   if (Object.keys(req.query).some(key => key !== 'refresh') || (req.query.refresh !== undefined && req.query.refresh !== '1')) throw new HttpError(400, 'Unknown setup status option');
   res.json({ pi: await piSetupStatus(req.query.refresh === '1'), data_dir: getDataDir() });
 }));
+router.get('/settings/preparation-usage', route((req, res) => res.json(preparationUsage(getDb(), req.query))));
 router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettings())));
 router.patch('/settings/auto-index', route((req, res) => {
   if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => !['enabled', 'preparation_scope'].includes(key))) throw new HttpError(400, 'Only enabled and preparation_scope are accepted');
