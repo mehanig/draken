@@ -95,7 +95,8 @@ test('setup status is authenticated, coalesced, secret-free; missing pi blocks c
 test('start prints first-run instructions; status confirms the server; duplicate launch never opens a database',async()=>{
  const n=await port(),env={...process.env,DRAKEN_PORT:String(n)},child=spawn(process.execPath,[cli],{env,cwd:root,stdio:['ignore','pipe','pipe']});let text='',error='';child.stdout.on('data',part=>text+=part);child.stderr.on('data',part=>error+=part);const exited=new Promise(resolve=>child.once('exit',resolve));
  try{
-  for(let count=0;count<100&&!text.includes('Draken sync running at');count++){if(child.exitCode!==null)throw Error(error);await new Promise(resolve=>setTimeout(resolve,50));}
+  // Readiness and the following instructions can arrive in separate stdout chunks.
+  for(let count=0;count<100&&(!text.includes('Draken sync running at')||!text.includes('draken setup → draken login')||!text.includes('Ctrl+C')||!text.includes('draken voice login'));count++){if(child.exitCode!==null)throw Error(error);await new Promise(resolve=>setTimeout(resolve,50));}
   assert.match(text,/draken setup → draken login/);assert.match(text,/Ctrl\+C/);assert.match(text,/draken voice login/);assert.deepEqual(calls(),[]);
   const status=spawnSync(process.execPath,[cli,'status'],{env,cwd:root,encoding:'utf8',timeout:10000});assert.equal(status.status,0,status.stderr);assert.match(status.stdout,/Draken is responding/);
   const other=path.join(root,'duplicate-state'),duplicate=spawnSync(process.execPath,[cli],{env:{...env,DRAKEN_DATA_DIR:other},cwd:root,encoding:'utf8',timeout:10000});assert.equal(duplicate.status,1);assert.match(duplicate.stderr,/already in use/);assert.equal(fs.existsSync(other),false);

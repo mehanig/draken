@@ -186,23 +186,30 @@ export class SummaryTree {
     if (final && isBatchSummaryModel(this.sync.models.summary) && estimatedTokens > LUNA_BATCH.finalTokens) throw new HttpError(400, 'The final input exceeds its compact token budget; no larger or more expensive request was substituted. Cached summaries are intact.');
     // Reserve one invocation for the final verdict. Retries count against the same ceiling.
     const limit = this.sync.models.max_invocations - (final ? 0 : 1);
-    const claimed = this.db.prepare('UPDATE sync_runs SET invocations = invocations + 1 WHERE id = ? AND invocations < ?').run(this.runId, limit);
-    if (!claimed.changes) throw new HttpError(409, 'Invocation budget reached. Completed summaries are cached. Raise the limit and retry; nothing was marked covered.');
-    const started = Date.now(); let response: string | undefined;
+    const started = Date.now(), request = payload as { task?: string; stage?: string; repair?: unknown };
+    const pending: ModelCallMetric = { started_at: new Date(started).toISOString(), task: request.task || 'unknown', stage: request.stage || null,
+      repair: Boolean(request.repair), model, elapsed_ms: 0, input_characters: prompt.length, input_tokens_estimate: estimatedTokens,
+      output_characters: null, output_tokens_estimate: null, status: 'running' };
+    // Reserve budget and the timestamped metadata slot atomically. An interrupted
+    // request remains explicitly unpriced rather than disappearing from usage.
+    const claimed = this.db.prepare(`UPDATE sync_runs SET invocations=invocations+1,
+      metrics_json=json_insert(metrics_json,'$[#]',json(?)) WHERE id=? AND invocations<?
+      RETURNING json_array_length(metrics_json)-1 AS metric_index`).get(JSON.stringify(pending), this.runId, limit) as { metric_index: number } | undefined;
+    if (!claimed) throw new HttpError(409, 'Invocation budget reached. Completed summaries are cached. Raise the limit and retry; nothing was marked covered.');
+    let response: string | undefined;
     let accounting: ModelCallMetric['accounting'];
     try {
       response = await invokePi(prompt, { model, system, signal: this.signal, thinking: final ? 'medium' : 'off', largeSummary: large,
         onAccounting: this.accountAggregation ? value => { accounting = value; } : undefined });
       return response;
     } finally {
-      const request = payload as { task?: string; stage?: string; repair?: unknown };
-      const metric: ModelCallMetric = { ...(accounting ? { accounting } : {}), task: request.task || 'unknown', stage: request.stage || null, repair: Boolean(request.repair),
-        model, elapsed_ms: Date.now() - started, input_characters: prompt.length,
+      const metric: ModelCallMetric = { ...pending, finished_at: new Date().toISOString(), ...(accounting ? { accounting } : {}),
+        elapsed_ms: Date.now() - started, input_characters: prompt.length,
         input_tokens_estimate: estimatedTokens, output_characters: response?.length ?? null,
         output_tokens_estimate: response === undefined ? null : summaryTokens(response),
         status: response !== undefined ? 'completed' : this.signal.aborted ? 'cancelled' : 'failed' };
       // Metadata only: no prompts, rejected prose, source text, paths or credentials.
-      this.db.prepare("UPDATE sync_runs SET metrics_json=json_insert(metrics_json,'$[#]',json(?)) WHERE id=?").run(JSON.stringify(metric), this.runId);
+      this.db.prepare('UPDATE sync_runs SET metrics_json=json_set(metrics_json,?,json(?)) WHERE id=?').run(`$[${claimed.metric_index}]`, JSON.stringify(metric), this.runId);
     }
   }
 

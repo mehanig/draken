@@ -65,6 +65,23 @@ test('paid responses rejected by validation remain in aggregation cost',async()=
  session(2);await scanSessions();const sync=store.startSync();fs.writeFileSync(control,JSON.stringify({invalidSources:true}));await assert.rejects(generateReply(sync.id));
  const ready=store.getSync(sync.id);assert.ok(!ready.briefing);assert.ok(ready.aggregation_cost.usd>0);assert.equal(ready.aggregation_cost.complete,true);assert.ok(Math.abs(ready.aggregation_cost.usd-calls().length*.0031)<1e-12);assert.equal(store.homeOverview().covered,0);
 });
+test('usage GETs are metadata-only, strictly bounded and do not scan, infer or change review',async()=>{
+ session(2);const db=getDb(),before=db.prepare('SELECT total_changes() n').get().n;
+ server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const origin=`http://127.0.0.1:${server.address().port}`;
+ for(const range of ['6h','1d','7d','14d'])for(const bucket of ['1h','6h','24h']){const response=await fetch(origin+`/api/settings/preparation-usage?range=${range}&bucket=${bucket}`);assert.equal(response.status,200);const data=await response.json();assert.equal(data.totals.requests,0);assert.equal(data.totals.completed_batches,0);}
+ assert.equal((await fetch(origin+'/api/settings/preparation-usage?range=7d&range=1d')).status,400);
+ assert.equal((await fetch(origin+'/api/settings/preparation-usage',{headers:{Origin:'https://other.invalid'}})).status,403);
+ assert.equal(db.prepare('SELECT total_changes() n').get().n,before);assert.equal(db.prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);assert.equal(calls().length,0);assert.equal(store.homeOverview().covered,0);
+});
+test('an active request has one durable timestamped slot, which cancellation completes without duplicating its cost',async()=>{
+ session(2);await scanSessions();const sync=store.startSync();fs.writeFileSync(control,JSON.stringify({delay:2000}));
+ const pending=generateReply(sync.id).then(()=>null,error=>error);const until=Date.now()+5000;
+ while(!store.getProgress(sync.id).run?.metrics.some(m=>m.status==='running')){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
+ const active=store.getProgress(sync.id).run;assert.equal(active.invocations,active.metrics.length);assert.ok(active.metrics[0].started_at);assert.equal(active.metrics[0].finished_at,undefined);
+ const usage=require('../dist/sync/usage').preparationUsage(getDb(),{},Date.now()+1);assert.equal(usage.active_attempts,1);assert.equal(usage.totals.requests,1);assert.equal(usage.totals.cost.usd,null);
+ cancelReply(sync.id);assert.ok(await pending);const stopped=store.getProgress(sync.id).run;assert.equal(stopped.metrics.length,1);assert.equal(stopped.metrics[0].started_at,active.metrics[0].started_at);assert.ok(stopped.metrics[0].finished_at);assert.equal(stopped.metrics[0].status,'cancelled');
+});
+
 test('home API is compact, paginated, same-origin protected and one-click preparation is idempotent',async()=>{
  session(4);server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const origin=`http://127.0.0.1:${server.address().port}`;
  const key=randomUUID(),post=()=>fetch(origin+'/api/syncs/start-call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:key})});

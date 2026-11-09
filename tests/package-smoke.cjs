@@ -15,7 +15,7 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  const [packed]=JSON.parse(run(['pack','--json','--ignore-scripts','--pack-destination',root]));
  const files=packed.files.map(file=>file.path);
  for(const file of files)assert.doesNotMatch(file,/(^|\/)(?:auth\.json|server-state\.json|\.env|node_modules|\.git)(?:\/|$)|\.(?:sqlite|db|jsonl|pem|key|log)$/i);
- for(const file of ['dist/cli.js','dist/npm-cli.js','runtime/pi/package-lock.json','tray/windows.ps1','tray/macos.js','voice/realtime/native.mjs','public/persona/call-poster.webp','public/persona/chat-avatar.webp','dist/memory/reconcile.js','dist/sync/reconciliation.js'])assert.ok(files.includes(file),file);
+ for(const file of ['dist/cli.js','dist/npm-cli.js','runtime/pi/package-lock.json','tray/windows.ps1','tray/macos.js','voice/realtime/native.mjs','public/persona/call-poster.webp','public/persona/chat-avatar.webp','dist/memory/reconcile.js','dist/sync/reconciliation.js','dist/sync/automatic.js','dist/sync/answer-references.js','dist/sync/usage.js'])assert.ok(files.includes(file),file);
  run(['install','--omit=dev','--no-audit','--no-fund',path.join(root,packed.filename)],install);
  const audit=JSON.parse(run(['audit','--omit=dev','--json'],install));assert.equal(audit.metadata.vulnerabilities.total,0);
  const app=path.join(install,'node_modules','draken'),cli=path.join(app,'dist','cli.js');

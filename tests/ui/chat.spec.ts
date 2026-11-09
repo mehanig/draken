@@ -42,6 +42,20 @@ test.afterEach(async ({ page }) => {
   }
 });
 
+test('citation correction shows its real stage and never displays rejected drafts or wire labels', async ({ page }) => {
+  await noAudio(page); const id = await start(page), chat = page.getByRole('region', { name: 'Chat with Draken', exact: true });
+  fs.writeFileSync(control, JSON.stringify({ invalidFinalOnce: true, delay: 1800 }));
+  await page.getByRole('textbox', { name: 'Message Draken' }).fill('What remains in Trailboard?');
+  await chat.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(chat.getByRole('status', { name: 'Chat status' })).toContainText('Checking source references', { timeout: 15000 });
+  await expect(chat).not.toContainText('Unsupported draft');
+  await expect(page.getByRole('textbox', { name: 'Message Draken' })).toBeEnabled({ timeout: 15000 });
+  const sync = await (await page.request.get(`/api/syncs/${id}`)).json();
+  expect(sync.tree.run.status).toBe('completed'); expect(sync.tree.run.invocations).toBe(2);
+  expect(sync.messages.at(-1).content).toMatch(/\[[ECH]/); expect(sync.messages.at(-1).content).not.toMatch(/\[R\d+\]/);
+  expect(await page.evaluate(() => (window as any).__chatMedia)).toEqual({ microphone: 0, audio: 0, peers: 0 });
+});
+
 test('chat works without voice setup or secure-context APIs, shows thinking and has a square mobile avatar', async ({ page }) => {
   await noAudio(page, true); const nativeRequests: string[] = [];
   page.on('request', request => { if (request.url().includes('/voice/live/')) nativeRequests.push(request.url()); });

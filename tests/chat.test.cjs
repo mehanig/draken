@@ -89,15 +89,35 @@ function reconciliationFixture(session){
 }
 test('an unreconciled draft gets one bounded same-model repair and only the corrected answer is saved',async()=>{
  const {id,trail}=await ready(),refs=reconciliationFixture(trail),before=calls().length;
- fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true}));
+ fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true,damageLongReference:true}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
  const sync=store.getSync(id),attempts=calls().slice(before);
  assert.equal(sync.tree.run.status,'completed');assert.equal(sync.messages.length,2);assert.match(sync.messages[1].content,/Corrected synthetic answer/);
  assert.equal(attempts.length,2);assert.ok(attempts.every(call=>call.model==='test/strong'&&call.task==='final_verdict'));
  assert.ok(attempts[1].reconciliation_repair);assert.equal(attempts[0].reconciliation_repair,undefined);
  assert.ok(refs.slice(1).every(ref=>sync.messages[1].content.includes(ref)));
+ assert.ok(attempts.every(call=>call.historical_evidence.sources.every(source=>/^R\d+$/.test(source.ref))));
+ assert.deepEqual(attempts[0].reference_labels,attempts[1].reference_labels);
+ assert.ok(attempts[1].reconciliation_repair.gaps.every(gap=>/^R\d+$/.test(gap.earlier_ref)&&gap.missing_later_refs.every(ref=>/^R\d+$/.test(ref))));
  assert.equal(store.homeOverview().covered,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
 });
+test('bad or missing first-draft citations get the same single bounded correction',async()=>{
+ const {id}=await ready();
+ for(const controlValue of [{invalidFinalOnce:true},{missingFinalOnce:true}]){
+  fs.writeFileSync(control,JSON.stringify(controlValue));const before=calls().length;
+  launchChat(id,'What remains in Trailboard?',randomUUID());await idle();const sync=store.getSync(id),attempts=calls().slice(before);
+  assert.equal(sync.tree.run.status,'completed');assert.equal(attempts.length,2);assert.ok(attempts[1].reconciliation_repair.citation_issue);assert.match(sync.messages.at(-1).content,/\[[ECH]/);assert.doesNotMatch(sync.messages.at(-1).content,/R999999|Unsupported draft/);
+ }
+ const before=calls().length,key=randomUUID();launchChat(id,'INVALID_CITATION',key);await idle();assert.equal(calls().length-before,2);assert.match(store.getSync(id).tree.run.error,/outside the supplied evidence/);assert.equal(store.getSync(id).messages.at(-1).role,'user');launchChat(id,'INVALID_CITATION',key);assert.equal(calls().length-before,2);
+});
+
+test('citation and later-report gaps share one correction rather than separate retry loops',async()=>{
+ const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
+ fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true,staleCheckpoint:true,damageLongReference:true}));
+ launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();const attempts=calls().slice(before);
+ assert.equal(store.getSync(id).tree.run.status,'completed');assert.equal(attempts.length,2);assert.equal(attempts[1].reconciliation_repair.citation_issue,'outside_catalog');assert.ok(attempts[1].reconciliation_repair.gaps.length);assert.doesNotMatch(store.getSync(id).messages.at(-1).content,/R999999|Unsupported draft/);
+});
+
 test('a second unreconciled answer fails visibly without saving either draft or retrying indefinitely',async()=>{
  const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length,key=randomUUID();
  fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true,ignoreReconciliation:true}));

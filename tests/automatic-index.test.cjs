@@ -44,11 +44,15 @@ test('settings are persistent, validated, read-only on GET, and protected from c
  const first=await(await fetch(url)).json();assert.equal(first.enabled,false);assert.equal(first.batch_records,64);assert.equal(Object.hasOwn(first,'max_wait_seconds'),false);assert.equal(getDb().prepare("SELECT COUNT(*) n FROM sync_settings WHERE key='auto_index'").get().n,0);
  for(const body of [{enabled:'true'},{enabled:true,summary:true},[],{}])assert.equal((await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).status,400);
  assert.equal((await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json',Origin:'https://elsewhere.invalid'},body:'{"enabled":true}'})).status,403);
- assert.equal((await(await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true}'})).json()).enabled,true);
+ assert.equal((await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true}'})).status,409,'A stale local-index-only UI cannot authorize paid preparation');
+ assert.equal(autoIndexSettings().enabled,false);
+ assert.equal((await(await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true,"preparation_scope":"index-and-briefing-v1"}'})).json()).enabled,true);
  await stopBackgroundIndexing();closeDb();assert.equal(autoIndexSettings().enabled,true);startBackgroundIndexing();assert.equal(autoIndexSettings().phase,'waiting');setAutoIndex(false);assert.equal(autoIndexSettings().enabled,false);
  for(const table of ['agent_sessions','syncs','sync_items','sync_coverage','sync_runs','live_calls'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
 });
-test('opted-in timer scans and indexes actual synthetic pointers without creating syncs or provider calls',async t=>{
+test('one opted-in timer indexes synthetic originals and prepares a reusable briefing without review or calls',async t=>{
+ const fake=path.join(root,'pi');fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),fake);fs.chmodSync(fake,0o700);
+ Object.assign(process.env,{DRAKEN_PI_BIN:fake,DRAKEN_PI_SUMMARY_MODEL:'test/cheap',DRAKEN_PI_FINAL_MODEL:'test/strong',DRAKEN_TEST_CALL_LOG:root+'/calls.jsonl',DRAKEN_FAKE_CONTROL:root+'/control.json'});fs.writeFileSync(root+'/control.json','{}');
  const Database=require('better-sqlite3'),{HistoryIndex}=require('../dist/memory/index'),service=require('../dist/memory/service');
  fs.mkdirSync(root+'/state/memory',{recursive:true});
  const original=service.prepareHistory,cache=new Database(root+'/state/memory/index.sqlite');let jobs=0,foregroundJobs=0,embeddings=0;
@@ -61,17 +65,22 @@ test('opted-in timer scans and indexes actual synthetic pointers without creatin
  try{
   startBackgroundIndexing();t.mock.timers.tick(60000);await new Promise(r=>setTimeout(r,20));assert.equal(jobs,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);
   setAutoIndex(true);t.mock.timers.tick(60000);for(let n=0;n<200&&!autoIndexSettings().last_completed_at;n++)await new Promise(r=>setTimeout(r,10));
-  assert.ok(autoIndexSettings().last_completed_at);assert.equal(jobs,1);assert.equal(embeddings,70);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_entries').get().n,70);
+  assert.ok(autoIndexSettings().last_completed_at);assert.equal(jobs,2);assert.equal(embeddings,70);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_entries').get().n,70);
   const ready=()=>require('../dist/memory/readiness').indexReadiness(cache,getDb());
   assert.equal(ready().ready,true,'background work establishes the same call-readiness receipt');
-  t.mock.timers.tick(60000);for(let n=0;n<200&&autoIndexSettings().phase==='scanning';n++)await new Promise(r=>setTimeout(r,10));assert.equal(jobs,1);assert.equal(embeddings,70);
+  t.mock.timers.tick(60000);for(let n=0;n<200&&autoIndexSettings().phase==='scanning';n++)await new Promise(r=>setTimeout(r,10));assert.equal(jobs,2);assert.equal(embeddings,70);
   const tail=JSON.stringify({type:'message',id:'70',parentId:'69',timestamp:header.timestamp,message:{role:'assistant',content:'Small pending tail; deployment not checked.'}})+'\n';fs.appendFileSync(root+'/sessions/auto.jsonl',tail);
   t.mock.timers.tick(3600000);for(let n=0;n<200&&autoIndexSettings().phase==='scanning';n++)await new Promise(r=>setTimeout(r,10));
-  assert.ok(autoIndexSettings().pending_records>0&&autoIndexSettings().pending_records<64);assert.equal(jobs,1);assert.equal(embeddings,70,'no automatic small-batch flush after an hour');
+  assert.ok(autoIndexSettings().pending_records>0&&autoIndexSettings().pending_records<64);assert.equal(jobs,2);assert.equal(embeddings,70,'no automatic small-batch flush after an hour');
   assert.equal(ready().ready,false,'a pending tail keeps Call disabled rather than indexing after click');
   await service.prepareHistory(new Date().toISOString(),new AbortController().signal);assert.equal(foregroundJobs,1);assert.equal(embeddings,71,'foreground call preparation still indexes the small tail');
   assert.equal(ready().ready,true);
-  for(const table of ['syncs','sync_items','sync_coverage','sync_runs','live_calls','summary_cache'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
+  for(const table of ['sync_coverage','live_calls','sync_messages'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM syncs').get().n,1);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_items').get().n,70);
+  assert.ok(getDb().prepare('SELECT briefing FROM syncs').get().briefing);
+  assert.equal(require('../dist/sync/store').availableCount(),1);
+  assert.ok(fs.readFileSync(root+'/calls.jsonl','utf8').includes('final_verdict'));
   assert.equal(fs.readFileSync(root+'/sessions/auto.jsonl','utf8'),contents+tail);
  }finally{await stopBackgroundIndexing();t.mock.timers.reset();service.prepareHistory=original;cache.close();}
 });
