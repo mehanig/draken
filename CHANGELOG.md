@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.1
+
+This release improves audio recall, makes preparation charts easier to read, and explains automatic compaction and cost tracking on Home and the public website.
+
+### Audio evidence and continuity
+
+- Native voice now uses the same bounded archive selection and later-report checking as chat: up to sixteen sources in a 32,000-byte historical packet. Original source permissions, captured cutoffs and qualifications are retained.
+- New calls inherit project focus from actual saved user turns, not generated replies. Explicit switches still win. Questions about old historical or frozen checkpoints check later reports instead of merely repeating the old state.
+- Larger evidence travels losslessly through bounded native context messages; the small handoff returns a completion receipt. Partial transfers are never marked ready, repeated lookups reuse delivery, and Stop/new turns prevent old transfers from continuing.
+- Spoken answers keep the existing concise target. No extra pi generation or replacement voice engine is introduced. More input context is not a guarantee of unchanged native quota use.
+- Native speech is not post-validated or retractable like text's citation-repair pass. Protocol tests and matching evidence packets do not establish physical-audio acceptance or exhaustive answer accuracy.
+
+### Readable preparation costs and clearer guidance
+
+- Add labelled USD/whole-batch Y-axes and gridlines, with matching rounded bar scales and readable mobile labels. Handle zero, tiny, large and unavailable costs without inventing prices.
+- Explain automatic preparation/compaction and preparation spending estimates on the app Home page, README and public homepage. Compaction produces cached summaries; it does not modify or delete original logs.
+- Keep cost boundaries explicit: recorded preparation estimates include retries and failures, but exclude chat, native voice, standalone post-conversation recaps and local machine/network costs. They are not invoices, total spending or quota balances.
+- Opening the explanatory panel or dashboard does not enable automatic mode, start inference, capture audio or mark work reviewed.
+
+### Upgrading from 0.4.0
+
+- No schema migrations or dependency changes. Existing histories, notes, conversations, coverage, cached summaries and compatible vectors remain intact.
+- Node.js 22.19+ and npm remain required. Back up original logs and Draken data, wait for active work to finish, stop the server, upgrade and restart. Existing automatic-preparation consent remains unchanged.
+
 ## 0.4.0
 
 This release prepares conversations in the background, makes preparation usage visible, and improves text-answer reference handling.

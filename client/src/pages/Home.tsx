@@ -56,6 +56,13 @@ export function Home({ navigate }: { navigate: Navigate }) {
     <p className="home-hint muted small">With automatic preparation enabled, new history becomes a ready briefing before you arrive. Join the prepared conversation, or catch up the newest entries in one final preparation. Nothing is marked reviewed until you confirm it.</p>
     <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> awaiting preparation</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> included, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
     <AutomaticPreparation />
+    <details className="home-preparation-info">
+      <summary>Automatic preparation and cost tracking</summary>
+      <p><strong>Automatic compaction:</strong> turn on <strong>Settings → Automatically prepare conversations</strong> to index history, summarize new work and prepare a briefing while the server runs. It is off by default and uses your configured models within the saved invocation limit. Cached summaries and ready briefings are reused when their inputs match.</p>
+      <p>Compaction creates derived summaries; it does not edit or delete original agent logs. It never starts a call, saves decisions or marks work reviewed automatically.</p>
+      <p><strong>Preparation spending estimates:</strong> open <strong>Settings → Preparation usage</strong> for estimated USD cost, completed batches and model requests over time. Manual and automatic preparation, retries and failed work are included; missing prices remain unavailable or partial.</p>
+      <p className="small muted">Not total spending, a provider invoice or account quota. Chat, voice, standalone post-conversation recaps and local machine/network costs are excluded. Opening this explanation or the usage dashboard does not start preparation.</p>
+    </details>
     {work && <p role="status" className="working"><span className="spinner" />{work}</p>}
     {home?.busy && !work && <p className="small muted" role="status">Draken is updating a sync. Open its card to follow progress.</p>}
     {home?.active_call && <p className="small muted">A call is active. End it before starting another sync.</p>}

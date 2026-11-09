@@ -81,6 +81,9 @@ p { line-height: 1.7; }
 .usage-chart line { stroke: var(--rule); vector-effect: non-scaling-stroke; }
 .usage-chart .usage-gridline { stroke-dasharray: 3 4; }
 .usage-chart-axis { grid-column: 2; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.home-preparation-info { margin: 16px 0; padding: 12px; border: 1px solid var(--rule); }
+.home-preparation-info summary { cursor: pointer; font-weight: 700; }
+.home-preparation-info p { margin-top: 12px; }
 .usage-details { margin-top: 16px; }
 .usage-details summary { cursor: pointer; font-weight: 700; }
 .usage-table-wrap { overflow: auto; max-height: 320px; margin-top: 12px; }
