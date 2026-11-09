@@ -10,7 +10,11 @@ A local-first engineering sync across your **pi, Codex CLI and Claude Code sessi
 
 **Sync with Draken → call or chat → keep a short recap.**
 
-**Draken 0.4.0** adds combined automatic preparation, a preparation-usage dashboard and more reliable text-answer references. See [the release notes](CHANGELOG.md#040).
+**Draken 0.4.1** improves audio evidence and project continuity, adds readable chart value axes, and makes preparation and cost tracking easier to find. See [the release notes](CHANGELOG.md#041).
+
+**Automatic preparation and compaction:** opt in through **Settings → Automatically prepare conversations** to index history, summarize new work and prepare a briefing while the server runs. Compaction means cached, derived summaries—not editing or deleting your original agent logs. Matching summaries and ready briefings are reused. This mode is off by default and uses your configured models within the saved invocation limit; it never starts a call or marks work reviewed.
+
+**Track preparation spending estimates:** **Settings → Preparation usage** shows estimated USD cost, completed batches and model requests over time, with labelled cost/batch axes and exact bucket details. It includes manual/automatic preparation, retries and failed work. Missing prices stay unavailable or partial. This is **not total spending, a provider invoice or account quota**: chat, voice, standalone post-conversation recaps and local machine/network costs are excluded. Opening the dashboard only reads metadata.
 
 The home page is compact history cards. Each sync has its own `/syncs/:id` URL, with the full briefing, conversations, notes and evidence behind it. **Search history** (`/history`) adds local semantic + keyword retrieval across retained older records, with dated source links. It prepares itself automatically—no enable/update buttons or search-mode choices. Progress counts only new or changed passages, with cached history shown separately and a measured time estimate. Local indexing reuses existing vectors and uses up to two embedding lanes/six CPU threads on sufficiently capable machines; smaller machines stay single-lane. Text questions and calls use it by default. See [MEMORY.md](MEMORY.md) for source scope, first-use download and limitations.
 
@@ -22,7 +26,7 @@ Draken remembers which evidence a finished sync covered, what you decided, and w
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.4.0](CHANGELOG.md#040).
+> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.4.1](CHANGELOG.md#041).
 
 ```sh
 npm install -g draken
