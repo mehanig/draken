@@ -22,7 +22,7 @@ interface Operations {
 }
 const initial = (): State => ({ phase: 'off', pending_records: 0, last_completed_at: null, error: '' });
 
-/** One opted-in pipeline: source discovery, local search and a ready briefing.
+/** One enabled pipeline: source discovery, local search and a ready briefing.
  * Full batches start at 64 changes or waiting entries; interrupted work resumes.
  * Smaller new tails wait for foreground preparation, with no timed flush.
  * Provider failures require explicit retry; cancellation retains cached work. */
@@ -106,7 +106,8 @@ class AutoIndexer {
 export function createAutoIndexer(ops: Operations) { return new AutoIndexer(ops); }
 
 // Old local-index-only consent must not silently become paid model consent on
-// another installation. The same single switch records the new combined scope.
+// another installation. Fresh databases seed this combined scope at creation;
+// existing databases and explicit choices are never defaulted by this getter.
 const enabled = () => (getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_prepare_conversations'").get() as { value: string } | undefined)?.value === 'true';
 let worker: AutoIndexer | undefined, timer: NodeJS.Timeout | undefined;
 export function startBackgroundIndexing() {

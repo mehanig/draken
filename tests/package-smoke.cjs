@@ -35,6 +35,8 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  assert.equal((await fetch(url)).status,200);
  assert.equal((await fetch(url+'/api/scan',{method:'POST',headers:{Origin:'https://elsewhere.invalid'}})).status,403);
  const setup=await(await fetch(url+'/api/setup')).json();assert.notEqual(setup.pi.state,'configured');
+ const automatic=await(await fetch(url+'/api/settings/auto-index')).json();assert.equal(automatic.enabled,true,'Fresh production installs enable combined preparation');
+ assert.equal(automatic.phase,'waiting');assert.equal(automatic.batch_records,64);
  child.kill('SIGTERM');await Promise.race([exited,pause(10000).then(()=>{throw Error('Packed server did not stop');})]);child=undefined;
  const Database=require(path.join(install,'node_modules','better-sqlite3')),db=new Database(path.join(state,'draken.db'),{readonly:true});
  try{for(const table of ['agent_sessions','syncs','live_calls'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);}finally{db.close();}

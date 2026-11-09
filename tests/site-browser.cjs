@@ -48,11 +48,11 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/same bounded archive evidence selection/);assert.match(notes,/labelled dollar or whole-batch Y-axes/);assert.match(notes,/No new tables, columns or schema migration/);
-  assert.match(notes,/streamed speech does not get text’s post-generation citation repair/);
+  assert.match(notes,/New installations enable indexing, summaries and briefings by default/);assert.match(notes,/without a saved preference stays off/);assert.match(notes,/No new tables, columns or dependencies/);
+  assert.match(notes,/64-record threshold/);assert.match(notes,/quota or API billing/);
   const preparation=await page.locator('#preparation').innerText();
   assert.match(preparation,/Automatic preparation and compaction/);assert.match(preparation,/does not edit or delete original agent logs/);
-  assert.match(preparation,/off by default/);assert.match(preparation,/does not silently authorize model usage/);
+  assert.match(preparation,/on by default for new installations/);assert.match(preparation,/does not silently authorize model usage/);
   assert.match(preparation,/not invoices, total spending or account quota/);assert.match(preparation,/Chat, voice, standalone post-conversation recaps and local machine\/network costs are excluded/);
   assert.equal(await page.getByRole('link',{name:`Full ${version} notes`,exact:true}).getAttribute('href'),`https://github.com/mehanig/draken/blob/master/CHANGELOG.md#${anchor}`);
   assert.doesNotMatch(await page.locator('.release-note').innerText(),/draken@/i,'avoid Cloudflare treating the package version as an email address');

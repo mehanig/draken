@@ -105,7 +105,7 @@ test('pi-to-agent schema migration preserves IDs, coverage, snapshots, preferenc
   pi(); await scanSessions(); const sync = store.startSync(); store.saveNotes(sync.id, 'Explicit decision', 'Carry forward');
   // Simulate the deployed v1 pointers, whose metadata predates the optional agent field.
   for (const row of db.prepare('SELECT rowid,evidence_json FROM sync_items').all()) { const value = JSON.parse(row.evidence_json); delete value.agent; db.prepare('UPDATE sync_items SET evidence_json=? WHERE rowid=?').run(JSON.stringify(value), row.rowid); }
-  db.prepare("INSERT INTO sync_settings VALUES('auto_index','false')").run();
+  db.exec("DELETE FROM sync_settings WHERE key='auto_prepare_conversations'; UPDATE sync_settings SET value='false' WHERE key='auto_index'");
   db.prepare('INSERT INTO sync_coverage VALUES(?,?)').run(sync.items[0].event_key, sync.id);
   db.prepare("UPDATE sqlite_sequence SET seq=999 WHERE name='agent_entries'").run();
   const frozen = db.prepare('SELECT * FROM sync_items').all(), before = store.getSync(sync.id), history = [...historySources(db)], derived = new Database(':memory:'), embedder = model();

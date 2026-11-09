@@ -50,7 +50,11 @@ fs.writeFileSync(control, JSON.stringify({ delay: 400 }));
 process.env.DRAKEN_FAKE_CONTROL = control;
 require('../fixtures/fake-memory.cjs').useIndexedHistory();
 const { createApp } = require('../../dist/server');
-const { closeDb } = require('../../dist/db/schema');
+const { getDb, closeDb } = require('../../dist/db/schema');
+// Shared foreground UI fixture explicitly opts out to avoid timer-dependent
+// interference. The default-on timer is exercised with a controlled clock in
+// automatic-index.test.cjs; settings UI tests exercise persisted toggles.
+getDb().prepare("UPDATE sync_settings SET value='false' WHERE key IN ('auto_index','auto_prepare_conversations')").run();
 const { stopLiveCalls } = require('../../dist/voice/live');
 const { stopHistory } = require('../../dist/memory/service');
 const { stopBackgroundIndexing } = require('../../dist/memory/automatic');

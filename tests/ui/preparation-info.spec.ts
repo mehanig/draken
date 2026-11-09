@@ -11,7 +11,9 @@ test('Home explains compaction and preparation-only estimates without enabling w
   await expect(details).not.toHaveAttribute('open', '');
   await details.locator('summary').click();
   await expect(details).toContainText('Automatic compaction');
-  await expect(details).toContainText('off by default');
+  await expect(details).toContainText('new installations automatically');
+  await expect(details).toContainText('Existing installations keep their previous choice, including off');
+  await expect(details).toContainText('quota or API billing');
   await expect(details).toContainText('does not edit or delete original agent logs');
   await expect(details).toContainText('Settings → Preparation usage');
   await expect(details).toContainText('Not total spending, a provider invoice or account quota');

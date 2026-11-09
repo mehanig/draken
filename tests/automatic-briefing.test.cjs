@@ -59,5 +59,6 @@ test('a Home start yields the running automatic provider and resumes its same sn
 });
 
 test('legacy local-only opt-in does not silently authorize paid preparation; the single new switch does',()=>{
- getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_index','true')").run();assert.equal(autoIndexSettings().enabled,false);assert.equal(count('syncs'),0);assert.equal(calls().length,0);setAutoIndex(true);assert.equal(autoIndexSettings().enabled,true);setAutoIndex(false);assert.equal(autoIndexSettings().enabled,false);
+ // Reconstruct pre-combined-consent settings, not a newly initialized 0.4.2 database.
+ getDb().exec("DELETE FROM sync_settings WHERE key='auto_prepare_conversations'; UPDATE sync_settings SET value='true' WHERE key='auto_index'");assert.equal(autoIndexSettings().enabled,false);assert.equal(count('syncs'),0);assert.equal(calls().length,0);setAutoIndex(true);assert.equal(autoIndexSettings().enabled,true);setAutoIndex(false);assert.equal(autoIndexSettings().enabled,false);
 });

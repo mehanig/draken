@@ -29,6 +29,10 @@ export function getDb(): Database.Database {
 
 export function initSchema(database: Database.Database): void {
   database.transaction(() => {
+  // Seed the new-install default only for a genuinely empty database, before
+  // migrations create any objects. Existing databases (even without a saved
+  // preference) retain their old behavior; local-only consent is not upgraded.
+  const fresh = !database.prepare("SELECT 1 FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' LIMIT 1").get();
   renameAgentTables(database);
   const pointerOnly = database.prepare("SELECT 1 FROM sqlite_schema WHERE name='sync_settings'").get()
     && (database.prepare("SELECT value FROM sync_settings WHERE key='storage_schema'").get() as any)?.value === 'pointer-v2';
@@ -209,6 +213,11 @@ export function initSchema(database: Database.Database): void {
   migratePointers(database); migrateSnapshotPointers(database); migrateAgents(database);
   const sessionColumns = new Set((database.prepare('PRAGMA table_info(agent_sessions)').all() as { name: string }[]).map(column => column.name));
   if (!sessionColumns.has('scanned_bytes')) database.exec('ALTER TABLE agent_sessions ADD COLUMN scanned_bytes INTEGER NOT NULL DEFAULT -1');
+  if (fresh) {
+    const seed = database.prepare('INSERT INTO sync_settings(key,value) VALUES (?,?)');
+    seed.run('auto_index', 'true');
+    seed.run('auto_prepare_conversations', 'true');
+  }
   })();
 }
 
