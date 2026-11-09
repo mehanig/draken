@@ -117,17 +117,26 @@ test('a retrieved follow-up is checked again when its own pending sub-task was c
   const packet = historyPacket({ ...found, mode: 'hybrid', limitations: 'Synthetic.' }, 32000, 3000);
   assert.match(packet.text, /Implemented permission callbacks/); assert.match(packet.text, /Implemented durable backend delivery jobs/); assert.match(packet.text, /shared dispatcher implementation is still pending/);
 });
-test('the smaller voice lookup keeps its existing retrieval path rather than silently truncating the expanded text graph', async () => {
-  await timeline();
-  const found = await index.search({ question: 'Current status in Trailboard', kind: 'sources', session_ids: ['trailboard'], before: cutoff }, undefined, true);
-  assert.equal(found.reconciliation, undefined);assert.ok(found.results.length <= 8);
-  const service = require('../dist/memory/service'), saved = service.searchPreparedHistory;
-  service.searchPreparedHistory = query => { assert.equal(query.reconcile, undefined); return index.search(query, undefined, true); };
+test('voice carries the same expanded evidence and later-update graph as chat without truncating it into a handoff', async () => {
+  const ids=await timeline();
+  const service=require('../dist/memory/service'),saved=service.searchPreparedHistory;
+  const {historyContext,DISCUSSION_HISTORY_BYTES}=require('../dist/memory/context');
+  const {historyDelivery}=require('../dist/voice/history-delivery');
+  const changes=cache.prepare('SELECT total_changes() n').get().n;
+  service.searchPreparedHistory=query=>{assert.equal(query.reconcile,true);return index.search(query,undefined,true);};
   try {
-    const packet = await require('../dist/memory/context').historyContext('What is still blocked?', cutoff, undefined, 7000, true, { kind: 'sources', session_ids: ['trailboard'], recent: true });
-    assert.ok(Buffer.byteLength(packet.text) <= 7000);assert.ok(packet.refs.length);
-  } finally { service.searchPreparedHistory = saved; }
-  assert.throws(() => service.validateHistoryQuery({ question: 'Status', reconcile: 'yes' }), /Invalid reconciliation/);
+    const query=voiceHistoryQuery(db,`Is ${ids.old} still the current blocked status in Trailboard?`).query;
+    const packet=await historyContext(query.question,cutoff,undefined,DISCUSSION_HISTORY_BYTES,true,query);
+    const delivery=historyDelivery(packet,17);
+    const recovered=delivery.contexts.length===1?delivery.contexts[0].slice(delivery.contexts[0].indexOf('\n')+1):delivery.contexts.slice(0,-1).map(text=>JSON.parse(text.slice(text.indexOf('\n')+1)).fragment).join('');
+    assert.equal(recovered,packet.text);
+    for(const ref of Object.values(ids))assert.ok(JSON.parse(delivery.receipt).refs.includes(ref));
+    assert.match(recovered,/Client wiring implemented/);assert.match(recovered,/Durable backend delivery jobs implemented locally/);
+    assert.match(recovered,/dispatcher and reminder serving still unfinished/);assert.doesNotMatch(recovered,/FUTURE|all finished in Beacon/);
+    assert.ok(JSON.parse(recovered).reconciliation.threads.length);
+    assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes);
+  } finally {service.searchPreparedHistory=saved;}
+  assert.throws(()=>service.validateHistoryQuery({question:'Status',reconcile:'yes'}),/Invalid reconciliation/);
 });
 test('a deliberate long original-reference read still includes requested tool-call text', () => {
   const source = { ref: 'H' + 'a'.repeat(24), kind: 'session', role: 'assistant', text: 'Inspecting the plan.\nTool requested: read /demo/Trailboard/plan.md', offset: 0, at: cutoff };

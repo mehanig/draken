@@ -28,6 +28,14 @@ test('ready context waits for streaming output and does not repeat a substantive
   f.turn.lookupStarted(); assert.equal(f.states.at(-1).pending, false, 'late context cannot reopen a finished answer');
 });
 
+test('a pending refinement defers the scheduled cue until its full context is ready',t=>{
+  const f=fixture(t);f.turn.inputStarted();f.turn.contextReady();f.tick(1000);
+  f.turn.lookupStarted();f.tick(5000);assert.equal(f.calls(),0);
+  f.turn.contextReady();f.tick(1500);assert.equal(f.calls(),1);
+  f.turn.lookupStarted();f.turn.contextReady();f.tick(5000);assert.equal(f.calls(),1,'never another continuation');
+  f.turn.cancel();
+});
+
 test('context alone cannot cue a typed question before its actual input is sent', t => {
   const f = fixture(t); f.turn.lookupStarted(); f.turn.contextReady(); f.tick(10000); assert.equal(f.calls(), 0);
   f.turn.inputStarted(); f.tick(1500); assert.equal(f.calls(), 1);

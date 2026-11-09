@@ -13,7 +13,9 @@ export class ReplyContinuation {
 
   constructor(private readonly resume: () => Promise<void>, private readonly changed: (pending: boolean, error?: string) => void, private readonly question: () => string = () => '') {}
 
-  lookupStarted() { if (!this.finished) this.changed(true); }
+  lookupStarted() {
+    if (!this.finished) { this.ready = false; clearTimeout(this.timer); this.changed(true); }
+  }
   inputStarted() { if (!this.finished) { this.input = true; this.schedule(); } }
   contextReady() { if (!this.finished) { this.ready = true; this.schedule(); } }
   response(text: string, final: boolean) {

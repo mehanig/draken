@@ -3,6 +3,10 @@ import { cleanText } from '../sync/normalize';
 import type { HistoryQuery, HistoryResults } from './types';
 import { statusQuestion } from './reconcile';
 
+// Shared evidence selection budget. Voice transports this same bounded packet
+// in acknowledged context parts; speech length is independent of evidence size.
+export const DISCUSSION_HISTORY_BYTES = 32000;
+
 // Existing E/C labels belong to a particular snapshot. Do not let quoted source
 // text masquerade as references in the current answer's namespace.
 const quote = (text: string, max: number) => {
