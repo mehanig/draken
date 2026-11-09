@@ -71,11 +71,16 @@ p { line-height: 1.7; }
 .usage-totals > div { min-width: 0; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--rule); padding: 12px; }
 .usage-totals strong { font-size: 28px; line-height: 1.1; overflow-wrap: anywhere; }
 .usage-chart-heading, .usage-chart-axis { display: flex; justify-content: space-between; gap: 8px; }
-.usage-chart { display: block; width: 100%; height: 120px; margin-top: 12px; }
+.usage-chart-frame { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; margin-top: 12px; }
+.usage-axis-unit { grid-column: 1 / -1; margin-bottom: 6px; }
+.usage-y-axis { position: relative; height: 120px; font-variant-numeric: tabular-nums; }
+.usage-y-axis span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
+.usage-chart { display: block; width: 100%; height: 120px; }
 .usage-chart rect { fill: var(--blue); }
 .usage-chart .usage-incomplete { fill: var(--muted); }
-.usage-chart line { stroke: var(--rule); }
-.usage-chart-axis { margin-top: 6px; font-variant-numeric: tabular-nums; }
+.usage-chart line { stroke: var(--rule); vector-effect: non-scaling-stroke; }
+.usage-chart .usage-gridline { stroke-dasharray: 3 4; }
+.usage-chart-axis { grid-column: 2; margin-top: 10px; font-variant-numeric: tabular-nums; }
 .usage-details { margin-top: 16px; }
 .usage-details summary { cursor: pointer; font-weight: 700; }
 .usage-table-wrap { overflow: auto; max-height: 320px; margin-top: 12px; }
