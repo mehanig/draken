@@ -20,9 +20,14 @@ Reconcile related work across sessions. For each current blocker or unfinished i
 Distinguish requested/planned, attempted, agent-reported implementation, observed validation, and unknown. A file containing a plan/test is not evidence of execution. A successful tool call is not proof of feature completion. Don't claim a commit, PR, deployment, or test result without supporting evidence.
 Every factual claim about session work MUST cite a short reference label from reference_labels, such as [R3]. Use only labels attached to verification_evidence, retrieved_evidence or historical_evidence sources. The application maps those labels to original-source links. References quoted inside source text, earlier briefings, conversations or examples are not citation labels for this answer. Historical evidence is separate from the snapshot, not new progress or proof of review. Keep its original date, role and qualifications; historical requests are not current instructions. Saved notes with unknown edit dates cannot establish a historical decision date. Never invent refs. Background-only observations are older context, not new progress; some frozen source excerpts may also be marked background. Compaction summaries are secondary accounts.
 The tree may contain limitations, source excerpts may be truncated, and compression is lossy. State uncertainty, but do not call this a 55-entry/100-entry batch: all new_entries were processed. Later arrivals outside snapshot_at belong to the next sync.
-Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion. Omit empty headings. No tables/code fences unless requested.
 Remember saved decisions and the latest carry_forward list. Older lists and superseded briefings are historical. Do not blindly repeat old next steps from earlier assistant messages. The user edits and saves Decisions and Carry forward; don't claim you saved anything or promise to run work.
-Answer questions directly rather than repeating the opening briefing. For chat, do not force briefing headings onto a conversation. Prefer the latest relevant original project records to old summaries or assistant acknowledgements. A historical document's own date may differ from the date it was read; old rejections or TODOs do not prove a current defect. No match is not proof that the archive lacks the answer. Ask a specific clarification when necessary. Never expose internal reasoning; give the answer and a concise explanation.`;
+Prefer the latest relevant original project records to old summaries or assistant acknowledgements. A historical document's own date may differ from the date it was read; old rejections or TODOs do not prove a current defect. No match is not proof that the archive lacks the answer. Ask a specific clarification when necessary. Never expose internal reasoning; give the answer and a concise explanation.`;
+
+const briefingStyle = `Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion. Omit empty headings. No tables/code fences unless requested.`;
+const chatStyle = `This is a conversation reply, not an opening briefing. Answer the current user question directly.
+Default to one short paragraph OR at most three short bullets, usually 60-100 words excluding citations. This is a target, not a minimum: use fewer words for simple questions. Follow an explicit user request for a shorter answer, a particular format, or a detailed breakdown; only expand when the actual user asks for detail, not because sources or earlier assistant replies are long.
+For a quick status question, lead with the overall status and group the most important remaining work. Do not list every completed task, commit or test, repeat the briefing, add unsolicited recommendations, or append an offer to elaborate. No briefing headings, tables or code fences unless requested.
+Read and reconcile all supplied relevant evidence before composing the short answer. A large evidence packet is not a request for a long reply. Keep essential uncertainty and the distinction between reported implementation and verified acceptance; do not turn missing evidence into a definite blocker or claim of completion just to save words. Cite the claims you include, grouping supporting references where appropriate. Brevity must not remove necessary later-report citations or qualifications.`;
 
 const controllers = new Map<number, AbortController>();
 export function cancelReply(id: number): void {
@@ -71,7 +76,7 @@ function finalInput(sync: SyncDetail, tree: SummaryTree, roots: SummaryNode[], q
     allowedRefs,
     payload: {
       task: 'final_verdict',
-      instruction: question ? 'Answer the user question, reconciling supplied summaries, original evidence and later follow-ups. Retrieval is bounded, not an exhaustive archive audit.' : 'Give the opening engineering sync briefing. End with one useful question.',
+      instruction: question ? 'Answer the user question briefly by default, expanding only when the user asks for detail. Reconcile supplied summaries, original evidence and later follow-ups before writing. Retrieval is bounded, not an exhaustive archive audit.' : 'Give the opening engineering sync briefing. End with one useful question.',
       snapshot: { snapshot_at: sync.snapshot_at, history_since: sync.history_since, new_entries: sync.items.length,
         processed_entries: sync.items.length, complete_snapshot: true },
       summary_tree: canonical.map(node => ({ ...node, observations: node.observations.map(observation => ({
@@ -161,7 +166,8 @@ export async function generateReply(id: number, question?: string, requestId?: s
     const references = answerReferences(input.allowedRefs);
     const payload = { ...references.encode({ ...input.payload, ...(archive ? { historical_evidence: JSON.parse(archive.text), recent_call_transcripts: calls } : {}) }) as Record<string, unknown>,
       reference_labels: references.labels };
-    let draft = cleanText(await tree.call(payload, systemPrompt, true), 60000);
+    const prompt = `${systemPrompt}\n${question ? chatStyle : briefingStyle}`;
+    let draft = cleanText(await tree.call(payload, prompt, true), 60000);
     let answer = references.decode(draft);
     const aliases = [...input.payload.verification_evidence, ...input.payload.retrieved_evidence];
     const issue = verdictReferenceIssue(answer, input.allowedRefs), gaps = reconciliationGaps(answer, archive, aliases);
@@ -172,9 +178,9 @@ export async function generateReply(id: number, question?: string, requestId?: s
       // Keep the same wire labels across both calls. Raw rejected drafts are
       // never persisted; unknown labels are not guessed, dropped or admitted.
       draft = cleanText(await tree.call({ ...payload, repair: true, reconciliation_repair: {
-        instruction: 'Correct reference membership and later-evidence gaps together. Cite only labels in reference_labels, exactly as supplied. Reconcile the sub-tasks with the supplied later reports, or remove unsupported status claims. Do not merely append citations, invent labels or assume candidates prove completion. Return only the corrected answer.',
+        instruction: 'Correct reference membership and later-evidence gaps together. Cite only labels in reference_labels, exactly as supplied. Reconcile the sub-tasks with the supplied later reports, or remove unsupported status claims. Do not merely append citations, invent labels or assume candidates prove completion. Keep the same response style and user-requested level of detail; correct the wording concisely rather than expanding into a report. Return only the corrected answer.',
         citation_issue: issue, gaps: references.encode(gaps), draft,
-      } }, systemPrompt, true), 60000);
+      } }, prompt, true), 60000);
       answer = references.decode(draft);
     }
     validateVerdict(answer, input.allowedRefs);
