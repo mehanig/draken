@@ -8,7 +8,7 @@ Open **Settings → Agents & sessions**. Each adapter shows its configured direc
 
 - Existing pi sessions and exclusions survive the migration. Pi history is enabled by default.
 - **Codex and Claude history are off until explicitly enabled.** An existing background-indexing preference does not silently gain access to new transcripts.
-- Enabling an agent persists its permission; it does not itself scan, download a model, summarize, create a sync or acquire a microphone. The next explicit scan/sync, or an already opted-in background schedule, may read its logs.
+- Enabling an agent persists its permission; it does not itself scan, download a model, summarize, create a sync or acquire a microphone. The next explicit scan/sync, or an enabled background schedule (on by default for new installations), may read its logs.
 - **Scan enabled agents** discovers and parses enabled roots only. New sessions from enabled agents are selected by default. Each session can be excluded independently.
 - Disabled agents are excluded from new snapshots and historical retrieval. Disabling does not rewrite existing frozen snapshots or erase discussions, notes or derived files.
 - Merely opening/polling Settings reads database metadata and directory existence, not transcript bodies.

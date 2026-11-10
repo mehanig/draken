@@ -41,16 +41,19 @@ test('cancellation preserves the last successful baseline; retry is bounded and 
 });
 test('settings are persistent, validated, read-only on GET, and protected from cross-origin changes',async()=>{
  const {createApp}=require('../dist/server');server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const url=`http://127.0.0.1:${server.address().port}/api/settings/auto-index`;
- const first=await(await fetch(url)).json();assert.equal(first.enabled,false);assert.equal(first.batch_records,64);assert.equal(Object.hasOwn(first,'max_wait_seconds'),false);assert.equal(getDb().prepare("SELECT COUNT(*) n FROM sync_settings WHERE key='auto_index'").get().n,0);
+ const before=getDb().prepare('SELECT total_changes() n').get().n;
+ const first=await(await fetch(url)).json();assert.equal(first.enabled,true);assert.equal(first.batch_records,64);assert.equal(Object.hasOwn(first,'max_wait_seconds'),false);assert.equal(getDb().prepare('SELECT total_changes() n').get().n,before);
+ assert.equal((await(await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":false}'})).json()).enabled,false);
  for(const body of [{enabled:'true'},{enabled:true,summary:true},[],{}])assert.equal((await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).status,400);
  assert.equal((await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json',Origin:'https://elsewhere.invalid'},body:'{"enabled":true}'})).status,403);
  assert.equal((await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true}'})).status,409,'A stale local-index-only UI cannot authorize paid preparation');
  assert.equal(autoIndexSettings().enabled,false);
  assert.equal((await(await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true,"preparation_scope":"index-and-briefing-v1"}'})).json()).enabled,true);
  await stopBackgroundIndexing();closeDb();assert.equal(autoIndexSettings().enabled,true);startBackgroundIndexing();assert.equal(autoIndexSettings().phase,'waiting');setAutoIndex(false);assert.equal(autoIndexSettings().enabled,false);
+ await stopBackgroundIndexing();closeDb();assert.equal(autoIndexSettings().enabled,false,'Explicit opt-out survives initialization on restart');
  for(const table of ['agent_sessions','syncs','sync_items','sync_coverage','sync_runs','live_calls'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
 });
-test('one opted-in timer indexes synthetic originals and prepares a reusable briefing without review or calls',async t=>{
+test('the fresh default timer indexes synthetic originals and prepares a reusable briefing without review or calls',async t=>{
  const fake=path.join(root,'pi');fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),fake);fs.chmodSync(fake,0o700);
  Object.assign(process.env,{DRAKEN_PI_BIN:fake,DRAKEN_PI_SUMMARY_MODEL:'test/cheap',DRAKEN_PI_FINAL_MODEL:'test/strong',DRAKEN_TEST_CALL_LOG:root+'/calls.jsonl',DRAKEN_FAKE_CONTROL:root+'/control.json'});fs.writeFileSync(root+'/control.json','{}');
  const Database=require('better-sqlite3'),{HistoryIndex}=require('../dist/memory/index'),service=require('../dist/memory/service');
@@ -63,8 +66,8 @@ test('one opted-in timer indexes synthetic originals and prepares a reusable bri
  service.prepareHistory=async(before,signal,background=false)=>{assert.equal(signal.aborted,false);if(background)jobs++;else foregroundJobs++;await index.prepare({before},undefined,true);};
  t.mock.timers.enable({apis:['setInterval','Date'],now});
  try{
-  startBackgroundIndexing();t.mock.timers.tick(60000);await new Promise(r=>setTimeout(r,20));assert.equal(jobs,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);
-  setAutoIndex(true);t.mock.timers.tick(60000);for(let n=0;n<200&&!autoIndexSettings().last_completed_at;n++)await new Promise(r=>setTimeout(r,10));
+  assert.equal(autoIndexSettings().enabled,true);startBackgroundIndexing();assert.equal(jobs,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);
+  t.mock.timers.tick(60000);for(let n=0;n<200&&!autoIndexSettings().last_completed_at;n++)await new Promise(r=>setTimeout(r,10));
   assert.ok(autoIndexSettings().last_completed_at);assert.equal(jobs,2);assert.equal(embeddings,70);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM agent_entries').get().n,70);
   const ready=()=>require('../dist/memory/readiness').indexReadiness(cache,getDb());
   assert.equal(ready().ready,true,'background work establishes the same call-readiness receipt');

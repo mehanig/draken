@@ -56,7 +56,7 @@ Evaluation questions:
 - Are cached summaries versioned and recoverable after failure or restart?
 - Can the user inspect originals and correct an inaccurate summary?
 
-Pi's compaction/branch summaries remain useful background, not independent proof of outcomes or a checkpoint of what the user discussed with Draken. Scheduled preparation now shares **one explicit automatic-preparation opt-in** with indexing and uses each snapshot's saved model-call budget. Old local-only permission does not silently authorize paid inference. Browsing and standalone scans still do not start provider summaries; the opted-in server scheduler works independently of browsing. The explicit combined sync action and post-call recap retain their existing behavior.
+Pi's compaction/branch summaries remain useful background, not independent proof of outcomes or a checkpoint of what the user discussed with Draken. Scheduled preparation now shares **one automatic-preparation preference**, enabled by default only for new installations, with indexing and uses each snapshot's saved model-call budget. Old local-only permission does not silently authorize paid inference. Browsing and standalone scans still do not start provider summaries; the enabled server scheduler works independently of browsing. The explicit combined sync action and post-call recap retain their existing behavior.
 
 ## Later
 

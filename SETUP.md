@@ -2,7 +2,7 @@
 
 Draken uses **pi for summaries, preparation recaps and text discussion**, regardless of which coding agent produced the imported history. It does not implement provider OAuth, translate another agent's credentials, or run Claude/Codex to summarize.
 
-> This guide is for **Draken 0.4.1**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#041).
+> This guide is for **Draken 0.4.2**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#042).
 
 ## Install and start
 
@@ -20,6 +20,8 @@ Installation does not launch a server or register a background service. `draken`
 - The server atomically saves a private, credential-free `server-state.json` after binding successfully. The record stays after shutdown so status checks the last address, but a saved PID/address alone never counts as running. Stale records and mismatched live instances fail visibly.
 - `draken doctor`: checks the selected pi executable, version and configured model credentials. It does not create the application database, generate text or verify provider access/billing. A non-ready result exits nonzero.
 - A duplicate launch on an occupied HTTP/HTTPS port exits **before opening the database or recovering interrupted runs**.
+
+**Automatic preparation is on by default for new installations.** While the server runs, it scans enabled sources, updates local search and uses configured summary/briefing models and their quota or API billing within the saved invocation limit. First use may download the local search model. Turn it off in **Settings → Automatically prepare conversations** before configuring models if you prefer manual preparation. Existing installations keep their previous behavior, including off or no saved preference; older local-index-only consent is not upgraded to model usage. Provider failures pause until you explicitly retry in Settings after fixing setup. Source/session exclusions still apply, Codex and Claude remain separately opt-in, and no call, microphone or review starts automatically. **Settings → Preparation usage** shows preparation-only cost estimates, not total spending or quota.
 
 Loopback (`http://127.0.0.1:40333`) needs no dashboard login by default. LAN exposure still requires configured dashboard authentication and trusted HTTPS for microphone access. There is no automatic firewall change or certificate trust installation.
 
@@ -99,7 +101,7 @@ Home shows first-run guidance when no syncs exist, and a setup notice whenever s
 
 Choose **Settings → Agents & sessions**. Enable the history sources you want and use **Scan enabled agents**, or let the next explicit sync scan them. Source roots and permissions are independent of the private summarization runtime: installing pi does not enable Codex/Claude histories or change the original pi archive. See [SOURCES.md](SOURCES.md).
 
-Opening these instructions checks local metadata only. It does not install packages, refresh OAuth tokens, download embeddings, generate a summary, create a snapshot, acquire a microphone, or mark work reviewed. An independently opted-in background indexing schedule keeps its existing behavior.
+Opening these instructions checks local metadata only. It does not install packages, refresh OAuth tokens, download embeddings, generate a summary, create a snapshot, acquire a microphone, or mark work reviewed. Enabled automatic preparation runs independently of these instructions; it is on by default for new installations and can be turned off in Settings.
 
 ## Recovery and maintenance
 

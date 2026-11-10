@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- New installations enable automatic preparation by default: scan enabled histories, update local search, summarize new work and prepare a briefing while the server runs. This includes configured model quota or API billing, not only local indexing; turn it off in Settings → Automatically prepare conversations.
+- Preserve existing installations' behavior, including explicit off, no saved preference and older local-index-only permission. The default is stored only when initializing an empty database; restarts and settings reads do not reset choices or authorize wider work on upgrade.
+- Keep the existing once-minute idle checks, 64-record batch threshold, saved invocation limits, explicit retry after provider failures and independent source/session permissions. No automatic microphone, call, decision or review.
+- Explain the default and preparation costs in setup, Home, Settings and public documentation. Preparation usage remains a preparation-only estimate, not a provider invoice or total-spending tracker.
+- No new tables, columns or dependencies. Existing original logs, conversations, notes, coverage, summaries and compatible vectors remain unchanged.
+
 ## 0.4.1
 
 This release improves audio recall, makes preparation charts easier to read, and explains automatic compaction and cost tracking on Home and the public website.
