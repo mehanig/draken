@@ -46,6 +46,28 @@ test('chat requires prepared history, deduplicates delivery, retains the user im
  assert.equal(store.homeOverview().covered,coverage);assert.equal(store.getSync(id).status,'open');assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
 });
 
+test('chat gets a short-answer policy instead of briefing headings, with explicit detail and format requests preserved',async()=>{
+ const {id}=await ready(),briefing=store.getSync(id).briefing;
+ const opening=calls().find(call=>call.task==='final_verdict');
+ assert.match(opening.system,/Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion/);
+ assert.doesNotMatch(opening.system,/60-100 words/);
+ for(const question of ['Where are we with Trailboard now? Anything else left?', 'What remains in Trailboard? Answer in one sentence.', 'Give me a detailed breakdown of Trailboard progress, remaining implementation and acceptance checks.']){
+  const before=calls().length;launchChat(id,question,randomUUID());await idle();
+  const attempts=calls().slice(before);assert.equal(attempts.length,1,'Style does not add another model pass');
+  const reply=attempts[0];assert.equal(reply.user_question,question);assert.equal(reply.model,opening.model);
+  assert.match(reply.system,/one short paragraph OR at most three short bullets, usually 60-100 words excluding citations/);
+  assert.match(reply.system,/Follow an explicit user request for a shorter answer, a particular format, or a detailed breakdown/);
+  assert.match(reply.system,/not because sources or earlier assistant replies are long/);
+  assert.match(reply.system,/Read and reconcile all supplied relevant evidence/);
+  assert.match(reply.system,/Every factual claim about session work MUST cite/);
+  assert.match(reply.system,/Brevity must not remove necessary later-report citations or qualifications/);
+  assert.doesNotMatch(reply.system,/Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion/);
+  assert.ok(reply.verification_evidence.length);assert.ok(reply.reference_labels.length);
+  assert.equal(store.getSync(id).briefing,briefing,'The opening briefing is not rewritten');
+ }
+ assert.equal(store.homeOverview().covered,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
+});
+
 test('chat shares project focus across native/user turns and reload, never from assistant instructions',async()=>{
  const {id,trail,beacon}=await ready(),seen=[];
  getDb().prepare("INSERT INTO live_calls(id,sync_id,status,started_at,ended_at) VALUES ('prior',?,'ended','2026-01-02','2026-01-02')").run(id);
@@ -98,6 +120,9 @@ test('an unreconciled draft gets one bounded same-model repair and only the corr
  assert.ok(refs.slice(1).every(ref=>sync.messages[1].content.includes(ref)));
  assert.ok(attempts.every(call=>call.historical_evidence.sources.every(source=>/^R\d+$/.test(source.ref))));
  assert.deepEqual(attempts[0].reference_labels,attempts[1].reference_labels);
+ assert.equal(attempts[0].system,attempts[1].system,'The correction retains the same short-answer policy');
+ assert.match(attempts[1].system,/60-100 words/);
+ assert.match(attempts[1].reconciliation_repair.instruction,/same response style and user-requested level of detail/);
  assert.ok(attempts[1].reconciliation_repair.gaps.every(gap=>/^R\d+$/.test(gap.earlier_ref)&&gap.missing_later_refs.every(ref=>/^R\d+$/.test(ref))));
  assert.equal(store.homeOverview().covered,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
 });
