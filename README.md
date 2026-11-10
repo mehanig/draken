@@ -10,7 +10,7 @@ A local-first engineering sync across your **pi, Codex CLI and Claude Code sessi
 
 **Sync with Draken → call or chat → keep a short recap.**
 
-**Draken 0.4.2** enables automatic preparation by default for new installations, while preserving existing choices. See [the release notes](CHANGELOG.md#042).
+**Draken 0.5.0** enables automatic preparation by default for new installations and keeps chat replies short unless you ask for detail. Existing preparation choices are preserved. See [the release notes](CHANGELOG.md#050).
 
 **Automatic preparation and compaction:** new installations index history, summarize new work and prepare a briefing automatically while the server runs. Turn this off in **Settings → Automatically prepare conversations** if you prefer manual preparation. Existing installations keep their previous behavior, including off and older local-index-only permission. Compaction means cached, derived summaries—not editing or deleting your original agent logs. Matching summaries and ready briefings are reused. This mode uses your configured models and their quota or API billing within the saved invocation limit; it never starts a call or marks work reviewed.
 
@@ -26,7 +26,7 @@ Draken remembers which evidence a finished sync covered, what you decided, and w
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.4.2](CHANGELOG.md#042).
+> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.5.0](CHANGELOG.md#050).
 
 ```sh
 npm install -g draken

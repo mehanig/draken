@@ -50,6 +50,7 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
   assert.match(notes,/New installations enable indexing, summaries and briefings by default/);assert.match(notes,/without a saved preference stays off/);assert.match(notes,/No new tables, columns or dependencies/);
   assert.match(notes,/64-record threshold/);assert.match(notes,/quota or API billing/);
+  assert.match(notes,/Chat defaults to one paragraph or up to three bullets/);assert.match(notes,/60–100 words plus citations/);assert.match(notes,/not a hard cutoff or an extra model request/);
   const preparation=await page.locator('#preparation').innerText();
   assert.match(preparation,/Automatic preparation and compaction/);assert.match(preparation,/does not edit or delete original agent logs/);
   assert.match(preparation,/on by default for new installations/);assert.match(preparation,/does not silently authorize model usage/);

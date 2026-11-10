@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.4.2
+## 0.5.0
+
+This minor release combines automatic preparation for new installations with shorter conversational replies. The planned 0.4.2 changes are included here; 0.4.2 was not published.
+
+- Give text chat its own short-answer instructions instead of opening-briefing headings: one paragraph or up to three bullets, usually 60–100 words excluding citations. Simple questions can be shorter; explicit requests for detail or another format still win.
+- Keep the same concise style during the existing single citation/reconciliation correction. Evidence selection, later-report checking, model choice and invocation limits are unchanged. No hard word truncation or additional shortening-model pass; actual model adherence to the target is not guaranteed.
 
 - New installations enable automatic preparation by default: scan enabled histories, update local search, summarize new work and prepare a briefing while the server runs. This includes configured model quota or API billing, not only local indexing; turn it off in Settings → Automatically prepare conversations.
 - Preserve existing installations' behavior, including explicit off, no saved preference and older local-index-only permission. The default is stored only when initializing an empty database; restarts and settings reads do not reset choices or authorize wider work on upgrade.
