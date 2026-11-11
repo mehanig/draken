@@ -135,7 +135,14 @@ export interface TreeNode {
   source_count: number;
   error: string;
 }
+export interface RecapValidation {
+  status: 'valid' | 'reflowed' | 'invalid';
+  reason?: string;
+  line_lengths?: number[];
+  characters?: number;
+}
 export interface ModelCallMetric {
+  recap_validation?: RecapValidation;
   started_at?: string;
   finished_at?: string;
   accounting?: PiAccounting;

@@ -15,13 +15,17 @@ test('Home exposes one automatic pipeline with truthful summary progress, readin
   await expect(progress).toBeVisible(); await expect(progress).toContainText('Preparing your next briefing');
   await expect(progress.getByRole('progressbar', { name: 'Automatic briefing summaries' })).toHaveAttribute('value', '30');
   await expect(progress).toContainText('30 / 64 entries summarized'); await expect(progress).toContainText('2 / 120 model calls');
-  await expect(page.getByText('awaiting preparation', { exact: false })).toBeVisible();
+  await expect(page.getByText('not yet in a sync', { exact: false })).toBeVisible();
   for (const width of [390, 1440]) { await page.setViewportSize({ width, height: 900 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
   state = { ...state, phase: 'waiting', sync_id: null, ready_sync_id: 7, progress: null, pending_entries: 3, last_completed_at: new Date().toISOString() };
   await expect(progress).toContainText('Your next briefing is prepared', { timeout: 8000 });
-  await expect(progress).toContainText('3 entries waiting for preparation'); await expect(progress.getByRole('link', { name: 'Open prepared briefing' })).toHaveAttribute('href', '/syncs/7');
-  state = { ...state, phase: 'error', error: 'Automatic briefing stopped. Retry explicitly.', ready_sync_id: null, sync_id: 8 };
+  await expect(progress).toContainText('3 entries not yet assigned to a preparation batch'); await expect(progress.getByRole('link', { name: 'Open prepared briefing' })).toHaveAttribute('href', '/syncs/7');
+  await expect(progress).not.toContainText('unfinished preparation');
+  state = { ...state, phase: 'error', error: 'Automatic briefing stopped. Retry explicitly.', ready_sync_id: null, sync_id: 8, pending_entries: 0, progress: { stage: 'Recapping earlier sync #7', completed: 0, total: 98, invocations: 2, max_invocations: 120 } };
   await expect(progress.getByRole('alert')).toContainText('Retry explicitly', { timeout: 8000 });
+  await expect(progress).toContainText('0 entries not yet assigned to a preparation batch');
+  await expect(progress).toContainText('98 entries in unfinished preparation #8');
+  await expect(progress).toContainText('Stopped at: Recapping earlier sync #7');
   await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
   await expect(dialog.getByRole('switch', { name: /Automatically prepare conversations/ })).toBeChecked();

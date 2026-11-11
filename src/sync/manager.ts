@@ -144,7 +144,11 @@ export async function generateReply(id: number, question?: string, requestId?: s
         const inputs: RecapInput[] = JSON.parse(view.memory_inputs_json), memory: SyncDetail['memory'] = [];
         for (const prior of inputs) {
           db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run(`Recapping earlier sync #${prior.sync_id}`, runId);
-          const recap = await summarizeRecap(prior, sync.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
+          const recap = await summarizeRecap(prior, sync.models.summary, (payload, system) => tree.call(payload, system), controller.signal, result => {
+            // Recap calls are sequential. Annotate their existing metric slot,
+            // including rejected responses, without storing model/source text.
+            db.prepare("UPDATE sync_runs SET metrics_json=json_set(metrics_json,'$[#-1].recap_validation',json(?)) WHERE id=? AND json_array_length(metrics_json)>0").run(JSON.stringify(result), runId);
+          });
           memory.push({ sync_id: prior.sync_id, status: prior.status, snapshot_at: prior.snapshot_at, recap, decisions: prior.decisions, carry_forward: prior.carry_forward });
           // Do not overwrite a newer presentation if the prior sync changed meanwhile.
           if (recapHash(recapInput(getSync(prior.sync_id)), sync.models.summary) === recapHash(prior, sync.models.summary)) saveRecap(prior, sync.models.summary, recap);
