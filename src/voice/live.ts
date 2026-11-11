@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { getDb } from '../db/schema';
-import { activeVoiceSyncs, assertEvidenceAvailable, getSync, HttpError, requireOpen } from '../sync/store';
+import { activeVoiceSyncs, assertEvidenceAvailable, getSync, requireOpen } from '../sync/store';
+import { HttpError } from '../errors';
 import { cleanText } from '../sync/normalize';
 import { SyncDetail } from '../types';
 import { invalidateRecap } from '../sync/recap';
@@ -9,7 +10,7 @@ import { DISCUSSION_HISTORY_BYTES, historyContext } from '../memory/context';
 import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyReadiness } from '../memory/service';
 import { ReplyContinuation } from './continuation';
-import { discussionFocus, voiceHistoryQuery, type VoiceHistoryFocus } from './history-focus';
+import { discussionFocus, historyQuery, type HistoryFocus } from '../memory/focus';
 import type { HistoryQuery } from '../memory/types';
 
 // Resource limits, not a subscription spending guarantee.
@@ -21,7 +22,7 @@ type Native = { subscribe(fn: (event: any) => void): () => void; open(sdp: strin
 const runtime = () => require('../../voice/realtime/native.mjs') as { nativeStatus(options?: any): Promise<any>; NativeVoice: new (options?: any) => Native };
 interface Message { id: number; role: 'user' | 'assistant'; text: string; final: boolean; interrupted?: boolean; refs: string[]; started: number }
 interface Turn { user: Message; life: AbortController; continuation: ReplyContinuation; query?: HistoryQuery; refs: string[]; lookups: Map<string, Promise<EvidencePacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
-interface Call { turn?: Turn; id: string; sync: SyncDetail; historyBefore: string; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; focus?: VoiceHistoryFocus; contextDelivery: Promise<void> }
+interface Call { turn?: Turn; id: string; sync: SyncDetail; historyBefore: string; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; focus?: HistoryFocus; contextDelivery: Promise<void> }
 const calls = new Map<string, Call>();
 // End can overtake creation on a second HTTP connection. Retain unknown-ID
 // cancellations for the HTTP request window, bounded independently of calls.
@@ -106,7 +107,7 @@ function beginTurn(call: Call, user: Message, spoken: boolean) {
 async function lookup(call: Call, question: string, turn: Turn) {
   const currentQuestion = turn.user.text;
   if (!turn.query) {
-    const plan = voiceHistoryQuery(getDb(), currentQuestion, call.focus);
+    const plan = historyQuery(getDb(), currentQuestion, call.focus);
     turn.query = plan.query; call.focus = plan.focus;
   }
   const snapshot = /\b[EC]\d+\b/.test(question) ? liveEvidence(call.sync, question, false, currentQuestion) : undefined;

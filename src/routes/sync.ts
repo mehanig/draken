@@ -1,16 +1,16 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request } from 'express';
+import { route } from './http';
+import { HttpError } from '../errors';
 import { getDb, getDataDir } from '../db/schema';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, HttpError, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs, claimAutomaticSync } from '../sync/store';
+import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs, claimAutomaticSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
 import { callReadiness, prepareCall } from '../voice/preparation';
 import { preparationUsage } from '../sync/usage';
 
 const router = Router();
-const route = (handler: (req: Request, res: Response) => unknown | Promise<unknown>) =>
-  (req: Request, res: Response, next: NextFunction) => { Promise.resolve().then(() => handler(req, res)).catch(next); };
 function id(req: Request): number {
   const value = Number(req.params.id);
   if (!Number.isSafeInteger(value) || value < 1) throw new HttpError(400, 'Invalid sync ID');
@@ -51,7 +51,6 @@ let starting = false;
 router.post(['/syncs/start-call', '/syncs/start-chat'], route(async (req, res) => {
   const requestId = req.body?.request_id;
   if (typeof requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestId)) throw new HttpError(400, 'A request ID is required');
-  // One scan/start operation at a time, including the async indexing interval.
   if (starting) throw new HttpError(409, 'A sync is already being prepared');
   const prior = getDb().prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
   if (prior) { res.status(202).json({ sync: getSync(prior.sync_id), scan: { files: 0, added: 0, warnings: [] } }); return; }

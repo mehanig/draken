@@ -300,13 +300,14 @@ Live speech supplies received audio energy, not exact word or mouth timing. The 
 | A sync's briefing, discussion, notes and evidence controls | [`client/src/pages/Sync.tsx`](client/src/pages/Sync.tsx) |
 | Private pi installation, selection and pi-owned login | [`src/pi/`](src/pi/), [`runtime/pi/package-lock.json`](runtime/pi/package-lock.json), [`src/cli.ts`](src/cli.ts) |
 | First-run instructions and setup state | [`client/src/components/SetupPanel.tsx`](client/src/components/SetupPanel.tsx) |
-| HTTP request checks and route wiring | [`src/server.ts`](src/server.ts), [`src/routes/`](src/routes/) |
+| HTTP request checks and route wiring | [`src/server.ts`](src/server.ts), [`src/routes/`](src/routes/); async dispatch and opt-in disconnect cancellation in [`src/routes/http.ts`](src/routes/http.ts), shared errors in [`src/errors.ts`](src/errors.ts) |
 | Reading agent histories and cleaning excerpts | [`src/sources/adapters.ts`](src/sources/adapters.ts), [`src/sources/registry.ts`](src/sources/registry.ts), [`src/sync/collector.ts`](src/sync/collector.ts), [`normalize.ts`](src/sync/normalize.ts) |
 | Snapshot selection, review and saved notes | [`src/sync/store.ts`](src/sync/store.ts) |
 | Summary steps, caching and source-label validation | [`src/sync/tree.ts`](src/sync/tree.ts), [`references.ts`](src/sync/references.ts) |
 | Final answers and background preparation jobs | [`src/sync/manager.ts`](src/sync/manager.ts), [`pi.ts`](src/sync/pi.ts) |
 | Short conversation memory | [`src/sync/recap.ts`](src/sync/recap.ts) |
 | Hybrid historical retrieval | [`src/memory/index.ts`](src/memory/index.ts), [`src/memory/service.ts`](src/memory/service.ts), [`MEMORY.md`](MEMORY.md) |
+| Shared text/voice project scope and frozen-evidence selection | [`src/memory/focus.ts`](src/memory/focus.ts), [`src/sync/retrieval.ts`](src/sync/retrieval.ts) |
 | Reading old call records without keeping the retired engine | [`src/voice/legacy-history.ts`](src/voice/legacy-history.ts) |
 | Native voice server / browser / helper | [`src/voice/live.ts`](src/voice/live.ts), [`client/src/voice/live-session.ts`](client/src/voice/live-session.ts), [`voice/realtime/`](voice/realtime/) |
 | What evidence native voice receives | [`src/voice/live-context.ts`](src/voice/live-context.ts) |

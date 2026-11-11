@@ -1,7 +1,8 @@
 import { getDataDir, getDb } from '../db/schema';
 import { sourceStamps, loadSourceCheckpoint } from './stamps';
 import { scanSessions } from '../sync/collector';
-import { activeVoiceSyncs, automaticSyncId, availableCount, backgroundSyncs, busySyncs, HttpError } from '../sync/store';
+import { activeVoiceSyncs, automaticSyncId, availableCount, backgroundSyncs, busySyncs } from '../sync/store';
+import { HttpError } from '../errors';
 import { automaticBriefingError, pendingAutomaticBriefing, prepareAutomaticBriefing, retryAutomaticBriefing } from '../sync/automatic';
 import { historyProgress, historyReadiness, prepareHistory } from './service';
 import type { AutoIndexSettings } from '../types';

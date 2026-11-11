@@ -8,7 +8,8 @@ const { randomUUID } = require('node:crypto');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { scanSessions } = require('../dist/sync/collector');
 const store = require('../dist/sync/store');
-const { generateReply, cancelReply, retrieveEvidence, validateVerdict } = require('../dist/sync/manager');
+const { generateReply, cancelReply, validateVerdict } = require('../dist/sync/manager');
+const { retrieveEvidence } = require('../dist/sync/retrieval');
 const { SummaryTree, validateSummary, validateGroups, repairSummaryCitations } = require('../dist/sync/tree');
 const { prepareModelInput } = require('../dist/sync/references');
 

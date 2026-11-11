@@ -14,8 +14,9 @@ import { startBackgroundIndexing, stopBackgroundIndexing } from './memory/automa
 import voiceRouter from './routes/voice';
 import { recoverLegacyCalls } from './voice/legacy-history';
 import { validateVoiceConfig, recoverLiveCalls, stopLiveCalls } from './voice/live';
-import { HttpError, recoverInterruptedRuns } from './sync/store';
-import { stopManagerProcesses } from './sync/manager';
+import { recoverInterruptedRuns } from './sync/store';
+import { HttpError } from './errors';
+import { stopManagerProcesses } from './sync/pi';
 import { stopPiChecks } from './pi/runtime';
 
 export function createApp(options: { staticDir?: string; instanceId?: string } = {}) {

@@ -1,7 +1,8 @@
 import { getDb } from '../db/schema';
 import { Evidence, ModelCallMetric, NodeKind, NodeSummary, SyncDetail, TopicGroups } from '../types';
 import { cleanText, digest, sourceKey } from './normalize';
-import { assertEvidenceAvailable, HttpError } from './store';
+import { assertEvidenceAvailable } from './store';
+import { HttpError } from '../errors';
 import { invokePi } from './pi';
 import { prepareModelInput } from './references';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens, summaryTokens } from './summary-budget';

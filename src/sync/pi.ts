@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDataDir } from '../db/schema';
 import { cleanText } from './normalize';
-import { HttpError } from './store';
+import { HttpError } from '../errors';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens } from './summary-budget';
 import { PiOutput } from './pi-output';
 import type { PiAccounting } from '../types';

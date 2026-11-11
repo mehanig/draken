@@ -5,7 +5,7 @@ const Database = require('better-sqlite3');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
 const { indexReadiness } = require('../dist/memory/readiness');
-const { voiceHistoryQuery } = require('../dist/voice/history-focus');
+const { historyQuery: voiceHistoryQuery } = require('../dist/memory/focus');
 const { historyPacket } = require('../dist/memory/context');
 const { sourceEntry } = require('./fixtures/source-entry.cjs');
 let root, db, cache, index;

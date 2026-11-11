@@ -1,14 +1,13 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { route } from './http';
 import fs from 'fs';
 import { X509Certificate } from 'crypto';
-import { HttpError } from '../sync/store';
+import { HttpError } from '../errors';
 import { legacyCallHistory } from '../voice/legacy-history';
 import { liveStatus, liveHistory } from '../voice/live';
 import liveRouter from './live-voice';
 
 const router = Router();
-const route = (handler: (req: Request, res: Response) => unknown | Promise<unknown>) =>
-  (req: Request, res: Response, next: NextFunction) => { Promise.resolve().then(() => handler(req, res)).catch(next); };
 
 router.use('/live', liveRouter);
 router.get('/status', route(async (_req, res) => res.json({

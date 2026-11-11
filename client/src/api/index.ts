@@ -20,7 +20,6 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
   return data as T;
 }
 
-// Named exports let the module graph check each endpoint wrapper independently.
 export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir: string }>(`/setup${refresh ? '?refresh=1' : ''}`);
 export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);
 export const autoIndexSettings = () => request<AutoIndexSettings>('/settings/auto-index');

@@ -7,9 +7,7 @@ import { aggregationCost } from './cost';
 import { recapInput, invalidateRecap, type RecapInput } from './recap';
 import { admittedAgent, agentSources, AGENTS } from '../sources/registry';
 
-export class HttpError extends Error {
-  constructor(public status: number, message: string) { super(message); }
-}
+import { HttpError } from '../errors';
 
 export const busySyncs = new Set<number>();
 // Owned automatic preparation can be yielded before a foreground start.

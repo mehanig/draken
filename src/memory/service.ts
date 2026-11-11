@@ -2,7 +2,7 @@ import path from 'path';
 import { fork, type ChildProcess } from 'child_process';
 import { getDataDir, getDb } from '../db/schema';
 import { getSourceRoots } from '../sources/registry';
-import { HttpError } from '../sync/store';
+import { HttpError } from '../errors';
 import { historyUpdate, type HistoryPage, type HistoryProgress, type HistoryQuery, type HistoryResults, type HistoryUpdate } from './types';
 import { storedHistoryReadiness } from './readiness';
 import { scanSessions } from '../sync/collector';

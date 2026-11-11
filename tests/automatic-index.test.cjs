@@ -2,7 +2,7 @@ const {test,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {getDb,closeDb}=require('../dist/db/schema');
 const {createAutoIndexer,autoIndexSettings,setAutoIndex,startBackgroundIndexing,stopBackgroundIndexing}=require('../dist/memory/automatic');
-const {HttpError}=require('../dist/sync/store');
+const {HttpError}=require('../dist/errors');
 let root,server;
 beforeEach(()=>{root=fs.mkdtempSync(path.join(os.tmpdir(),'draken-auto-test-'));fs.mkdirSync(root+'/sessions');Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions',DRAKEN_NO_AUTH:'true',DRAKEN_HOST:'127.0.0.1',DRAKEN_PI_BIN:'/not-a-provider'});});
 afterEach(async()=>{await stopBackgroundIndexing();if(server)await new Promise(r=>server.close(r));server=null;closeDb();fs.rmSync(root,{recursive:true,force:true});});

@@ -1,6 +1,7 @@
 import { getDb } from '../db/schema';
 import type { CallReadiness } from '../types';
-import { activeVoiceSyncs, assertEvidenceAvailable, busySyncs, getSync, HttpError, requireOpen } from '../sync/store';
+import { activeVoiceSyncs, assertEvidenceAvailable, busySyncs, getSync, requireOpen } from '../sync/store';
+import { HttpError } from '../errors';
 import { historyReadiness, prepareHistory } from '../memory/service';
 
 const jobs = new Map<number, { controller: AbortController; done: Promise<void> }>();
