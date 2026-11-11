@@ -14,7 +14,9 @@ export function AutomaticProgress({ settings }: { settings: AutoIndexSettings })
   }[settings.phase];
   return <section className="history-progress" aria-label="Automatic preparation">
     <p role="status"><strong>{phase}</strong></p>
-    {settings.enabled && <p className="small muted">{waiting.toLocaleString()} entries waiting for preparation. {settings.last_completed_at && `Last completed batch: ${new Date(settings.last_completed_at).toLocaleString()}.`}</p>}
+    {settings.enabled && <p className="small muted">{waiting.toLocaleString()} entries not yet assigned to a preparation batch. {settings.last_completed_at && `Last completed batch: ${new Date(settings.last_completed_at).toLocaleString()}.`}</p>}
+    {settings.sync_id && settings.progress && <p className="small muted">{settings.progress.total.toLocaleString()} entries in unfinished preparation #{settings.sync_id}. These are already assigned, not a ready briefing.</p>}
+    {settings.phase === 'error' && settings.progress && <p className="small muted">Stopped at: {settings.progress.stage}.</p>}
     {settings.phase === 'briefing' && settings.progress && <>
       <p role="status">{settings.progress.stage}</p>
       <progress aria-label="Automatic briefing summaries" max={Math.max(1, settings.progress.total)} value={settings.progress.completed} />

@@ -54,7 +54,7 @@ export function Home({ navigate }: { navigate: Navigate }) {
       {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div></div>
     {!window.isSecureContext && <p className="small muted">Use trusted HTTPS or localhost for the combined sync and call.</p>}
     <p className="home-hint muted small">With automatic preparation enabled, new history becomes a ready briefing before you arrive. Join the prepared conversation, or catch up the newest entries in one final preparation. Nothing is marked reviewed until you confirm it.</p>
-    <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> awaiting preparation</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> included, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
+    <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> not yet in a sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> included, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
     <AutomaticPreparation />
     <details className="home-preparation-info">
       <summary>Automatic preparation and cost tracking</summary>

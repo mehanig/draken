@@ -34,6 +34,17 @@ test('recaps visit every transcript fragment, keep roles, cache reductions and r
  assert.equal(await summarizeRecap(input,'test/cheap',async()=>{throw Error('Cache not reused');},new AbortController().signal),first);
  await assert.rejects(summarizeRecap(input,'different/model',async()=>JSON.stringify({lines:['x'.repeat(161)]}),new AbortController().signal),/concise recap/);
 });
+test('preparation retains content-free recap validation reasons in the existing metric slots',async()=>{
+ session(2);await scanSessions();const first=store.startConversationSync(randomUUID());await generateReply(first.id);
+ const next=store.startConversationSync(randomUUID());fs.writeFileSync(control,JSON.stringify({badRecap:true}));
+ await assert.rejects(generateReply(next.id),/after two responses: Return only the JSON/);
+ const run=store.getSync(next.id).tree.run;assert.equal(run.invocations,2);assert.equal(run.metrics.length,2);
+ assert.ok(run.metrics.every(m=>m.task==='sync_recap'&&m.status==='completed'&&m.recap_validation.status==='invalid'));
+ assert.ok(run.metrics.every(m=>m.recap_validation.reason.includes('JSON')));assert.doesNotMatch(JSON.stringify(run.metrics),/previous_output|Invalid recap|Synthetic report/);
+ fs.writeFileSync(control,'{}');await generateReply(next.id);assert.equal(store.getSync(next.id).tree.run.metrics.find(m=>m.task==='sync_recap').recap_validation.status,'valid');
+ assert.equal(store.homeOverview().covered,0);
+});
+
 test('standalone recap is asynchronous, cancellable, cached and does not change original sync data',async()=>{
  const sync=store.startSync();const before=getDb().prepare('SELECT * FROM syncs WHERE id=?').get(sync.id);launchRecap(sync.id);assert.equal(store.getSync(sync.id).recap_state,'running');await waitIdle();assert.equal(store.getSync(sync.id).recap_state,'ready');const count=calls().length;launchRecap(sync.id);await waitIdle();assert.equal(calls().length,count);assert.deepEqual(getDb().prepare('SELECT * FROM syncs WHERE id=?').get(sync.id),before);assert.equal(store.homeOverview().covered,0);
  getDb().prepare('UPDATE syncs SET decisions=? WHERE id=?').run('Changed explicit note',sync.id);fs.writeFileSync(control,JSON.stringify({delay:2000}));launchRecap(sync.id);cancelReply(sync.id);await waitIdle();assert.equal(store.getSync(sync.id).recap_state,'failed');assert.equal(store.getSync(sync.id).decisions,'Changed explicit note');
