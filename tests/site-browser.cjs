@@ -48,8 +48,8 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/New installations enable indexing, summaries and briefings by default/);assert.match(notes,/without a saved preference stays off/);assert.match(notes,/No new tables, columns or dependencies/);
-  assert.match(notes,/64-record threshold/);assert.match(notes,/quota or API billing/);
+  assert.match(notes,/without dropping words or qualifications/);assert.match(notes,/five lines and 600 characters/);assert.match(notes,/No new tables, columns or dependencies/);
+  assert.match(notes,/content-free validation reasons and line lengths, not rejected model text/);assert.match(notes,/Zero unassigned entries does not mean preparation succeeded/);
   assert.match(notes,/Chat defaults to one paragraph or up to three bullets/);assert.match(notes,/60–100 words plus citations/);assert.match(notes,/not a hard cutoff or an extra model request/);
   const preparation=await page.locator('#preparation').innerText();
   assert.match(preparation,/Automatic preparation and compaction/);assert.match(preparation,/does not edit or delete original agent logs/);

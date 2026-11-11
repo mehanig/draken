@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+- Reflow overlong recap prose at existing spaces rather than rejecting it solely for line width. No words, qualifications or original point boundaries are dropped; the same five-line, 160-character-per-line and 600-character-total limits still apply. Other invalid output still gets at most one correction.
+- Save content-free recap validation outcomes, reasons and line lengths in existing preparation metrics. Final failures include a specific safe reason. Rejected model text is not retained, and older failures cannot be retroactively diagnosed from missing outputs.
+- Distinguish entries not yet assigned to a sync from entries held in unfinished preparation. Home and Settings show unfinished batch size and stopped stage; zero unassigned entries no longer implies preparation succeeded.
+- Preserve existing recap caches, histories, notes, review coverage, automatic-preparation choices, model budgets and explicit failure-retry rules. No new schema or dependencies. Short chat replies and new-install automatic preparation from 0.5.0 are unchanged.
+
 ## 0.5.0
 
 This minor release combines automatic preparation for new installations with shorter conversational replies. The planned 0.4.2 changes are included here; 0.4.2 was not published.
