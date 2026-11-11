@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { getDataDir, getDb } from '../db/schema';
+import { getDb } from '../db/schema';
+import { getDataDir } from '../data-dir';
 import { ScanResult, type AgentKind } from '../types';
 import { cleanText, digest, NormalizedEntry } from './normalize';
-import { fileRecords, RECORD_BYTES, type RecordPointer } from './source-files';
+import { fileRecords, RECORD_BYTES, type RecordPointer } from './jsonl';
 import { getSourceRoots } from '../sources/registry';
 import { identifySource, normalizeSource } from '../sources/adapters';
 

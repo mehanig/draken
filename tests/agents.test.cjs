@@ -10,14 +10,21 @@ const { historySources } = require('../dist/memory/sources');
 const { HistoryIndex } = require('../dist/memory/index');
 const { EvidenceReader } = require('../dist/db/evidence');
 const { codexLog, claudeLog, at } = require('./fixtures/agent-logs.cjs');
-let root, db;
+let root, db, previousAuth;
 beforeEach(() => {
+  previousAuth = { DRAKEN_NO_AUTH: process.env.DRAKEN_NO_AUTH, DRAKEN_HOST: process.env.DRAKEN_HOST };
+  Object.assign(process.env, { DRAKEN_NO_AUTH: 'true', DRAKEN_HOST: '127.0.0.1' });
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-agents-test-'));
   for (const agent of ['pi', 'codex', 'claude']) fs.mkdirSync(path.join(root, agent));
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(root, 'state'), DRAKEN_PI_SESSIONS_DIR: path.join(root, 'pi'), DRAKEN_CODEX_SESSIONS_DIR: path.join(root, 'codex'), DRAKEN_CLAUDE_SESSIONS_DIR: path.join(root, 'claude') });
   db = getDb();
 });
-afterEach(() => { closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  closeDb(); fs.rmSync(root, { recursive: true, force: true });
+  for (const [key, value] of Object.entries(previousAuth)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+});
 const write = (agent, name, records) => { const file = path.join(root, agent, name + '.jsonl'); fs.writeFileSync(file, records.map(JSON.stringify).join('\n') + '\n'); return file; };
 const pi = () => write('pi', 'pi', [{ type: 'session', version: 3, id: 'shared', cwd: '/synthetic/pi' }, { type: 'message', id: 'u1', parentId: null, timestamp: at, message: { role: 'user', content: 'Please check the parser.' } }]);
 const allEnabled = () => { store.setAgentEnabled('codex', true); store.setAgentEnabled('claude', true); };

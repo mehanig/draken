@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { isIP } from 'net';
 import { randomUUID } from 'crypto';
-import { getDataDir } from './db/schema';
+import { getDataDir } from './data-dir';
 
 interface ServerState {
   version: 1;

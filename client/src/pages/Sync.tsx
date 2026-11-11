@@ -9,7 +9,7 @@ import { TextChat } from '../components/TextChat';
 import { requestId } from '../request-id';
 import { HistoryProgress } from '../components/HistoryProgress';
 import { SyncCost } from '../components/SyncCost';
-import { linkClick, type Navigate } from './Home';
+import { linkClick, type Navigate } from '../navigation';
 
 export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, setGuard }: {
   id: number; chat?: boolean; callIntent: boolean; consumeIntent: () => void; navigate: Navigate; setGuard: (guard: (() => boolean) | null) => void;

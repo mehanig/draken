@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { getDataDir } from '../db/schema';
+import { getDataDir } from '../data-dir';
 import { configuredServerTarget, recordedServerTarget, serverTarget } from '../server-state';
 import { probeServer } from '../server-status';
 import { TrayController, TrayView } from './controller';
@@ -66,8 +66,8 @@ export async function runTrayWorker(helperFactory = nativeTray, checkDesktop = a
     });
     await helper.ready;
     if (!process.connected) throw new Error('Tray launch was cancelled before readiness');
-    // A host/port override must not hide an existing instance in the same DB
-    // directory and cause startup recovery under a second listener.
+    // Preserve external-server presentation across address overrides instead of
+    // attempting a competing launch. The server enforces directory exclusion.
     controller = new TrayController({ target: () => recordedServerTarget() || serverTarget(), configured: configuredServerTarget, probe: probeServer,
       launch: () => launchServer(path.join(directory, 'server.log')), open: openBrowser,
       changed: value => { view = value; publish(); } });

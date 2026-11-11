@@ -19,7 +19,7 @@ export interface HistoryQuery {
   session_ids?: string[];
   kind?: 'sources' | 'conversation';
   recent?: boolean;
-  /** Bounded status follow-ups; intended for the larger text-answer packet. */
+  /** Include later related records for status reconciliation, independent of packet size. */
   reconcile?: boolean;
   topics?: string[];
   sync_id?: number;
@@ -37,6 +37,7 @@ export interface HistoryResults {
     qualification: string;
   };
 }
+export const HISTORY_PAGE_CHARACTERS = 4000;
 export interface HistoryPage {
   record: HistoryRecord;
   offset: number;

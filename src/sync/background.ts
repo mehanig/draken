@@ -1,10 +1,12 @@
-import { getDataDir, getDb } from '../db/schema';
-import { sourceStamps, loadSourceCheckpoint } from './stamps';
-import { scanSessions } from '../sync/collector';
-import { activeVoiceSyncs, automaticSyncId, availableCount, backgroundSyncs, busySyncs } from '../sync/store';
+import { getDb } from '../db/schema';
+import { getDataDir } from '../data-dir';
+import { sourceStamps, loadSourceCheckpoint } from '../memory/stamps';
+import { scanSessions } from './collector';
+import { automaticSyncId, availableCount } from './store';
+import { activity } from './activity';
 import { HttpError } from '../errors';
-import { automaticBriefingError, pendingAutomaticBriefing, prepareAutomaticBriefing, retryAutomaticBriefing } from '../sync/automatic';
-import { historyProgress, historyReadiness, prepareHistory } from './service';
+import { automaticBriefingError, pendingAutomaticBriefing, prepareAutomaticBriefing, retryAutomaticBriefing } from './automatic';
+import { historyProgress, historyReadiness, prepareHistory } from '../memory/service';
 import type { AutoIndexSettings } from '../types';
 
 const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 64;
@@ -13,13 +15,13 @@ interface Operations {
   enabled(): boolean; idle(): boolean; now(): number;
   scan(signal: AbortSignal): Promise<{ warnings: string[] }>;
   stamp(before: string): Map<string, string>;
-  baseline?(): Map<string, string> | undefined;
+  baseline(): Map<string, string> | undefined;
   prepare(before: string, signal: AbortSignal): Promise<void>;
-  waiting?(): number;
-  unfinished?(): boolean;
-  briefing?(signal: AbortSignal): Promise<void>;
-  problem?(): string;
-  completed?(at: string): void;
+  waiting(): number;
+  unfinished(): boolean;
+  briefing(signal: AbortSignal): Promise<void>;
+  problem(): string;
+  completed(at: string): void;
 }
 const initial = (): State => ({ phase: 'off', pending_records: 0, last_completed_at: null, error: '' });
 
@@ -29,7 +31,6 @@ const initial = (): State => ({ phase: 'off', pending_records: 0, last_completed
  * Provider failures require explicit retry; cancellation retains cached work. */
 class AutoIndexer {
   state = initial();
-  private baseline?: Map<string, string>;
   private retryAt = 0;
   private life?: AbortController;
   private job?: Promise<void>;
@@ -38,7 +39,7 @@ class AutoIndexer {
     if (this.job) return this.job;
     if (!this.ops.enabled()) { this.state.phase = 'off'; return Promise.resolve(); }
     if (!this.ops.idle()) { this.state.phase = 'paused'; return Promise.resolve(); }
-    const problem = this.ops.problem?.();
+    const problem = this.ops.problem();
     if (problem) { this.state.phase = 'error'; this.state.error = problem; return; }
     if (this.ops.now() < this.retryAt) return Promise.resolve();
     const life = new AbortController(); this.life = life;
@@ -58,37 +59,31 @@ class AutoIndexer {
       if (signal.aborted || !this.ops.enabled()) return;
       if (scanned.warnings.length) throw new Error('Scan incomplete');
       const before = new Date(this.ops.now()).toISOString();
-      const baseline = this.ops.baseline ? this.ops.baseline() : this.baseline;
-      if (this.ops.baseline && !baseline && !this.ops.briefing) {
-        this.state.phase = 'waiting'; this.state.pending_records = 0;
-        this.state.error = 'Prepare history once with a foreground call or unfiltered history search to establish the background checkpoint for this older index.';
-        return;
-      }
+      const baseline = this.ops.baseline();
       const current = this.ops.stamp(before);
       let changed = 0;
       for (const [key, value] of current) if (baseline?.get(key) !== value) changed++;
       if (baseline) for (const key of baseline.keys()) if (!current.has(key)) changed++;
-      const waiting = this.ops.waiting?.() || 0, unfinished = this.ops.unfinished?.() || false;
+      const waiting = this.ops.waiting(), unfinished = this.ops.unfinished();
       this.state.pending_records = Math.max(changed, waiting);
       if (changed < BATCH && waiting < BATCH && !unfinished) { this.state.phase = 'waiting'; return; }
       if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
       if (changed >= BATCH || !baseline) {
         this.state.phase = 'indexing';
         await this.ops.prepare(before, signal);
-        this.baseline = current;
       }
       if (signal.aborted || !this.ops.enabled()) return;
-      if (this.ops.briefing && (waiting > 0 || unfinished)) {
+      if (waiting > 0 || unfinished) {
         if (!this.ops.idle()) throw new HttpError(409, 'Foreground work has priority');
         this.state.phase = 'briefing';
         await this.ops.briefing(signal);
       }
       if (signal.aborted || !this.ops.enabled()) return;
       const completed = new Date(this.ops.now()).toISOString();
-      this.ops.completed?.(completed);
+      this.ops.completed(completed);
       this.state = { phase: 'waiting', pending_records: 0, last_completed_at: completed, error: '' };
     } catch (error) {
-      const problem = this.ops.problem?.();
+      const problem = this.ops.problem();
       if (!signal.aborted && problem) {
         this.state.phase = 'error'; this.state.error = problem;
       } else if (!signal.aborted && error instanceof HttpError && error.status === 409) {
@@ -113,7 +108,7 @@ const enabled = () => (getDb().prepare("SELECT value FROM sync_settings WHERE ke
 let worker: AutoIndexer | undefined, timer: NodeJS.Timeout | undefined;
 export function startBackgroundIndexing() {
   if (timer) return;
-  worker = createAutoIndexer({ enabled, idle: () => !busySyncs.size && !activeVoiceSyncs.size && !historyProgress().active && !historyProgress().queued,
+  worker = createAutoIndexer({ enabled, idle: () => !activity.busy && !activity.callActive && !historyProgress().active && !historyProgress().queued,
     now: Date.now, scan: scanSessions, stamp: before => sourceStamps(getDb(), before), baseline: () => loadSourceCheckpoint(getDataDir()), prepare: (before, signal) => prepareHistory(before, signal, true),
     waiting: availableCount, unfinished: () => pendingAutomaticBriefing() !== undefined, briefing: prepareAutomaticBriefing, problem: automaticBriefingError,
     completed: at => { getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_last_completed',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at); } });
@@ -127,7 +122,7 @@ export async function stopBackgroundIndexing() {
 }
 export async function yieldBackgroundIndexing() { await worker?.stop(); }
 export function autoIndexSettings(): AutoIndexSettings {
-  const on = enabled(), syncId = [...backgroundSyncs][0] ?? pendingAutomaticBriefing() ?? null;
+  const on = enabled(), syncId = activity.backgroundId ?? pendingAutomaticBriefing() ?? null;
   const progress = syncId === null ? null : getDb().prepare('SELECT stage,processed_entries AS completed,total_entries AS total,invocations,max_invocations FROM sync_runs WHERE sync_id=? ORDER BY id DESC LIMIT 1').get(syncId) as AutoIndexSettings['progress'];
   const prepared = automaticSyncId(true), problem = on ? automaticBriefingError() : '';
   const last = getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_last_completed'").get() as { value: string } | undefined;
@@ -146,6 +141,5 @@ export function setAutoIndex(value: unknown): AutoIndexSettings {
   startBackgroundIndexing();
   if (!value) worker!.pause();
   else { retryAutomaticBriefing(); worker!.retry(); }
-  // The periodic server timer owns work; neither GET nor rendering starts a job.
   return autoIndexSettings();
 }

@@ -4,11 +4,13 @@ import { cleanText } from '../sync/normalize';
 import { getSourceRoots, type RootInput } from '../sources/registry';
 import { NormalizationCache } from '../sync/jsonl';
 import { initHistoryStorage } from './storage';
+import { validEmbedding } from './embedding-contract';
 import { reconcileHistory } from './reconcile';
 import { sourceStamps, saveSourceCheckpoint } from './stamps';
 import { historyStamp, saveHistoryReadiness } from './readiness';
-import { digest, historySources, type SourceRecord } from './sources';
-import { historyUpdate, type Embedder, type HistoryPage, type HistoryQuery, type HistoryResults, type ReportHistory } from './types';
+import { historySources, type SourceRecord } from './sources';
+import { passage, passages, PASSAGE_CHARACTERS } from './passages';
+import { historyUpdate, HISTORY_PAGE_CHARACTERS, type Embedder, type HistoryPage, type HistoryQuery, type HistoryResults, type ReportHistory } from './types';
 
 type Chunk = { id: number; ref: string; offset: number };
 function proximity(text: string, terms: string[]): number {
@@ -52,7 +54,7 @@ export class HistoryIndex {
       const retained = new Set<string>();
       const existing = new Set((this.db.prepare('SELECT ref FROM records').all() as { ref: string }[]).map(row => row.ref));
       const insert = this.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?)');
-      const passage = this.db.prepare('INSERT OR IGNORE INTO passages(hash) VALUES(?)');
+      const insertPassage = this.db.prepare('INSERT OR IGNORE INTO passages(hash) VALUES(?)');
       const find = this.db.prepare('SELECT id FROM passages WHERE hash=?');
       const words = this.db.prepare('INSERT INTO words(rowid,body) VALUES(?,?)');
       const chunk = this.db.prepare('INSERT INTO chunk_links(ref,offset,passage_id) VALUES(?,?,?)');
@@ -62,12 +64,10 @@ export class HistoryIndex {
         if (!addNew) continue;
         current.set(item.ref, item);
         insert.run(item.ref, JSON.stringify({ ...item, text: undefined }), item.session_id, item.sync_id, item.at, item.group, item.position);
-        for (let offset = 0; offset < item.text.length; offset += 700) {
-          const body = `${item.title}\n${item.role}\n${item.text.slice(offset, offset + 800)}`, hash = digest(this.model.fingerprint + '\0' + body);
-          passage.run(hash); const row = find.get(hash) as { id: number };
+        for (const { offset, body, hash } of passages(item, this.model.fingerprint)) {
+          insertPassage.run(hash); const row = find.get(hash) as { id: number };
           const link = chunk.run(item.ref, offset, row.id);
           words.run(link.lastInsertRowid, body);
-          if (offset + 800 >= item.text.length) break;
         }
       }
       const remove = this.db.prepare('DELETE FROM records WHERE ref=?'); let removed = false;
@@ -126,8 +126,8 @@ export class HistoryIndex {
       if (!computed) notify('loading');
       const batch = groups.slice(offset, offset + 8), bodies = batch.map(group => {
         const chunk = getChunk.get(group.id) as { ref: string; offset: number; hash: string }, record = this.record(chunk.ref);
-        const body = `${record.title}\n${record.role}\n${record.text.slice(chunk.offset, chunk.offset + 800)}`;
-        if (digest(this.model.fingerprint + '\0' + body) !== chunk.hash) throw new Error('Verified search passage changed');
+        const { body, hash } = passage(record, chunk.offset, this.model.fingerprint);
+        if (hash !== chunk.hash) throw new Error('Verified search passage changed');
         return body;
       });
       const start = Date.now(), vectors: Float32Array[] = [];
@@ -135,7 +135,7 @@ export class HistoryIndex {
       else for (const body of bodies) vectors.push(await this.model.embed(body, false));
       if (vectors.length !== batch.length) throw new Error('Incomplete embedding batch');
       const embeddings = vectors.map(vector => {
-        if (!(vector instanceof Float32Array) || vector.length !== 384 || vector.some(value => !Number.isFinite(value))) throw new Error('Invalid embedding');
+        if (!validEmbedding(vector)) throw new Error('Invalid embedding');
         return Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
       });
       // Wall time per completed passage reflects parallel throughput. Exclude
@@ -159,10 +159,9 @@ export class HistoryIndex {
       if (!this.admitted(record, scope)) continue;
       const rows = chunks.all(record.ref) as { offset: number; hash: string; embedded: number }[];
       let count = 0;
-      for (let offset = 0; offset < record.text.length; offset += 700) {
-        const row = rows[count++], hash = digest(this.model.fingerprint + '\0' + `${record.title}\n${record.role}\n${record.text.slice(offset, offset + 800)}`);
+      for (const { offset, hash } of passages(record, this.model.fingerprint)) {
+        const row = rows[count++];
         if (!row || row.offset !== offset || row.hash !== hash || row.embedded !== 1) throw new Error('History needs preparation before calling.');
-        if (offset + 800 >= record.text.length) break;
       }
       if (rows.length !== count) throw new Error('Prepared history changed.');
       current.set(record.ref, record);
@@ -260,7 +259,7 @@ export class HistoryIndex {
       const role = record.role === 'user' ? 0.25 : /^Tool requested:/.test(record.text) ? 0.5 : 1;
       const detail = record.role === 'assistant' && /\n(?:[-*] |### |\|)/.test(record.text) ? 1.5 : 1;
       return value.score * role * detail * (query.recent ? 1 + 2 * Math.exp(-age / 0.5) : 1 + 0.4 * Math.exp(-age / 3))
-        * proximity(record.text.slice(value.chunk.offset, value.chunk.offset + 800), terms);
+        * proximity(record.text.slice(value.chunk.offset, value.chunk.offset + PASSAGE_CHARACTERS), terms);
     };
     const rankings = scoresByQuery.map((scores, i) => [...scores.values()].sort((a, b) => rank(b, termSets[i]) - rank(a, termSets[i]) || a.chunk.id - b.chunk.id));
     const ranked = rankings.flat(), topicLeaders = [0, 1].flatMap(i => rankings.slice(1).flatMap(rows => rows[i] ? [rows[i]] : []));
@@ -306,6 +305,6 @@ export class HistoryIndex {
     const before = records.slice(0, at).reverse().find(row => row.identity !== item.identity);
     const after = records.slice(at + 1).find(row => row.identity !== item.identity && row.identity !== before?.identity);
     const neighbors = [before, after].filter((row): row is SourceRecord => Boolean(row)).map(row => ({ ...row, text: row.text.slice(0, 600) }));
-    return { record: { ...item, text: item.text.slice(offset, offset + 4000) }, offset, total: item.text.length, neighbors };
+    return { record: { ...item, text: item.text.slice(offset, offset + HISTORY_PAGE_CHARACTERS) }, offset, total: item.text.length, neighbors };
   }
 }

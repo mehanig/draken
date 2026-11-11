@@ -1,13 +1,13 @@
 const {test,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {getDb,closeDb}=require('../dist/db/schema');
-const {createAutoIndexer,autoIndexSettings,setAutoIndex,startBackgroundIndexing,stopBackgroundIndexing}=require('../dist/memory/automatic');
+const {createAutoIndexer,autoIndexSettings,setAutoIndex,startBackgroundIndexing,stopBackgroundIndexing}=require('../dist/sync/background');
 const {HttpError}=require('../dist/errors');
 let root,server;
 beforeEach(()=>{root=fs.mkdtempSync(path.join(os.tmpdir(),'draken-auto-test-'));fs.mkdirSync(root+'/sessions');Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions',DRAKEN_NO_AUTH:'true',DRAKEN_HOST:'127.0.0.1',DRAKEN_PI_BIN:'/not-a-provider'});});
 afterEach(async()=>{await stopBackgroundIndexing();if(server)await new Promise(r=>server.close(r));server=null;closeDb();fs.rmSync(root,{recursive:true,force:true});});
-function fixture(size=1){let now=0,on=true,idle=true,scans=0,prepares=0;const rows=new Map(Array.from({length:size},(_,n)=>[String(n),'v1']));
- const ops={enabled:()=>on,idle:()=>idle,now:()=>now,scan:async()=>{scans++;return{warnings:[]};},stamp:()=>new Map(rows),prepare:async()=>{prepares++;}};
+function fixture(size=1){let now=0,on=true,idle=true,scans=0,prepares=0,baseline=new Map();const rows=new Map(Array.from({length:size},(_,n)=>[String(n),'v1']));
+ const ops={enabled:()=>on,idle:()=>idle,now:()=>now,scan:async()=>{scans++;return{warnings:[]};},stamp:()=>new Map(rows),baseline:()=>baseline,prepare:async()=>{prepares++;baseline=new Map(rows);},waiting:()=>0,unfinished:()=>false,briefing:async()=>{},problem:()=>'',completed:()=>{}};
  return{worker:createAutoIndexer(ops),ops,rows,get scans(){return scans;},get prepares(){return prepares;},set now(v){now=v;},set on(v){on=v;},set idle(v){idle=v;}};
 }
 test('off and foreground work perform no scans or embedding; full batches run once and unchanged checks do not infer',async()=>{

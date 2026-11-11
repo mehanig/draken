@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {historyDelivery}=require('../dist/voice/history-delivery');
-const {DISCUSSION_HISTORY_BYTES}=require('../dist/memory/context');
+const {DISCUSSION_HISTORY_BYTES}=require('../dist/memory/packet');
 
 function parts(delivery){return delivery.contexts.filter(s=>s.startsWith('READ-ONLY')).map(s=>JSON.parse(s.slice(s.indexOf('\n')+1)));}
 test('voice transports the whole chat packet, including late qualifications and follow-up edges, within native limits',()=>{

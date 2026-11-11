@@ -1,16 +1,16 @@
 import type { PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
+import { authorizationHeaders, clearSession } from '../auth/session';
+
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
-  const token = localStorage.getItem('draken_token');
   const response = await fetch(`/api${path}`, {
     method, signal,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...authorizationHeaders() },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (response.status === 401) {
-    localStorage.removeItem('draken_token');
-    localStorage.removeItem('draken_username');
+    clearSession();
     window.location.reload();
     throw new Error('Authentication required');
   }
@@ -45,7 +45,7 @@ export const brief = (id: number) => request<SyncDetail>(`/syncs/${id}/briefing`
 export const discuss = (id: number, message: string) => request<SyncDetail>(`/syncs/${id}/messages`, 'POST', { message });
 export const historyProgress = (signal?: AbortSignal) => request<HistoryProgress>('/memory/progress', 'GET', undefined, signal);
 export const searchHistory = (query: HistoryQuery, signal?: AbortSignal) => request<HistoryResults>('/memory/search', 'POST', query, signal);
-export const readHistory = (ref: string, offset = 0) => request<HistoryPage>(`/memory/records/${encodeURIComponent(ref)}?offset=${offset}`);
+export const readHistory = (ref: string, offset = 0, signal?: AbortSignal) => request<HistoryPage>(`/memory/records/${encodeURIComponent(ref)}?offset=${offset}`, 'GET', undefined, signal);
 export const notes = (id: number, decisions: string, carry_forward: string) => request<SyncDetail>(`/syncs/${id}/notes`, 'PATCH', { decisions, carry_forward });
 export const finish = (id: number, decisions: string, carry_forward: string) => request<SyncDetail>(`/syncs/${id}/complete`, 'POST', { decisions, carry_forward, reviewed: true });
 export const discard = (id: number) => request<SyncDetail>(`/syncs/${id}/discard`, 'POST');

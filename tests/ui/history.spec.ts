@@ -1,4 +1,21 @@
 import { test, expect } from '@playwright/test';
+import { delayedSources, sourceRefs } from './history-fixture';
+
+test('leaving a historical source cancels its outstanding paged read', async ({ page }) => {
+  const fixture = await delayedSources(page);
+  try {
+    await page.goto(`/history/${sourceRefs[0]}`);
+    await expect(page.getByRole('heading', { name: 'Source A', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Historical source' })).toContainText('not independent verification');
+    await page.getByRole('button', { name: 'Later text', exact: true }).click();
+    await expect.poll(() => fixture.reads.length).toBe(2);
+    await page.getByRole('main').getByRole('link', { name: 'Search history', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Find earlier work.' })).toBeVisible();
+    await expect.poll(() => fixture.reads[1].aborted).toBe(true);
+    fixture.release();
+    await expect(page.getByRole('region', { name: 'Historical source' })).toHaveCount(0);
+  } finally { fixture.release(); }
+});
 
 test('ordinary history search is automatically hybrid, has no setup controls, and browsing never captures audio', async ({ page, request }) => {
   await request.post('/api/scan');

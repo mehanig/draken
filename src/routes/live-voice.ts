@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { route, connected } from './http';
 import { HttpError } from '../errors';
 import { createLiveCall, connectLiveCall, liveEvents, sendLiveText, interruptLiveCall, endLiveCall, observeLiveAudio } from '../voice/live';
-import { yieldBackgroundIndexing } from '../memory/automatic';
+import { yieldBackgroundIndexing } from '../sync/background';
 const router = Router();
 const id = (value: unknown) => { if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/.test(value)) throw new HttpError(400, 'Invalid call identifier'); return value; };
 const number = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) => { const n = Number(value); if (!Number.isSafeInteger(n) || n < min || n > max) throw new HttpError(400, 'Invalid live call resource'); return n; };

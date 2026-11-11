@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/schema';
 import { prepareHistory } from '../memory/service';
 import { generateReply } from './manager';
-import { assertAutomaticScope, automaticSyncId, availableCount, backgroundSyncs, startConversationSync } from './store';
+import { assertAutomaticScope, automaticSyncId, availableCount, startConversationSync } from './store';
+import { activity } from './activity';
 
 export function pendingAutomaticBriefing(): number | undefined {
   const row = getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_preparing_sync'").get() as { value: string } | undefined;
@@ -27,7 +28,7 @@ export async function prepareAutomaticBriefing(signal: AbortSignal): Promise<voi
   if (pending === undefined && !availableCount()) return;
   const id = pending ?? startConversationSync(`auto:${randomUUID()}`, true).id;
   getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_preparing_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(id));
-  backgroundSyncs.add(id);
+  const release = activity.beginBackground(id);
   try {
     assertAutomaticScope(id);
     await generateReply(id, undefined, undefined, { signal, deferHistory: true });
@@ -40,5 +41,5 @@ export async function prepareAutomaticBriefing(signal: AbortSignal): Promise<voi
   } catch (error) {
     if (!signal.aborted) getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_briefing_failed',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(id));
     throw error;
-  } finally { backgroundSyncs.delete(id); }
+  } finally { release(); }
 }

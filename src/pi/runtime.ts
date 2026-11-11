@@ -2,8 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
-import { getDataDir } from '../db/schema';
-import { defaultModels } from '../sync/store';
+import { getDataDir } from '../data-dir';
+import { defaultModels } from '../sync/models';
 
 export const PI_VERSION = '1.5.0';
 export const PI_PACKAGE = '@earendil-works/pi-coding-agent';

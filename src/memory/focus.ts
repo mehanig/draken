@@ -49,6 +49,6 @@ export function historyQuery(db: Database.Database, question: string, previous?:
   const topics = namedTopics || (same && /\b(?:here|those|that|exactly)\b/i.test(question) ? previous?.topics : undefined);
   return { focus: { sessions, question: question.slice(0, 2000), topics }, query: {
     question: queryText.slice(0, 2000), ...(sessions.length && !recall ? { session_ids: sessions } : {}),
-    kind: recall ? 'conversation' : 'sources', recent, ...(topics && !recall ? { topics } : {}),
+    kind: recall ? 'conversation' : 'sources', ...(!recall ? { reconcile: true } : {}), recent, ...(topics && !recall ? { topics } : {}),
   } };
 }

@@ -9,7 +9,7 @@ const { EntryReader } = require('../dist/sync/source-files');
 const { EvidenceReader } = require('../dist/db/evidence');
 const { historySources } = require('../dist/memory/sources');
 const { legacyIndex } = require('./fixtures/legacy-storage.cjs');
-const { historyPacket } = require('../dist/memory/context');
+const { historyPacket } = require('../dist/memory/packet');
 const service = require('../dist/memory/service');
 const { validateVerdict } = require('../dist/sync/manager');
 const { createApp } = require('../dist/server');
@@ -29,7 +29,7 @@ beforeEach(() => {
   db.prepare("INSERT INTO agent_sessions(id,path,cwd,name,included,missing,modified_at) VALUES('session-b','/synthetic/b','/demo/beta','Beta',1,0,?)").run(at);
 });
 afterEach(async () => {
-  service.searchHistory = realSearch; service.stopHistory(); await pause(80);
+  service.searchHistory = realSearch; await service.stopHistory();
   if (server) await new Promise(resolve => server.close(resolve)); server = undefined;
   cache.close(); closeDb(); fs.rmSync(root, { recursive: true, force: true });
 });
@@ -93,9 +93,9 @@ test('missing model files are restored before calling, while prepared-only looku
   await index.prepare();assert.equal(setups,1);assert.equal(model.calls,calls,'restore files without rebuilding cached vectors');
   index=new HistoryIndex(cache,db,model);model.setup=async(_report,allowDownload)=>{assert.equal(allowDownload,false);};
   assert.ok((await index.search({question:'speech',before:new Date().toISOString()},undefined,true)).results.length);
-  const {LocalEmbedder}=require('../dist/memory/model'),missing=path.join(root,'missing-model');
+  const {prepareModelFiles}=require('../dist/memory/model-assets'),missing=path.join(root,'missing-model');
   const fetch=global.fetch;let network=0;global.fetch=async()=>{network++;throw Error('Unexpected network request');};
-  try{await assert.rejects(new LocalEmbedder(missing).setup(undefined,false),/Prepare history before calling/);assert.equal(network,0);assert.equal(fs.existsSync(missing),false);}
+  try{await assert.rejects(prepareModelFiles(missing,undefined,false),/Prepare history before calling/);assert.equal(network,0);assert.equal(fs.existsSync(missing),false);}
   finally{global.fetch=fetch;}
 });
 
@@ -293,12 +293,18 @@ test('delta-only indexing does no unchanged writes or inference, resumes pending
   // A fresh process can recognize a complete index without loading/downloading a model.
   const coldModel={...model,setup:async()=>{throw Error('Unnecessary setup');}},cold=new HistoryIndex(cache,db,coldModel);await cold.prepare();
   for(let i=0;i<72;i++)entry(`New unique delta ${i}.`);
-  let batches=0;model.embedMany=async bodies=>{batches++;if(batches===9)throw Error('Stop at a committed boundary');return Promise.all(bodies.map(text=>model.embed(text,false)));};
-  const updates=[];await assert.rejects(index.prepare({},u=>updates.push(u)),/committed boundary/);
+  let committed=0;model.embedMany=async bodies=>{if(committed)throw Error('Stop at a committed boundary');return Promise.all(bodies.map(text=>model.embed(text,false)));};
+  const updates=[];await assert.rejects(index.prepare({},u=>{
+    updates.push(u);
+    if(u.stage==='indexing'&&u.completed>0){
+      committed=u.completed;
+      assert.equal(cache.prepare('SELECT COUNT(*) n FROM passages WHERE embedded=1').get().n,70+committed);
+    }
+  }),/committed boundary/);
   assert.equal(updates.find(u=>u.stage==='indexing').completed,0);assert.equal(updates.at(-1).total,72);
-  assert.equal(updates.at(-1).completed,64);assert.equal(updates.at(-1).reused,70);
+  assert.ok(committed>0&&committed<72);assert.equal(updates.at(-1).completed,committed);assert.equal(updates.at(-1).reused,70);
   delete model.embedMany;const resumed=[];await index.prepare({},u=>resumed.push(u));
-  assert.equal(resumed.at(-1).total,8);assert.equal(resumed.at(-1).completed,8);assert.equal(resumed.at(-1).reused,134);
+  assert.equal(resumed.at(-1).total,72-committed);assert.equal(resumed.at(-1).completed,72-committed);assert.equal(resumed.at(-1).reused,70+committed);
   for(const row of originals)assert.equal(cache.prepare('SELECT hex(embedding) bytes FROM embedding_cache WHERE hash=?').get(row.hash).bytes,row.bytes);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n,0);
 });
@@ -319,7 +325,7 @@ test('covered-tail migration preserves valid embeddings, source references and U
   const records = [...historySources(db)], record = records.find(row => row.text === text);
   const original = cache.prepare('SELECT hash,hex(embedding) bytes FROM embedding_cache ORDER BY hash').all();
   const originalRef = record.ref, before = protectedRows();
-  const body = `${record.title}\n${record.role}\n${text.slice(700)}`, hash = require('../dist/memory/sources').digest(model.fingerprint + '\0' + body);
+  const body = `${record.title}\n${record.role}\n${text.slice(700)}`, hash = require('../dist/sync/normalize').digest(model.fingerprint + '\0' + body);
   const chunks = cache.prepare('SELECT * FROM chunks').all(), embeddings = cache.prepare('SELECT * FROM embedding_cache').all();
   cache.close(); cache = new Database(':memory:'); legacyIndex(cache, records, chunks, embeddings, model.fingerprint);
   cache.prepare('INSERT INTO chunks(ref,offset,body,hash) VALUES(?,700,?,?)').run(originalRef, body, hash);

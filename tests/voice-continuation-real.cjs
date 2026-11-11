@@ -70,7 +70,7 @@ NativeVoice.prototype.continueAnswer = function(question) { cues++; return origi
   const completionMs = Date.now() - started;
   await page.getByRole('button', { name: 'End call', exact: true }).click();
   await expect(dialog).not.toBeVisible();
-  await expect.poll(() => require('../dist/sync/store').busySyncs.size).toBe(0);
+  await expect.poll(() => require('../dist/sync/activity').activity.busyIds.length).toBe(0);
   check('coverageUnchanged', db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n === 0);
   check('decisionsUnchanged', db.prepare('SELECT decisions FROM syncs WHERE id=?').get(syncId).decisions === '');
   check('onePeer', await page.evaluate(() => window.__peers === 1));
@@ -84,7 +84,7 @@ NativeVoice.prototype.continueAnswer = function(question) { cues++; return origi
   fs.writeFileSync(path.join(root, 'failure.json'), JSON.stringify({ checks, errorType: error.name }, null, 2));
   console.error(JSON.stringify({ root, checks, errorType: error.name })); process.exitCode = 1;
 }).finally(async () => {
-  clearTimeout(timer); release(); await browser?.close(); await live.stopLiveCalls();
+  clearTimeout(timer); release(); await browser?.close(); await live.shutdownLiveVoice();
   if (server) await new Promise(resolve => server.close(resolve));
   schema.closeDb(); memory.historyContext = originalLookup; NativeVoice.prototype.open = originalOpen; NativeVoice.prototype.continueAnswer = originalContinue;
 });

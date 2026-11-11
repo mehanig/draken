@@ -9,6 +9,7 @@ after(async () => { await browser?.close(); });
 const modules = {
   '/client/src/voice/live-session.js': ts.transpileModule(fs.readFileSync(path.join(__dirname, '../client/src/voice/live-session.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText,
   '/client/src/voice/api': ts.transpileModule(fs.readFileSync(path.join(__dirname, '../client/src/voice/api.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText,
+  '/client/src/auth/session': ts.transpileModule(fs.readFileSync(path.join(__dirname, '../client/src/auth/session.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText,
   '/voice/realtime/peer.mjs': fs.readFileSync(path.join(__dirname, '../voice/realtime/peer.mjs'), 'utf8'),
 };
 async function fixture({ denied = false, lateMic = false, slowOffer = false, slowText = false, holdPreparation = false, failPreparation = false } = {}) {
@@ -18,6 +19,7 @@ async function fixture({ denied = false, lateMic = false, slowOffer = false, slo
       const url = new URL(req.url, 'http://localhost');
       if (modules[url.pathname]) { res.writeHead(200, { 'Content-Type': 'text/javascript' }); res.end(modules[url.pathname]); return; }
       if (url.pathname === '/') { res.end('<button id="start">Start test</button><script type="module">import {LiveVoiceSession} from "/client/src/voice/live-session.js";window.Controller=LiveVoiceSession;</script>'); return; }
+      if (!url.pathname.startsWith('/api/voice/')) { res.writeHead(404); res.end(); return; }
       let raw = ''; for await (const chunk of req) raw += chunk; requests.push({ path: url.pathname, authorization: req.headers.authorization, body: raw ? JSON.parse(raw) : null });
       let value;
       if (url.pathname.endsWith('/calls')) {
@@ -39,7 +41,13 @@ async function fixture({ denied = false, lateMic = false, slowOffer = false, slo
     } catch { if (!res.destroyed) { res.writeHead(500); res.end(); } }
   }).listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
   const context = await browser.newContext(); page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.Controller);
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.waitForFunction(() => window.Controller, null, { timeout: 5000 });
+    assert.deepEqual(errors, [], 'controller modules must load before lifecycle qualification');
+  } catch (error) {
+    await context.close(); await new Promise(resolve => server.close(resolve)); throw error;
+  }
   await page.evaluate(({ denied, lateMic }) => {
     localStorage.setItem('draken_token', 'synthetic-test-token');
     window.state = null; window.tracks = []; window.captureCalls = 0;
@@ -54,7 +62,7 @@ async function fixture({ denied = false, lateMic = false, slowOffer = false, slo
         if (lateMic) await new Promise(resolve => window.releaseMic = resolve);
         const stream = ctx.createMediaStreamDestination().stream; window.tracks.push(...stream.getTracks()); return stream;
       };
-      window.controller = new window.Controller({ onState: value => window.state = value, onLevel: () => {}, onTurn: () => {}, onPlayback: cue => window.cue = cue });
+      window.controller = new window.Controller({ onState: value => window.state = value, onTurn: () => {}, onPlayback: cue => window.cue = cue });
       void window.controller.start(1);
     };
   }, { denied, lateMic });
@@ -261,7 +269,7 @@ test('closing during reservation aborts setup without microphone access or a lat
   } finally { await f.close(); }
 });
 
-test('a tab hidden during indexing must be started again explicitly, without microphone capture', { timeout: 10000 }, async () => {
+test('a tab hidden during call reservation must be started again explicitly, without microphone capture', { timeout: 10000 }, async () => {
   const f = await fixture({ holdPreparation: true });
   try {
     await f.page.click('#start');

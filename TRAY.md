@@ -31,11 +31,11 @@ An already-running server is observed, not adopted. Stop is disabled for it, and
 
 ## How it works
 
-`draken tray` starts a detached Node companion and waits for native UI readiness before reporting success. One heartbeat lock per data directory prevents duplicate companions. After an unclean exit, stale-lock recovery takes approximately 30 seconds; there is no unconditional lock deletion or PID-based kill.
+`draken tray` starts a detached Node companion and waits for native UI readiness before reporting success. One heartbeat lock per data directory prevents duplicate companions. After an unclean companion exit, stale-lock recovery takes approximately 30 seconds; there is no unconditional lock deletion or PID-based kill. This is not the server's exclusion mechanism: every server independently acquires non-expiring, kernel-backed data-directory ownership before database initialization/recovery. See [server ownership and shutdown](ARCHITECTURE.md#languages-and-build-output).
 
 The companion polls only the bounded `/api/auth/status` identity endpoint. The native UI receives a bounded private presentation file and heartbeat, not server credentials, provider environment variables, source text, or tokens. Menu clicks return only fixed action identifiers. If the companion stops updating, the helper closes itself after 15 seconds.
 
-An owned server reports its actual bound addresses and instance over a private parent/child IPC channel. Stop requests and parent disconnect use that channel, including on Windows, where `kill(SIGTERM)` would be an abrupt termination. There is no new HTTP shutdown endpoint. Lost helpers cause shutdown of the tray's owned server only; existing external servers are unaffected.
+An owned server reports its actual bound addresses and instance over a private parent/child IPC channel. Stop requests and parent disconnect use that channel, including on Windows, where `kill(SIGTERM)` would be an abrupt termination. There is no new HTTP shutdown endpoint. Server shutdown retains directory ownership until resource exit is confirmed; an unconfirmed stop leaves the server in a failed stopping state and the tray cannot replace it. Lost helpers cause shutdown of the tray's owned server only; existing external servers are unaffected.
 
 Private state is under `<DRAKEN_DATA_DIR>/tray/` (default `~/.draken/tray/`):
 

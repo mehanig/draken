@@ -1,6 +1,7 @@
 import { getDb } from '../db/schema';
 import { Evidence, HomeOverview, ObservedSession, Overview, SyncDetail, SyncModels, SyncSummary, TreeNode, TreeProgress, TreeRun } from '../types';
-import { getSessionRoot, EntryReader } from './source-files';
+import { EntryReader } from './source-files';
+import { getSessionRoot } from './jsonl';
 import { EvidenceReader } from '../db/evidence';
 import { cleanText, sourceKey } from './normalize';
 import { aggregationCost } from './cost';
@@ -9,10 +10,8 @@ import { admittedAgent, agentSources, AGENTS } from '../sources/registry';
 
 import { HttpError } from '../errors';
 
-export const busySyncs = new Set<number>();
-// Owned automatic preparation can be yielded before a foreground start.
-export const backgroundSyncs = new Set<number>();
-export const activeVoiceSyncs = new Set<number>();
+import { activity } from './activity';
+import { defaultModels } from './models';
 const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.briefing, s.decisions, s.carry_forward,
   s.remaining_count, s.snapshot_version, s.snapshot_at,
   COALESCE((SELECT recap FROM sync_presentations WHERE sync_id=s.id), '') AS recap,
@@ -26,15 +25,6 @@ const availableFilter = (exceptSync = 0) => `${pendingWhere} AND NOT EXISTS (SEL
 const availableWhere = availableFilter();
 const evidenceSelect = `SELECT s.agent,e.id AS source_id, e.event_key, e.session_id, s.name AS session_name, s.path AS source_path,
   s.cwd, e.entry_id, e.timestamp, e.role FROM agent_entries e JOIN agent_sessions s ON s.id = e.session_id`;
-
-export function defaultModels(): SyncModels {
-  const limit = Number(process.env.DRAKEN_PI_MAX_INVOCATIONS || 120);
-  return {
-    summary: process.env.DRAKEN_PI_SUMMARY_MODEL || 'openai/gpt-6-luna',
-    final: process.env.DRAKEN_PI_FINAL_MODEL || process.env.DRAKEN_PI_MODEL || 'openai/gpt-6-astra',
-    max_invocations: Number.isInteger(limit) ? Math.max(1, Math.min(limit, 500)) : 120,
-  };
-}
 
 export function pendingCount(): number {
   return (getDb().prepare(`SELECT COUNT(DISTINCT e.event_key) AS count FROM agent_entries e
@@ -99,12 +89,12 @@ export function homeOverview(before?: number): HomeOverview {
   const available = availableCount();
   return { syncs: rows.slice(0, 20).map(row => ({ aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)), id: row.id, status: row.status, created_at: row.created_at, item_count: row.item_count,
     preview: row.recap || row.briefing.replace(/\[([EC]\d+)\]/g, '').replace(/\s+/g, ' ').slice(0, 600),
-    preview_kind: row.recap ? row.recap_state === 'ready' ? 'recap' : 'previous_recap' : row.briefing ? 'briefing' : 'empty', busy: busySyncs.has(row.id), active_call: activeVoiceSyncs.has(row.id),
+    preview_kind: row.recap ? row.recap_state === 'ready' ? 'recap' : 'previous_recap' : row.briefing ? 'briefing' : 'empty', busy: activity.jobActive(row.id), active_call: activity.voiceActive(row.id),
     needs_retry: row.status === 'open' && !row.briefing && ['failed', 'cancelled', 'interrupted'].includes((db.prepare('SELECT status FROM sync_runs WHERE sync_id=? ORDER BY id DESC LIMIT 1').get(row.id) as any)?.status),
     calls: (db.prepare('SELECT (SELECT COUNT(*) FROM voice_calls WHERE sync_id=?) + (SELECT COUNT(*) FROM live_calls WHERE sync_id=?) AS n').get(row.id, row.id) as any).n })),
     available, included_unreviewed: pendingCount() - available,
     covered: (db.prepare('SELECT COUNT(*) AS n FROM sync_coverage').get() as any).n,
-    busy: [...busySyncs].some(id => !backgroundSyncs.has(id)), active_call: activeVoiceSyncs.size > 0, next_cursor: rows.length > 20 ? rows[19].id : null };
+    busy: activity.foregroundBusy, active_call: activity.callActive, next_cursor: rows.length > 20 ? rows[19].id : null };
 }
 
 export function setAgentEnabled(agent: string, enabled: boolean): Overview {
@@ -128,7 +118,7 @@ export function getProgress(id: number): TreeProgress {
   const nodes = (db.prepare('SELECT key, kind, label, status, children_json, source_count, error FROM sync_tree_nodes WHERE sync_id = ? ORDER BY rowid').all(id) as any[])
     .map(({ children_json, ...node }) => ({ ...node, children: JSON.parse(children_json) })) as TreeNode[];
   const { metrics_json, ...fields } = run || { metrics_json: '[]' };
-  return { busy: busySyncs.has(id), complete: Boolean(sync.compression_complete),
+  return { busy: activity.jobActive(id), complete: Boolean(sync.compression_complete),
     run: run ? { ...fields, metrics: JSON.parse(metrics_json) } as TreeRun : null, nodes };
 }
 
@@ -143,7 +133,7 @@ export function getSync(id: number): SyncDetail {
     return {
       ...row, aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
       messages: db.prepare('SELECT id, role, content, created_at FROM sync_messages WHERE sync_id = ? ORDER BY id').all(id) as SyncDetail['messages'],
-      busy: busySyncs.has(id), history_since: historySince(),
+      busy: activity.jobActive(id), history_since: historySince(),
       models: { ...defaultModels(), ...JSON.parse(extra.model_config_json) }, tree: getProgress(id),
     };
   } finally { reader.close(); }
@@ -157,7 +147,7 @@ export function requireOpen(id: number, allowBusy = false): SyncDetail {
   const sync = getSync(id);
   if (sync.status !== 'open') throw new HttpError(409, 'This sync is already closed');
   if (!allowBusy && sync.busy) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
-  if (!allowBusy && activeVoiceSyncs.has(id)) throw new HttpError(409, 'End the voice call before changing this sync.');
+  if (!allowBusy && activity.voiceActive(id)) throw new HttpError(409, 'End the voice call before changing this sync.');
   return sync;
 }
 
@@ -249,7 +239,7 @@ export function startConversationSync(requestId: string, automatic = false): Syn
   return db.transaction(() => {
     const existing = db.prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
     if (existing) return getSync(existing.sync_id);
-    if (activeVoiceSyncs.size || busySyncs.size) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
+    if (activity.callActive || activity.busy) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
     if (!automatic) {
       const prepared = automaticSyncId(false) ?? (availableCount() === 0 ? automaticSyncId(true) : undefined);
       if (prepared !== undefined) {

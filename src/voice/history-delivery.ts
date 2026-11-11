@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { DISCUSSION_HISTORY_BYTES } from '../memory/context';
+import { DISCUSSION_HISTORY_BYTES } from '../memory/packet';
 
 export interface EvidencePacket { text: string; refs: string[]; snapshot?: { text: string; refs: string[] } }
 const NATIVE_CONTEXT_BYTES = 8192;

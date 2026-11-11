@@ -8,11 +8,7 @@ import { SyncCost } from '../components/SyncCost';
 import { SetupPanel } from '../components/SetupPanel';
 import { AutomaticPreparation } from '../components/AutomaticPreparation';
 
-export type Navigate = (path: string, call?: boolean) => void;
-export const linkClick = (event: React.MouseEvent<HTMLAnchorElement>, navigate: Navigate, path: string) => {
-  if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault(); navigate(path);
-};
+import { linkClick, type Navigate } from '../navigation';
 const date = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 export function Home({ navigate }: { navigate: Navigate }) {

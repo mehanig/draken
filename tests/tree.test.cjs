@@ -10,6 +10,7 @@ const { scanSessions } = require('../dist/sync/collector');
 const store = require('../dist/sync/store');
 const { generateReply, cancelReply, validateVerdict } = require('../dist/sync/manager');
 const { retrieveEvidence } = require('../dist/sync/retrieval');
+const { defaultModels } = require('../dist/sync/models');
 const { SummaryTree, validateSummary, validateGroups, repairSummaryCitations } = require('../dist/sync/tree');
 const { prepareModelInput } = require('../dist/sync/references');
 
@@ -121,9 +122,13 @@ test('cache hits across retries/syncs are source-addressed, not tied to old E re
   assert.equal(calls().length - firstCount, 1, 'discussion reuses the entire cheap tree');
   store.discardSync(first.id);
   const second = store.startSync();
-  for (const item of second.items) {
-    item.ref = `E${10000 + Number(item.ref.slice(1))}`;
-    getDb().prepare('UPDATE sync_items SET evidence_json = ? WHERE sync_id = ? AND event_key = ?').run(JSON.stringify(item), second.id, item.event_key);
+  for (const row of getDb().prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(second.id)) {
+    const encoded = JSON.parse(row.evidence_json);
+    assert.ok(encoded.source_pointer); assert.ok(encoded.source_key); assert.equal(Object.hasOwn(encoded, 'text'), false);
+    // Renumber persisted metadata, never serialize the thawed API projection.
+    const ref = `E${10000 + Number(encoded.ref.slice(1))}`;
+    getDb().prepare('UPDATE sync_items SET evidence_json = ? WHERE sync_id = ? AND event_key = ?')
+      .run(JSON.stringify({ ...encoded, ref }), second.id, row.event_key);
   }
   const before = calls().length;
   const result = await generateReply(second.id);
@@ -331,26 +336,29 @@ test('an invented label is rejected, then repaired by the model rather than gues
   assert.equal(result.tree.complete, true);
 });
 
-test('validated v1 leaf caches survive the short-label upgrade without another model call', async () => {
-  const sync = await begin(120);
-  const runId = Number(getDb().prepare(`INSERT INTO sync_runs(sync_id, summary_model, final_model, max_invocations, total_entries, started_at)
-    VALUES (?, 'test/cheap', 'test/strong', 120, 120, ?)`).run(sync.id, new Date().toISOString()).lastInsertRowid);
-  const tree = new SummaryTree(sync, runId, new AbortController().signal);
-  const specs = [...tree.chunkSpecs().values()].flat();
-  for (const spec of specs) {
-    const output = { observations: [{ topic: 'Demo', state: 'reported_done', summary: 'A previously validated cached summary', evidence: [spec.sources.at(-1)] }], limitations: [] };
-    getDb().prepare('INSERT INTO summary_cache(key, kind, model, prompt_version, output_json, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(spec.legacyKey, 'chunk', 'test/cheap', 'sync-tree-v1', JSON.stringify(output), new Date().toISOString());
-  }
-  const result = await generateReply(sync.id);
-  assert.equal(calls().filter(call => call.stage === 'chunk').length, 0);
-  assert.ok(result.tree.run.cache_hits >= specs.length);
-  assert.equal(result.tree.complete, true);
-});
+const { records, output, caches } = require('./fixtures/summary-cache.cjs');
+for (const cache of caches) {
+  test(`frozen ${cache.version} leaves survive without paying for the original summary again`, async () => {
+    fs.writeFileSync(path.join(root, 'source.jsonl'), records.map(JSON.stringify).join('\n') + '\n');
+    await scanSessions(); const sync = store.startSync();
+    store.configureModels(sync.id, { summary: cache.model, final: 'test/strong', max_invocations: 120 });
+    getDb().prepare('INSERT INTO summary_cache(key,kind,model,prompt_version,output_json,created_at) VALUES (?,?,?,?,?,?)')
+      .run(cache.key, 'chunk', cache.model, cache.version, JSON.stringify(output), '2026-01-02T00:00:00.000Z');
+    const result = await generateReply(sync.id);
+    assert.equal(calls().filter(call => call.stage === 'chunk').length, 0);
+    assert.equal(result.tree.run.cache_hits, 1);
+    assert.equal(result.tree.run.invocations, calls().length);
+    assert.equal(result.tree.complete, true);
+    const source = result.items.find(item => item.text.includes('Deployment remains unverified'));
+    assert.ok(source);
+    assert.ok(result.briefing.includes(`[${source.ref}]`));
+    assert.match(result.briefing, /Deployment remains unverified/);
+  });
+}
 
 test('built-in defaults run without model selection and server overrides remain available', async () => {
   for (const key of ['DRAKEN_PI_SUMMARY_MODEL', 'DRAKEN_PI_FINAL_MODEL', 'DRAKEN_PI_MODEL']) delete process.env[key];
-  assert.deepEqual(store.defaultModels(), { summary: 'openai/gpt-6-luna', final: 'openai/gpt-6-astra', max_invocations: 120 });
+  assert.deepEqual(defaultModels(), { summary: 'openai/gpt-6-luna', final: 'openai/gpt-6-astra', max_invocations: 120 });
   const sync = await begin();
   const result = await generateReply(sync.id);
   assert.equal(result.tree.complete, true);
@@ -358,9 +366,9 @@ test('built-in defaults run without model selection and server overrides remain 
   assert.equal(calls().at(-1).model, 'openai/gpt-6-astra');
   process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/custom-cheap';
   process.env.DRAKEN_PI_MODEL = 'test/legacy-final';
-  assert.equal(store.defaultModels().summary, 'test/custom-cheap');
-  assert.equal(store.defaultModels().final, 'test/legacy-final');
+  assert.equal(defaultModels().summary, 'test/custom-cheap');
+  assert.equal(defaultModels().final, 'test/legacy-final');
   process.env.DRAKEN_PI_FINAL_MODEL = 'test/custom-final';
-  assert.equal(store.defaultModels().final, 'test/custom-final');
+  assert.equal(defaultModels().final, 'test/custom-final');
   assert.equal(store.getSync(sync.id).models.summary, 'openai/gpt-6-luna', 'existing run settings stay frozen');
 });

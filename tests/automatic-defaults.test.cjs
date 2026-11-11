@@ -3,7 +3,7 @@ const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const Database = require('better-sqlite3');
 const { getDb, closeDb } = require('../dist/db/schema');
-const { autoIndexSettings } = require('../dist/memory/automatic');
+const { autoIndexSettings } = require('../dist/sync/background');
 let root;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-default-auto-')); process.env.DRAKEN_DATA_DIR = root; process.env.DRAKEN_PI_SESSIONS_DIR = root + '/sessions'; });
 afterEach(() => { closeDb(); fs.rmSync(root, { recursive: true, force: true }); });

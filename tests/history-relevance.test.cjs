@@ -6,7 +6,7 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
 const { indexReadiness } = require('../dist/memory/readiness');
 const { historyQuery: voiceHistoryQuery } = require('../dist/memory/focus');
-const { historyPacket } = require('../dist/memory/context');
+const { historyPacket } = require('../dist/memory/packet');
 const { sourceEntry } = require('./fixtures/source-entry.cjs');
 let root, db, cache, index;
 const cutoff = '2026-01-07T22:00:00.000Z';

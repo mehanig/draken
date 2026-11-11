@@ -1,14 +1,10 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import os from 'os';
+import { getDataDir } from '../data-dir';
 import fs from 'fs';
 import { entryTable, migratePointers } from './pointer-migration';
 import { migrateSnapshotPointers } from './snapshot-pointers';
 import { renameAgentTables, migrateAgents } from './agent-migration';
-
-export function getDataDir(): string {
-  return path.resolve(process.env.DRAKEN_DATA_DIR || path.join(os.homedir(), '.draken'));
-}
 
 let db: Database.Database | null = null;
 

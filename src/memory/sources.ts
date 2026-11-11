@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3';
-import { createHash } from 'crypto';
-import { cleanText } from '../sync/normalize';
+import { cleanText, digest } from '../sync/normalize';
 import { EntryReader } from '../sync/source-files';
 import { getSourceRoots, type RootInput } from '../sources/registry';
 import { EvidenceReader } from '../db/evidence';
@@ -8,7 +7,6 @@ import type { NormalizationCache } from '../sync/jsonl';
 import type { Evidence } from '../types';
 import type { HistoryQuery, HistoryRecord } from './types';
 
-export const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 export interface SourceRecord extends HistoryRecord { group: string; position: number; identity: string }
 
 /** Read canonical metadata/frozen pointers and verified, admitted JSONL records.

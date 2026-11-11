@@ -1,7 +1,9 @@
 import path from 'path';
 import { availableParallelism } from 'os';
 import { Worker } from 'worker_threads';
-import { LocalEmbedder } from './model';
+import { MODEL_ID } from './model-files';
+import { modelFilesPresent, prepareModelFiles } from './model-assets';
+import { EMBEDDING_BYTES, EMBEDDING_TEXT_LIMIT, validEmbedding } from './embedding-contract';
 import type { Embedder, ReportHistory } from './types';
 
 type Pending = { id: number; resolve(vector: Float32Array): void; reject(error: Error): void };
@@ -13,7 +15,7 @@ const failure = () => new Error('Local embedding worker failed; no other runtime
  * Workers are lazy: a warm-cache query needs only one, and a read needs none. */
 export class EmbeddingPool implements Embedder {
   readonly parallelism: { workers: number; threads: number };
-  private files: LocalEmbedder;
+  readonly fingerprint = MODEL_ID;
   private lanes: Lane[] = [];
   private sequence = 0;
   private busy = false;
@@ -24,11 +26,9 @@ export class EmbeddingPool implements Embedder {
     const workers = cpus >= 12 && memory >= 4 * 1024 ** 3 ? 2 : 1;
     const perLane = workers === 2 ? 3 : Math.max(1, Math.min(4, Math.floor(cpus / 2)));
     this.parallelism = { workers, threads: workers * perLane };
-    this.files = new LocalEmbedder(directory);
   }
-  get fingerprint() { return this.files.fingerprint; }
-  ready() { return this.files.ready(); }
-  setup(report?: ReportHistory, allowDownload = true) { return this.files.setup(report, allowDownload); }
+  ready() { return modelFilesPresent(this.directory); }
+  setup(report?: ReportHistory, allowDownload = true) { return prepareModelFiles(this.directory, report, allowDownload); }
   private lane(index: number): Lane {
     if (this.lanes[index]) { if (this.lanes[index].dead) throw failure(); return this.lanes[index]; }
     const worker = new Worker(path.join(__dirname, 'embedding-worker.js'), {
@@ -43,9 +43,9 @@ export class EmbeddingPool implements Embedder {
     worker.on('message', (message: any) => {
       const pending = lane.pending;
       if (!pending) return;
-      if (message?.id !== pending.id || message.error || !(message.vector instanceof ArrayBuffer) || message.vector.byteLength !== 384 * 4) { fail(); return; }
+      if (message?.id !== pending.id || message.error || !(message.vector instanceof ArrayBuffer) || message.vector.byteLength !== EMBEDDING_BYTES) { fail(); return; }
       const vector = new Float32Array(message.vector);
-      if (vector.some(value => !Number.isFinite(value))) { fail(); return; }
+      if (!validEmbedding(vector)) { fail(); return; }
       lane.pending = undefined; pending.resolve(vector);
     });
     return lane;
@@ -62,7 +62,7 @@ export class EmbeddingPool implements Embedder {
   async embed(text: string, query: boolean): Promise<Float32Array> { return (await this.work([text], query))[0]; }
   embedMany(texts: string[], parallel = true): Promise<Float32Array[]> { return this.work(texts, false, parallel); }
   private async work(texts: string[], query: boolean, parallel = false): Promise<Float32Array[]> {
-    if (this.busy || texts.length > 8 || texts.some(text => typeof text !== 'string' || text.length > 16000)) throw new Error('Invalid or overlapping embedding batch');
+    if (this.busy || texts.length > 8 || texts.some(text => typeof text !== 'string' || text.length > EMBEDDING_TEXT_LIMIT)) throw new Error('Invalid or overlapping embedding batch');
     this.busy = true; const epoch = this.epoch;
     try {
       await this.retiring;

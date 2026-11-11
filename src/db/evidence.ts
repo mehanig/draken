@@ -3,7 +3,6 @@ import type { Evidence } from '../types';
 import { cleanText, digest, sourceKey, type NormalizationVersion } from '../sync/normalize';
 import { RecordReader, type RecordPointer, type NormalizationCache } from '../sync/jsonl';
 import { getSourceRoots, sessionId, validIdentity, type RootInput, type SourceIdentity } from '../sources/registry';
-import { thawEvidence } from './retained-text';
 
 export interface FrozenPointer {
   version: 1 | 2;
@@ -23,7 +22,8 @@ export function encodeEvidence(item: Evidence, pointer: FrozenPointer): string {
   return JSON.stringify({ ...metadata, source_key: sourceKey(item), source_pointer: pointer });
 }
 
-/** Frozen membership, attribution and projection; original bytes stay in pi.
+/** Live frozen membership, attribution and projection require original records.
+ * Copied-text compatibility belongs to migration, not snapshot reads.
  * Share one reader per snapshot/request rather than reopening a file per item. */
 export class EvidenceReader {
   private reader: RecordReader;
@@ -58,15 +58,18 @@ export class EvidenceReader {
   }
   read(value: string | Record<string, any>, tolerateUnavailable = false): Evidence {
     const encoded = typeof value === 'string' ? JSON.parse(value) : value;
-    if (!encoded.source_pointer) return thawEvidence(this.db, encoded); // Legacy migration/import reader only.
     const { source_pointer, source_key, ...metadata } = encoded;
     let item: Evidence;
-    try { item = { ...metadata, text: this.project(metadata as Evidence, source_pointer) }; }
+    try {
+      if (!source_pointer) throw new Error(UNAVAILABLE_EVIDENCE);
+      item = { ...metadata, text: this.project(metadata as Evidence, source_pointer) };
+    }
     catch (error) {
       if (!tolerateUnavailable) throw error;
       item = { ...metadata, text: '', source_key, unavailable: UNAVAILABLE_EVIDENCE } as Evidence;
     }
-    pointers.set(item, source_pointer); return item;
+    if (source_pointer) pointers.set(item, source_pointer);
+    return item;
   }
   freeze(item: Evidence): string {
     const previous = pointers.get(item);

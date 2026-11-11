@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { nativePeer } from './native-fixture';
+import { delayedSources, sourceRefs } from './history-fixture';
 
 async function prepare(page: Page) {
   const status = await (await page.request.get('/api/voice/status')).json();
@@ -102,6 +103,65 @@ test('ChatGPT-only call: local test peer audio, dragon, controls, sources, histo
   expect(history[0].turns.every((turn: any) => turn.heard_text === '')).toBe(true);
   expect((await (await page.request.get(`/api/syncs/${syncId}`)).json()).status).toBe('open');
   expect(writes).toEqual([]); expect(errors).toEqual([]); expect(external).toEqual([]);
+});
+
+test('call sources reset pagination by identity and cancel reads on switching, source close and call close', async ({ page }) => {
+  const { syncId } = await prepare(page), fixture = await delayedSources(page);
+  await nativePeer(page);
+  let supplied = false, endRequested = false, finishEnd!: () => void;
+  const ending = new Promise<void>(resolve => { finishEnd = resolve; });
+  await page.route('**/api/voice/live/calls/*/end', async route => {
+    endRequested = true;
+    const response = await route.fetch();
+    await page.evaluate(() => (window as any).__disposeNative?.());
+    await ending;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  await page.route('**/api/voice/live/calls/*/events*', async route => {
+    const response = await route.fetch(), value = await response.json();
+    if (!supplied) { supplied = true; value.events.push({ sequence: 1, type: 'sources', evidence: sourceRefs }); }
+    await route.fulfill({ response, json: value });
+  });
+  const select = async (ref: string) => {
+    await page.getByText(/^Sources supplied \(/).click();
+    await page.getByRole('button', { name: `History ${ref.slice(-6)}`, exact: true }).click();
+  };
+  try {
+    await openCall(page, syncId);
+    await page.getByText('Conversation & details', { exact: true }).click();
+    await select(sourceRefs[0]);
+    await expect(page.getByRole('heading', { name: 'Source A', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Later text', exact: true }).click();
+    await expect.poll(() => fixture.reads.length).toBe(2);
+    await select(sourceRefs[1]);
+    await expect(page.getByRole('heading', { name: 'Source B', exact: true })).toBeVisible();
+    await expect.poll(() => fixture.reads[1].aborted).toBe(true);
+    expect(fixture.reads.map(({ ref, offset }) => [ref, offset])).toEqual([[sourceRefs[0], 0], [sourceRefs[0], 4000], [sourceRefs[1], 0]]);
+    fixture.release();
+    await expect(page.getByRole('region', { name: 'Historical source' })).toContainText('Retained source at offset 0');
+    await page.getByRole('button', { name: 'Later text', exact: true }).click();
+    await expect.poll(() => fixture.reads.length).toBe(4);
+    await page.getByRole('button', { name: 'Close historical source', exact: true }).click();
+    await expect.poll(() => fixture.reads[3].aborted).toBe(true);
+    fixture.release();
+    await select(sourceRefs[1]);
+    await expect(page.getByRole('heading', { name: 'Source B', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Later text', exact: true }).click();
+    await expect.poll(() => fixture.reads.length).toBe(6);
+    await page.getByRole('button', { name: 'End call', exact: true }).click();
+    await expect.poll(() => endRequested).toBe(true);
+    await expect.poll(() => fixture.reads[5].aborted).toBe(true);
+    await expect(dialog(page)).toBeVisible();
+    await select(sourceRefs[0]);
+    await expect(page.getByRole('heading', { name: 'Source A', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Later text', exact: true }).click();
+    await expect.poll(() => fixture.reads.length).toBe(8);
+    finishEnd();
+    await expect(dialog(page)).not.toBeVisible();
+    await expect.poll(() => fixture.reads[7].aborted).toBe(true);
+    await expect(page.getByRole('region', { name: 'Historical source' })).toHaveCount(0);
+    expect(await tracksStopped(page)).toBe(true);
+  } finally { finishEnd(); fixture.release(); }
 });
 
 test('history preparation finishes outside the call before Call Draken can be enabled', async ({ page }) => {

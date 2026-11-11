@@ -3,7 +3,8 @@ import { LogOut } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './pages/Login';
 import { Sync } from './pages/Sync';
-import { Home, linkClick } from './pages/Home';
+import { Home } from './pages/Home';
+import { linkClick } from './navigation';
 import { History } from './pages/History';
 import { IndexSettings } from './components/IndexSettings';
 

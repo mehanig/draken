@@ -1,6 +1,6 @@
 import fs from 'fs';
 import type Database from 'better-sqlite3';
-import { fileRecords, getSessionRoot, openSessionFile, verifySessionHeader, type RecordPointer } from '../sync/source-files';
+import { fileRecords, getSessionRoot, openSessionFile, verifySessionHeader, type RecordPointer } from '../sync/jsonl';
 import { normalizeEntry, type NormalizedEntry } from '../sync/normalize';
 import { freezeEvidence, retainText, thawEvidence } from './retained-text';
 

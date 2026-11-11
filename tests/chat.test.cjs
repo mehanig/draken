@@ -2,6 +2,7 @@ require('./fixtures/fake-memory.cjs');
 const {test,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{randomUUID}=require('node:crypto');
 const {getDb,closeDb}=require('../dist/db/schema'),store=require('../dist/sync/store');
+const {activity}=require('../dist/sync/activity');
 const {scanSessions}=require('../dist/sync/collector'),{generateReply,launchChat,cancelReply}=require('../dist/sync/manager');
 const memory=require('../dist/memory/service'),{createApp}=require('../dist/server');
 let root,control,log,server,originals;
@@ -12,8 +13,8 @@ beforeEach(()=>{
  Object.assign(process.env,{DRAKEN_DATA_DIR:path.join(root,'state'),DRAKEN_PI_SESSIONS_DIR:path.join(root,'sessions'),DRAKEN_PI_BIN:fake,DRAKEN_PI_SUMMARY_MODEL:'test/cheap',DRAKEN_PI_FINAL_MODEL:'test/strong',DRAKEN_FAKE_CONTROL:control,DRAKEN_TEST_CALL_LOG:log,DRAKEN_HOST:'127.0.0.1',DRAKEN_NO_AUTH:'true',DRAKEN_CODEX_BIN:path.join(root,'no-native-helper'),DRAKEN_CODEX_HOME:path.join(root,'no-native-account')});
  originals={historyReadiness:memory.historyReadiness,searchPreparedHistory:memory.searchPreparedHistory,searchHistory:memory.searchHistory,prepareHistory:memory.prepareHistory};
 });
-afterEach(async()=>{for(const id of [...store.busySyncs])cancelReply(id);await idle();if(server)await new Promise(r=>server.close(r));server=null;Object.assign(memory,originals);closeDb();fs.rmSync(root,{recursive:true,force:true});});
-async function idle(){const until=Date.now()+15000;while(store.busySyncs.size){assert.ok(Date.now()<until,'Job did not finish');await new Promise(r=>setTimeout(r,10));}}
+afterEach(async()=>{for(const id of activity.busyIds)cancelReply(id);await idle();if(server)await new Promise(r=>server.close(r));server=null;Object.assign(memory,originals);closeDb();fs.rmSync(root,{recursive:true,force:true});});
+async function idle(){const until=Date.now()+15000;while(activity.busy){assert.ok(Date.now()<until,'Job did not finish');await new Promise(r=>setTimeout(r,10));}}
 const calls=()=>fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse):[];
 function source(name){const id=randomUUID(),timestamp='2026-01-01T00:00:00.000Z';fs.writeFileSync(path.join(root,'sessions',id+'.jsonl'),[
  {type:'session',version:3,id,timestamp,cwd:'/demo/'+name},
@@ -84,7 +85,7 @@ test('a prepared chat cutoff survives new chat messages without weakening fresh-
  require('./fixtures/fake-memory.cjs').useIndexedHistory();const {id}=await ready();const before=memory.historyReadiness(true);assert.equal(before.ready,true);
  launchChat(id,'What remains in Trailboard?',randomUUID());await idle();
  assert.deepEqual(memory.historyReadiness(true),before);assert.equal(memory.historyReadiness().ready,false);
- assert.equal(require('../dist/voice/preparation').callReadiness(id,true).ready,true);
+ assert.equal(require('../dist/sync/preparation').callReadiness(id,true).ready,true);
  launchChat(id,'What is it working on now?',randomUUID());await idle();assert.equal(store.getSync(id).messages.length,4);
  const old = getDb().prepare("INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,'user','Older newly admitted text',?)").run(id,before.before).lastInsertRowid;
  assert.equal(memory.historyReadiness(true).ready,false,'Captured readiness cannot skip a missing old record');

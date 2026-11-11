@@ -1,14 +1,16 @@
 import { Router, Request } from 'express';
 import { route } from './http';
 import { HttpError } from '../errors';
-import { getDb, getDataDir } from '../db/schema';
+import { getDb } from '../db/schema';
+import { getDataDir } from '../data-dir';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs, claimAutomaticSync } from '../sync/store';
+import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, claimAutomaticSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
-import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
-import { callReadiness, prepareCall } from '../voice/preparation';
+import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../sync/background';
+import { callReadiness, prepareCall } from '../sync/preparation';
 import { preparationUsage } from '../sync/usage';
+import { activity } from '../sync/activity';
 
 const router = Router();
 function id(req: Request): number {
@@ -47,25 +49,22 @@ async function completeScan() {
   if (scan.warnings.length) throw new HttpError(409, 'History import could not finish. Check session sources and scan again; no new snapshot was prepared.');
   return scan;
 }
-let starting = false;
 router.post(['/syncs/start-call', '/syncs/start-chat'], route(async (req, res) => {
   const requestId = req.body?.request_id;
   if (typeof requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestId)) throw new HttpError(400, 'A request ID is required');
-  if (starting) throw new HttpError(409, 'A sync is already being prepared');
+  if (activity.starting) throw new HttpError(409, 'A sync is already being prepared');
   const prior = getDb().prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
   if (prior) { res.status(202).json({ sync: getSync(prior.sync_id), scan: { files: 0, added: 0, warnings: [] } }); return; }
-  if (busySyncs.size || activeVoiceSyncs.size) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
-  starting = true;
-  busySyncs.add(0); // Reserve foreground ownership during async setup and scanning.
+  const releaseStart = activity.beginStart();
   try {
     const setup = await piSetupStatus(true);
     if (setup.state !== 'configured') throw new HttpError(503, setup.message);
     const scan = await completeScan();
-    busySyncs.delete(0);
+    releaseStart();
     const sync = startConversationSync(requestId);
     const ready = callReadiness(sync.id, req.path.endsWith('/start-chat')).ready;
     res.status(202).json({ sync: ready ? sync : launchReply(sync.id), scan });
-  } finally { busySyncs.delete(0); starting = false; }
+  } finally { releaseStart(); }
 }));
 router.post('/syncs/:id/recap', route((req, res) => res.status(202).json(launchRecap(id(req)))));
 router.get('/overview', route((_req, res) => res.json(overview())));

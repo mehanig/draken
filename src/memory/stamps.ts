@@ -54,9 +54,9 @@ export function saveSourceCheckpoint(db: Database.Database, stamps: Map<string, 
   if (prior?.value !== value) db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(KEY, value);
 }
 
-/** No file/DB/model creation. Older indexes without a checkpoint need one
- * foreground preparation; treating the whole cached archive as new would let
- * a small tail bypass the minimum after a restart. */
+/** Undefined means an existing cache has no established checkpoint. Successful
+ * global preparation establishes one while reusing compatible cached vectors;
+ * the scheduler decides whether enough work exists to start automatically. */
 export function loadSourceCheckpoint(directory: string): Map<string, string> | undefined {
   const file = path.join(directory, 'memory', 'index.sqlite');
   if (!fs.existsSync(file)) return new Map();

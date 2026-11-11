@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { NativeHelperProcess } from './helper-process.mjs';
 
 /** Private stdio only. No HTTP listener, shell, generic command route, or raw logging. */
 export class NativeRpc {
@@ -8,24 +8,15 @@ export class NativeRpc {
   #sequence = 0;
   #buffer = '';
   #closed = false;
-  #exited = false;
-  #killTimer;
-  #exitPromise;
-  #resolveExit;
-  constructor(binary, args, { cwd, env, spawnProcess = spawn } = {}) {
-    this.#exitPromise = new Promise(resolve => { this.#resolveExit = resolve; });
-    this.#child = spawnProcess(binary, args, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+  #helper;
+  constructor(binary, args, options = {}) {
+    this.#helper = new NativeHelperProcess(binary, args, options);
+    this.#child = this.#helper.child;
     this.#child.stdout.setEncoding('utf8');
     this.#child.stdout.on('data', chunk => this.#receive(chunk));
-    // Native diagnostics can contain prompts, transcripts, paths and auth details.
-    // Drain them, but never copy them into routine logs or browser errors.
-    this.#child.stderr.resume();
     this.#child.stdin.on('error', () => this.close('Native voice input closed.'));
     this.#child.on('error', () => this.close('Cannot start the pinned native voice helper.'));
     this.#child.on('close', () => {
-      this.#exited = true;
-      clearTimeout(this.#killTimer);
-      this.#resolveExit(true);
       this.close('Native voice helper stopped.');
     });
   }
@@ -89,29 +80,13 @@ export class NativeRpc {
       if (signal?.aborted) abort();
     });
   }
-  async waitForExit(timeoutMs = 2500) {
-    let timer;
-    try { return await Promise.race([this.#exitPromise, new Promise(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); })]); }
-    finally { clearTimeout(timer); }
-  }
-  #terminate(signal) {
-    // The official npm launcher owns a native child. On Unix terminate the
-    // entire group, including escalation if a launcher exits before its child.
-    if (process.platform !== 'win32' && Number.isInteger(this.#child.pid) && this.#child.pid > 1) {
-      try { process.kill(-this.#child.pid, signal); return; } catch { /* Already gone, or test double. */ }
-    }
-    try { this.#child.kill(signal); } catch { /* Exit confirmation is separate. */ }
-  }
+  waitForExit(timeoutMs) { return this.#helper.waitForExit(timeoutMs); }
   close(reason = 'Native voice connection closed.') {
     if (this.#closed) return;
     this.#closed = true; this.#buffer = '';
     for (const pending of this.#pending.values()) { pending.cleanup(); pending.reject(new Error(reason)); }
     this.#pending.clear();
-    this.#child.stdin.destroy();
-    if (!this.#exited) {
-      this.#terminate('SIGTERM');
-      this.#killTimer = setTimeout(() => this.#terminate('SIGKILL'), 1500); this.#killTimer.unref();
-    }
+    this.#helper.close();
     this.#emit({ method: 'draken/closed', params: { reason } });
     this.#listeners.clear();
   }

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { route, connected } from './http';
 import { historyProgress, readHistory, searchHistory, validateHistoryQuery } from '../memory/service';
-import { yieldBackgroundIndexing } from '../memory/automatic';
+import { yieldBackgroundIndexing } from '../sync/background';
 const router = Router();
 // Metadata only: never starts a worker, downloads a model or queues behind it.
 router.get('/progress', (_req, res) => res.json(historyProgress()));
