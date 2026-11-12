@@ -212,8 +212,12 @@ export function initSchema(database: Database.Database): void {
   if (fresh) {
     const seed = database.prepare('INSERT INTO sync_settings(key,value) VALUES (?,?)');
     seed.run('auto_index', 'true');
-    seed.run('auto_prepare_conversations', 'true');
   }
+  // Preserve the saved indexing choice while withdrawing the retired permission
+  // to create snapshots and spend provider quota in the background.
+  database.exec(`INSERT OR IGNORE INTO sync_settings(key,value)
+    SELECT 'auto_index',value FROM sync_settings WHERE key='auto_prepare_conversations';
+    DELETE FROM sync_settings WHERE key IN ('auto_prepare_conversations','auto_preparing_sync','auto_briefing_failed');`);
   })();
 }
 
