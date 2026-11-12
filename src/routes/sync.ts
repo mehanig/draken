@@ -5,7 +5,7 @@ import { getDb } from '../db/schema';
 import { getDataDir } from '../data-dir';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, claimAutomaticSync } from '../sync/store';
+import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../sync/background';
 import { callReadiness, prepareCall } from '../sync/preparation';
@@ -30,8 +30,7 @@ router.get('/setup', route(async (req, res) => {
 router.get('/settings/preparation-usage', route((req, res) => res.json(preparationUsage(getDb(), req.query))));
 router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettings())));
 router.patch('/settings/auto-index', route((req, res) => {
-  if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => !['enabled', 'preparation_scope'].includes(key))) throw new HttpError(400, 'Only enabled and preparation_scope are accepted');
-  if (req.body.enabled && req.body.preparation_scope !== 'index-and-briefing-v1') throw new HttpError(409, 'Refresh Draken before enabling automatic preparation. This mode includes summary and briefing model usage, not only local indexing.');
+  if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => key !== 'enabled')) throw new HttpError(400, 'Only boolean enabled is accepted');
   res.json(setAutoIndex(req.body.enabled));
 }));
 router.use((req, _res, next) => {
@@ -103,7 +102,6 @@ router.patch('/syncs/:id/models', route((req, res) => {
 }));
 router.post('/syncs/:id/cancel', route((req, res) => {
   cancelReply(id(req));
-  claimAutomaticSync(id(req));
   res.status(202).json(getProgress(id(req)));
 }));
 router.patch('/syncs/:id/notes', route((req, res) => {
@@ -111,7 +109,6 @@ router.patch('/syncs/:id/notes', route((req, res) => {
 }));
 router.post('/syncs/:id/briefing', route((req, res) => {
   const sync = launchReply(id(req));
-  claimAutomaticSync(sync.id);
   res.status(202).json(sync);
 }));
 router.post('/syncs/:id/messages', route((req, res) => {

@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('nod
 const Database=require('better-sqlite3');
 const {getDb,closeDb}=require('../dist/db/schema');
 const {scanSessions}=require('../dist/sync/collector');
-const {startSync}=require('../dist/sync/store');
+const {startSync,startConversationSync,availableCount}=require('../dist/sync/store');
 const {HistoryIndex}=require('../dist/memory/index');
 const {sourceStamps,loadSourceCheckpoint}=require('../dist/memory/stamps');
 const {createAutoIndexer}=require('../dist/sync/background');
@@ -11,7 +11,9 @@ let root,cache,index,model,jobs,embeddings,now;
 const at='2020-01-02T00:00:00.000Z';
 beforeEach(()=>{
  root=fs.mkdtempSync(path.join(os.tmpdir(),'draken-source-batch-'));fs.mkdirSync(root+'/sessions');
- Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions'});
+ const fake=root+'/pi';fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),fake);fs.chmodSync(fake,0o700);
+ fs.writeFileSync(root+'/control.json','{}');
+ Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions',DRAKEN_PI_BIN:fake,DRAKEN_TEST_CALL_LOG:root+'/calls.jsonl',DRAKEN_FAKE_CONTROL:root+'/control.json'});
  jobs=embeddings=0;now=Date.now();getDb();
 });
 afterEach(()=>{cache?.close();cache=index=model=undefined;closeDb();fs.rmSync(root,{recursive:true,force:true});});
@@ -31,7 +33,35 @@ function history(){
 function scheduler(){return createAutoIndexer({enabled:()=>true,idle:()=>true,now:()=>now,scan:scanSessions,
  stamp:before=>sourceStamps(getDb(),before),baseline:()=>loadSourceCheckpoint(root+'/state'),
  prepare:async(before,signal)=>{assert.equal(signal.aborted,false);jobs++;await history().prepare({before},undefined,true);},
- waiting:()=>0,unfinished:()=>false,briefing:async()=>{},problem:()=>'',completed:()=>{}});}
+ completed:()=>{}});}
+function noAutomaticSyncs(){
+ for(const table of ['syncs','sync_items','sync_presentations','sync_runs','summary_cache','sync_coverage','sync_messages','live_calls','voice_calls'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table);
+ assert.equal(fs.existsSync(root+'/calls.jsonl'),false,'local indexing never invokes the provider');
+}
+
+test('real collector and durable index accumulate multiple batches and tails across restart; explicit sync takes ALL available entries',async()=>{
+ const s=session('accumulated');s.append(70);let worker=scheduler();
+ await worker.tick();assert.equal(jobs,1);assert.equal(embeddings,70);assert.equal(loadSourceCheckpoint(root+'/state').size,70);
+ assert.equal(availableCount(),70);noAutomaticSyncs();
+ for(let n=0;n<3;n++){await worker.tick();assert.equal(jobs,1);assert.equal(worker.state.pending_records,0);noAutomaticSyncs();}
+ s.append(3);now+=86400000;await worker.tick();assert.equal(worker.state.pending_records,3);assert.equal(jobs,1);assert.equal(availableCount(),73);noAutomaticSyncs();
+ s.append(61);await worker.tick();assert.equal(jobs,2);assert.equal(embeddings,134);assert.equal(availableCount(),134);noAutomaticSyncs();
+ const checkpoint=loadSourceCheckpoint(root+'/state'),originals=fs.readFileSync(s.file,'utf8');
+ await worker.stop();cache.close();cache=index=model=undefined;closeDb();
+ worker=scheduler();await worker.tick();assert.equal(jobs,2);assert.deepEqual(loadSourceCheckpoint(root+'/state'),checkpoint);assert.equal(availableCount(),134);noAutomaticSyncs();
+ s.append(63);now+=30*86400000;await worker.tick();assert.equal(jobs,2);assert.equal(worker.state.pending_records,63);assert.equal(availableCount(),197);noAutomaticSyncs();
+ s.append();await worker.tick();assert.equal(jobs,3);assert.equal(embeddings,198,'reopened cache reuses all previously indexed vectors');assert.equal(availableCount(),198);noAutomaticSyncs();
+ s.append(5);await worker.tick();assert.equal(jobs,3);assert.equal(worker.state.pending_records,5);assert.equal(availableCount(),203);noAutomaticSyncs();
+ const finalSource=fs.readFileSync(s.file,'utf8');assert.ok(finalSource.startsWith(originals));
+ const requestId=require('node:crypto').randomUUID(),sync=startConversationSync(requestId);
+ assert.equal(sync.items.length,203,'64 is an indexing threshold, never a snapshot limit');
+ assert.equal(new Set(sync.items.map(item=>item.event_key)).size,203);
+ assert.equal(startConversationSync(requestId).id,sync.id);assert.equal(availableCount(),0);
+ assert.equal(getDb().prepare('SELECT COUNT(*) n FROM syncs').get().n,1);
+ for(const table of ['sync_runs','sync_coverage','sync_messages','live_calls'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table);
+ assert.equal(fs.existsSync(root+'/calls.jsonl'),false,'creating a snapshot alone does not generate a briefing');
+ assert.equal(fs.readFileSync(s.file,'utf8'),finalSource);
+});
 
 test('real collector: 63 source entries plus session metadata never reaches 64, even after 30 days',async()=>{
  const s=session('batch63');s.append(63);const worker=scheduler();
@@ -94,7 +124,16 @@ test('an interrupted first preparation retains a known empty checkpoint and can 
  assert.equal(loadSourceCheckpoint(root+'/state').size,64);
 });
 
-test('combined preparation establishes a missing older checkpoint and unchanged checks do not repeat work',async()=>{
+test('a missing older checkpoint alone cannot admit a sub-64 archive',async()=>{
+ const s=session('small-upgrade');s.append(63);await scanSessions();await history().prepare();
+ cache.prepare("DELETE FROM meta WHERE key='background-source-stamps-v1'").run();
+ assert.equal(loadSourceCheckpoint(root+'/state'),undefined);
+ const worker=scheduler();await worker.tick();now+=30*86400000;await worker.tick();
+ assert.equal(worker.state.pending_records,63);assert.equal(jobs,0);assert.equal(embeddings,63);assert.equal(loadSourceCheckpoint(root+'/state'),undefined);noAutomaticSyncs();
+ s.append();await worker.tick();assert.equal(jobs,1);assert.equal(embeddings,64);assert.equal(loadSourceCheckpoint(root+'/state').size,64);noAutomaticSyncs();
+});
+
+test('local indexing establishes a missing older checkpoint and unchanged checks do not repeat work',async()=>{
  const s=session('upgrade');s.append(64);await scanSessions();await history().prepare();
  assert.equal(embeddings,64);
  cache.prepare("DELETE FROM meta WHERE key='background-source-stamps-v1'").run(); // Prior-release cache.

@@ -4,7 +4,6 @@ import { HttpError } from '../errors';
  * requests a stop: the owner keeps its lease until its resources are released. */
 class SyncActivity {
   private jobs = new Map<number, { controller: AbortController }>();
-  private automatic = new Map<number, symbol>();
   private call?: { id: number; token: symbol };
   private start?: symbol;
   private stopping = false;
@@ -12,7 +11,7 @@ class SyncActivity {
   private finishDrain?: () => void;
 
   private admit() { if (this.stopping) throw new HttpError(503, 'Draken is stopping. No new work can start.'); }
-  private changed() { if (!this.jobs.size && !this.automatic.size && !this.call && !this.start) this.finishDrain?.(); }
+  private changed() { if (!this.jobs.size && !this.call && !this.start) this.finishDrain?.(); }
   shutdown(): Promise<void> {
     this.stopping = true;
     const done = this.drained ||= new Promise<void>(resolve => { this.finishDrain = resolve; });
@@ -24,8 +23,6 @@ class SyncActivity {
   get busy(): boolean { return Boolean(this.start || this.jobs.size); }
   get starting(): boolean { return this.start !== undefined; }
   get callActive(): boolean { return this.call !== undefined; }
-  get backgroundId(): number | undefined { return this.automatic.keys().next().value; }
-  get foregroundBusy(): boolean { return Boolean(this.start) || this.busyIds.some(id => !this.automatic.has(id)); }
   jobActive(id: number): boolean { return this.jobs.has(id); }
   voiceActive(id: number): boolean { return this.call?.id === id; }
 
@@ -48,12 +45,6 @@ class SyncActivity {
     if (this.busy || this.callActive) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
     const token = Symbol(); this.start = token;
     return () => { if (this.start === token) { this.start = undefined; this.changed(); } };
-  }
-  beginBackground(id: number): () => void {
-    this.admit();
-    if (this.automatic.has(id)) throw new HttpError(409, 'Automatic preparation is already running');
-    const token = Symbol(); this.automatic.set(id, token);
-    return () => { if (this.automatic.get(id) === token) { this.automatic.delete(id); this.changed(); } };
   }
   beginCall(id: number): () => void {
     this.admit();

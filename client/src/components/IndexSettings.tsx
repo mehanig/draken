@@ -33,15 +33,15 @@ export function IndexSettings() {
         setSettings(current => current ? { ...current, enabled } : current);
         try { setSettings(await setAutoIndex(enabled)); } catch (error) { setSettings(previous); setError(error instanceof Error ? error.message : 'Could not save settings'); }
         finally { setSaving(false); }
-      }} /><span><strong>Automatically prepare conversations</strong><span className="small muted">Index history, summarize new work and prepare the next briefing together.</span></span></label>
-    <p className="small muted">One automatic mode, on by default for new installations. Existing installations keep their previous choice, including off; older local-index-only permission stays local-only until you enable this switch. While the server runs, check once a minute and prepare a batch at 64 source changes or waiting entries. Interrupted batches resume from cached work. Smaller new tails wait for your next sync; there is no timed flush. A completed briefing is reused when you join, rather than generated again. Calls and foreground work take priority.</p>
-    <p className="small muted">This uses your configured pi summary and final models and their account quota or API billing, within the saved per-run invocation limit. Search embeddings stay local; first use may download the pinned search model. Failures stop automatic model retries until you explicitly retry. Existing conversations, notes and frozen snapshots are not rewritten. Nothing is marked reviewed and no microphone or call starts automatically. Agent and session exclusions remain respected.</p>
+      }} /><span><strong>Automatically index history</strong><span className="small muted">Accumulate searchable history locally, without creating syncs, summaries or briefings.</span></span></label>
+    <p className="small muted">On by default for new installations. Existing installations keep their saved indexing choice, including off. While the server runs, check once a minute and index batches at 64 source changes. Smaller tails wait for explicit foreground preparation, such as a sync, Prepare history or search; there is no timed flush. Only your Sync with Draken or Chat instead action creates a snapshot and starts its briefing. Calls and foreground work take priority.</p>
+    <p className="small muted">Indexing makes no provider model calls. Local embeddings use CPU, memory and disk; first use may download about 136 MB of pinned search model files. Disabling cancels automatic indexing, keeping completed embeddings. Local failures back off for at least five minutes; foreground preemption waits at least one minute. Existing conversations, notes and frozen snapshots are not rewritten. Nothing is marked reviewed and no microphone or call starts automatically. Agent and session exclusions remain respected.</p>
     {saving && <p role="status">Saving…</p>}
     {error && <p className="small" role="alert">{error}</p>}
     {open && settings && <AutomaticProgress settings={settings} />}
     {settings?.enabled && settings.phase === 'error' && <button type="button" className="btn btn-secondary" disabled={saving} onClick={async () => {
-      setSaving(true); setError(''); try { setSettings(await setAutoIndex(true)); } catch (error) { setError(error instanceof Error ? error.message : 'Could not retry preparation'); } finally { setSaving(false); }
-    }}>Retry automatic preparation</button>}
+      setSaving(true); setError(''); try { setSettings(await setAutoIndex(true)); } catch (error) { setError(error instanceof Error ? error.message : 'Could not retry indexing'); } finally { setSaving(false); }
+    }}>Retry automatic indexing</button>}
     <AgentSources open={open} />
     <SetupPanel active={open} always />
     </dialog>
