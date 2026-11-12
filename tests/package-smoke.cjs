@@ -15,7 +15,8 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  const [packed]=JSON.parse(run(['pack','--json','--ignore-scripts','--pack-destination',root]));
  const files=packed.files.map(file=>file.path);
  for(const file of files)assert.doesNotMatch(file,/(^|\/)(?:auth\.json|server-state\.json|\.env|node_modules|\.git)(?:\/|$)|\.(?:sqlite|db|jsonl|pem|key|log)$/i);
- for(const file of ['dist/cli.js','dist/npm-cli.js','runtime/pi/package-lock.json','tray/windows.ps1','tray/macos.js','voice/realtime/native.mjs','public/persona/call-poster.webp','public/persona/chat-avatar.webp','dist/memory/reconcile.js','dist/sync/reconciliation.js','dist/sync/automatic.js','dist/sync/answer-references.js','dist/sync/usage.js','dist/voice/history-delivery.js'])assert.ok(files.includes(file),file);
+ for(const file of ['dist/cli.js','dist/npm-cli.js','runtime/pi/package-lock.json','tray/windows.ps1','tray/macos.js','voice/realtime/native.mjs','public/persona/call-poster.webp','public/persona/chat-avatar.webp','dist/memory/reconcile.js','dist/sync/reconciliation.js','dist/sync/background.js','dist/sync/answer-references.js','dist/sync/usage.js','dist/voice/history-delivery.js'])assert.ok(files.includes(file),file);
+ assert.equal(files.some(file=>/^dist\/sync\/automatic\.(?:js(?:\.map)?|d\.ts(?:\.map)?)$/.test(file)),false,'Retired automatic briefing code must not ship');
  run(['install','--omit=dev','--no-audit','--no-fund',path.join(root,packed.filename)],install);
  const audit=JSON.parse(run(['audit','--omit=dev','--json'],install));assert.equal(audit.metadata.vulnerabilities.total,0);
  const app=path.join(install,'node_modules','draken'),cli=path.join(app,'dist','cli.js');
@@ -35,11 +36,16 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  assert.equal((await fetch(url)).status,200);
  assert.equal((await fetch(url+'/api/scan',{method:'POST',headers:{Origin:'https://elsewhere.invalid'}})).status,403);
  const setup=await(await fetch(url+'/api/setup')).json();assert.notEqual(setup.pi.state,'configured');
- const automatic=await(await fetch(url+'/api/settings/auto-index')).json();assert.equal(automatic.enabled,true,'Fresh production installs enable combined preparation');
+ const automatic=await(await fetch(url+'/api/settings/auto-index')).json();assert.equal(automatic.enabled,true,'Fresh production installs enable local indexing only');
  assert.equal(automatic.phase,'waiting');assert.equal(automatic.batch_records,64);
+ for(const key of ['sync_id','ready_sync_id','progress'])assert.equal(Object.hasOwn(automatic,key),false,'Indexing must not expose automatic briefing ownership');
  child.kill('SIGTERM');await Promise.race([exited,pause(10000).then(()=>{throw Error('Packed server did not stop');})]);child=undefined;
  const Database=require(path.join(install,'node_modules','better-sqlite3')),db=new Database(path.join(state,'draken.db'),{readonly:true});
- try{for(const table of ['agent_sessions','syncs','live_calls'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);}finally{db.close();}
+ try{
+  for(const table of ['agent_sessions','syncs','sync_items','sync_runs','sync_messages','sync_coverage','live_calls'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
+  assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_index'").get().value,'true');
+  for(const key of ['auto_prepare_conversations','auto_preparing_sync','auto_briefing_failed'])assert.equal(db.prepare('SELECT value FROM sync_settings WHERE key=?').get(key),undefined);
+ }finally{db.close();}
  assert.equal(fs.existsSync(path.join(state,'memory','model')),false);
  assert.equal(fs.existsSync(path.join(home,'.pi')),false);
  console.log(JSON.stringify({productionOnly:true,packageFiles:files.length,rootAuditFindings:0,canonicalActivityRows:0,realProviderCalls:0}));
