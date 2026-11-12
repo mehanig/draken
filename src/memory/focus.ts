@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
-import type { HistoryQuery } from '../memory/types';
-import { statusQuestion } from '../memory/reconcile';
+import type { HistoryQuery } from './types';
+import { statusQuestion } from './reconcile';
 
-export interface VoiceHistoryFocus { sessions: string[]; question: string; topics?: string[] }
+export interface HistoryFocus { sessions: string[]; question: string; topics?: string[] }
 const common = new Set('hello hi hey can could would please check tell about what whats happening going latest current now doing working work trying achieve project repo repository called have with from this that those these here there where which when your our app application ios native rewrite version status update progress mean meant exactly does how the and for are was were has had you it its into written make want thinking using upload uploading safety missing links visual parity screens screen functional original remains tests testing tested implementation implemented images photos profile navigation blocked blocker blockers unfinished unconfirmed remaining finished completed completion left long longer'.split(' '));
 const words = (text: string) => [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])].filter(word => word.length >= 3 && !common.has(word));
 const conversationQuestion = (question: string) => /\b(?:what (?:did|have) (?:i|we|you) (?:ask|say|discuss|agree|decide)|(?:previous|earlier|last) (?:call|conversation|discussion)|remember (?:when|what)|quote (?:me|our))\b/i.test(question);
@@ -10,20 +10,20 @@ const conversationQuestion = (question: string) => /\b(?:what (?:did|have) (?:i|
 /** Shared text/voice continuity. Only actual saved user turns establish focus;
  * generated replies, briefings and quoted source instructions never select it.
  * Re-resolve against current source permissions when a new call is reserved. */
-export function discussionFocus(db: Database.Database, syncId: number, currentUserId = -1): VoiceHistoryFocus | undefined {
+export function discussionFocus(db: Database.Database, syncId: number, currentUserId = -1): HistoryFocus | undefined {
   const users = db.prepare(`SELECT content FROM (
     SELECT content,created_at AS at FROM sync_messages WHERE sync_id=? AND role='user' AND id!=?
     UNION ALL SELECT m.text AS content,m.started_at AS at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
       WHERE c.sync_id=? AND m.role='user' AND m.status='generated'
   ) ORDER BY at DESC LIMIT 30`).all(syncId, currentUserId, syncId) as { content: string }[];
-  let focus: VoiceHistoryFocus | undefined;
-  for (const turn of users.reverse()) focus = voiceHistoryQuery(db, turn.content, focus).focus;
+  let focus: HistoryFocus | undefined;
+  for (const turn of users.reverse()) focus = historyQuery(db, turn.content, focus).focus;
   return focus;
 }
 
 /** Resolve scope from admitted session metadata and the actual user's turns,
  * never from commands or project names embedded in retrieved source text. */
-export function voiceHistoryQuery(db: Database.Database, question: string, previous?: VoiceHistoryFocus): { focus: VoiceHistoryFocus; query: HistoryQuery } {
+export function historyQuery(db: Database.Database, question: string, previous?: HistoryFocus): { focus: HistoryFocus; query: HistoryQuery } {
   const terms = words(question);
   const rows = db.prepare(`SELECT s.id,s.name,s.cwd FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent
     WHERE s.included=1 AND s.missing=0 AND a.enabled=1 ORDER BY s.id`).all() as { id: string; name: string; cwd: string }[];
@@ -49,6 +49,6 @@ export function voiceHistoryQuery(db: Database.Database, question: string, previ
   const topics = namedTopics || (same && /\b(?:here|those|that|exactly)\b/i.test(question) ? previous?.topics : undefined);
   return { focus: { sessions, question: question.slice(0, 2000), topics }, query: {
     question: queryText.slice(0, 2000), ...(sessions.length && !recall ? { session_ids: sessions } : {}),
-    kind: recall ? 'conversation' : 'sources', recent, ...(topics && !recall ? { topics } : {}),
+    kind: recall ? 'conversation' : 'sources', ...(!recall ? { reconcile: true } : {}), recent, ...(topics && !recall ? { topics } : {}),
   } };
 }

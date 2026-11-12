@@ -1,14 +1,10 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import os from 'os';
+import { getDataDir } from '../data-dir';
 import fs from 'fs';
 import { entryTable, migratePointers } from './pointer-migration';
 import { migrateSnapshotPointers } from './snapshot-pointers';
 import { renameAgentTables, migrateAgents } from './agent-migration';
-
-export function getDataDir(): string {
-  return path.resolve(process.env.DRAKEN_DATA_DIR || path.join(os.homedir(), '.draken'));
-}
 
 let db: Database.Database | null = null;
 
@@ -216,8 +212,12 @@ export function initSchema(database: Database.Database): void {
   if (fresh) {
     const seed = database.prepare('INSERT INTO sync_settings(key,value) VALUES (?,?)');
     seed.run('auto_index', 'true');
-    seed.run('auto_prepare_conversations', 'true');
   }
+  // Preserve the saved indexing choice while withdrawing the retired permission
+  // to create snapshots and spend provider quota in the background.
+  database.exec(`INSERT OR IGNORE INTO sync_settings(key,value)
+    SELECT 'auto_index',value FROM sync_settings WHERE key='auto_prepare_conversations';
+    DELETE FROM sync_settings WHERE key IN ('auto_prepare_conversations','auto_preparing_sync','auto_briefing_failed');`);
   })();
 }
 

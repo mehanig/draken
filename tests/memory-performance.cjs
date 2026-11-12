@@ -3,10 +3,14 @@
 const assert=require('node:assert/strict'),path=require('node:path'),{execFileSync}=require('node:child_process');
 const modelDir=process.argv.find(arg=>arg.startsWith('--model-dir='))?.slice(12);
 if(!modelDir)throw Error('Pass --model-dir=<existing pinned test model directory>');
+const {modelFilesPresent}=require('../dist/memory/model-assets');
+const {MODEL_ID}=require('../dist/memory/model-files');
+if(!modelFilesPresent(path.resolve(modelDir)))throw Error('Model absent. Pass --model-dir=<existing pinned test model directory>; this benchmark never downloads weights.');
 if(process.argv.includes('--child')){
  const baseline=process.argv.includes('--baseline');
  const Model=baseline?require('../dist/memory/model').LocalEmbedder:require('../dist/memory/embedding-pool').EmbeddingPool;
- const model=new Model(path.resolve(modelDir));
+ const threads=Math.min(4,require('node:os').availableParallelism());
+ const model=new Model(path.resolve(modelDir),...(baseline?[threads]:[]));
  const samples=Array.from({length:48},(_,i)=>[
   'Deployment remains a proposal, not a verified release. Preserve the SQLite snapshots and inspect the authenticated health endpoint. Synthetic tests passed but production was NOT checked. ',
   `export async function collectRecords(db,source){const rows=db.prepare("SELECT id,hash FROM passages WHERE embedded=0 ORDER BY id").all();for(const row of rows){await index(row);}} // synthetic revision ${i} `,
@@ -15,14 +19,14 @@ if(process.argv.includes('--child')){
  ][i%4].repeat(10).slice(0,800));
  const embed=async texts=>{if(model.embedMany)return model.embedMany(texts);const out=[];for(const text of texts)out.push(await model.embed(text,false));return out;};
  (async()=>{try{
-  assert.equal(model.ready(),true);global.fetch=()=>{throw Error('Unexpected network');};
+  global.fetch=()=>{throw Error('Unexpected network');};
   await embed(samples.slice(0,8));const start=performance.now(),vectors=[];
   for(let i=0;i<samples.length;i+=8)vectors.push(...await embed(samples.slice(i,i+8)));
   const ms=performance.now()-start;
   // Long multilingual input crosses token windows; query prefix stays distinct.
   vectors.push(await model.embed('日'.repeat(1100)+' Deployment NOT checked.',false));
   vectors.push(await model.embed('Was the deployment checked?',true));
-  console.log(JSON.stringify({ms,parallelism:model.parallelism||{workers:1,threads:require('onnxruntime-web/wasm').env.wasm.numThreads},rss:process.memoryUsage().rss,fingerprint:model.fingerprint,vectors:Buffer.concat(vectors.map(v=>Buffer.from(v.buffer,v.byteOffset,v.byteLength))).toString('base64')}));
+  console.log(JSON.stringify({ms,parallelism:baseline?{workers:1,threads}:model.parallelism,rss:process.memoryUsage().rss,fingerprint:baseline?MODEL_ID:model.fingerprint,vectors:Buffer.concat(vectors.map(v=>Buffer.from(v.buffer,v.byteOffset,v.byteLength))).toString('base64')}));
  }finally{await model.close?.();}})().catch(e=>{console.error(e);process.exitCode=1;});
 }else{
  const run=baseline=>JSON.parse(execFileSync(process.execPath,[__filename,'--child',...(baseline?['--baseline']:[]),'--model-dir='+path.resolve(modelDir)],{encoding:'utf8',timeout:180000,maxBuffer:1000000}));

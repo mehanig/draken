@@ -1,15 +1,13 @@
 import type Database from 'better-sqlite3';
-import { retainedText } from '../db/retained-text';
 import { RecordReader, type NormalizationCache } from './jsonl';
 import { getSourceRoots, type RootInput } from '../sources/registry';
-export { RECORD_BYTES, getSessionRoot, fileRecords, openSessionFile, verifySessionHeader, type RecordPointer } from './jsonl';
 
-/** Current branch projection. Legacy text is readable only during conversion;
- * the pointer-only schema has no legacy text columns or retained-text table. */
+/** Current branch projection from verified originals; historical copied-text
+ * formats are handled exclusively by migration readers. */
 export class EntryReader {
   private reader: RecordReader;
   private row;
-  constructor(private db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache) {
+  constructor(db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache) {
     this.reader = new RecordReader(root, cache);
     this.row = db.prepare(`SELECT e.*,s.path,s.file_identity,s.agent,s.external_id FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE e.id=?`);
   }
@@ -21,16 +19,13 @@ export class EntryReader {
     const row = this.row.get(id) as any;
     if (!row) throw new Error('Session entry is unavailable');
     if (!row.effective_length) return '';
-    const original = row.record_hash ? this.normalized(row) : undefined;
-    if (row.effective_legacy_ref) return retainedText(this.db, row.effective_legacy_ref);
+    const original = this.normalized(row);
     if (row.effective_id !== null) {
       const edit = this.row.get(row.effective_id) as any;
       if (!edit || edit.session_id !== row.session_id || edit.type !== 'context_edit' || edit.target_id !== row.entry_id) throw new Error('Invalid context-edit pointer');
-      if (edit.legacy_replacement_ref) return retainedText(this.db, edit.legacy_replacement_ref);
       return this.normalized(edit).replacement || '';
     }
-    if (row.legacy_text_ref) return retainedText(this.db, row.legacy_text_ref);
-    return (original || this.normalized(row)).text;
+    return original.text;
   }
   close() { this.reader.close(); }
 }

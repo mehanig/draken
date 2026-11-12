@@ -40,7 +40,7 @@ function unchanged(sync, count) {
   assert.equal(getDb().prepare('SELECT count(*) n FROM sync_coverage').get().n, 0);
   const current = store.getSync(sync.id); assert.equal(current.status, 'open'); assert.equal(current.decisions, sync.decisions); assert.equal(current.carry_forward, sync.carry_forward);
 }
-function seedOld(spec) {
+function seedCache(spec) {
   const last = spec.payload.evidence.at(-1);
   const summary = { observations: [{ topic: last.workspace, state: 'reported_done', summary: last.text.slice(0, 800), evidence: [last.id] }], limitations: [] };
   getDb().prepare('INSERT INTO summary_cache(key,kind,model,prompt_version,output_json,created_at) VALUES (?,?,?,?,?,?)')
@@ -102,9 +102,9 @@ test('persisted order, roles and negative qualifications survive a skewed-clock 
   assert.equal(position.sequence, sync.items.find(item => item.text.startsWith('LATEST OUTCOME')).sequence); assert.equal(position.role, 'assistant'); assert.equal(position.background, false);
 });
 
-test('validated v2 leaf cache islands are reused; only the uncached gap is repacked', async () => {
+test('cached leaf islands are reused; only the uncached gap is repacked', async () => {
   session(240); const sync = await start(), old = [...new SummaryTree(sync, 0, new AbortController().signal).chunkSpecs(false).values()].flat();
-  assert.ok(old.length >= 4); seedOld(old[0]); seedOld(old.at(-1));
+  assert.ok(old.length >= 4); seedCache(old[0]); seedCache(old.at(-1));
   const original = getDb().prepare('SELECT key,output_json FROM summary_cache ORDER BY key').all();
   const result = await generateReply(sync.id), leaves = calls().filter(call => call.stage === 'chunk');
   assert.equal(leaves.length, 1); assert.equal(result.tree.run.cache_hits, 2);
@@ -117,7 +117,14 @@ test('validated v2 leaf cache islands are reused; only the uncached gap is repac
 test('new caches survive reference renumbering and allow a final-only one-call budget', async () => {
   session(600); const first = await start(); await generateReply(first.id); const count = calls().length;
   store.discardSync(first.id); const second = store.startSync();
-  for (const item of second.items) { item.ref = `E${10000 + Number(item.ref.slice(1))}`; getDb().prepare('UPDATE sync_items SET evidence_json=? WHERE sync_id=? AND event_key=?').run(JSON.stringify(item), second.id, item.event_key); }
+  for (const row of getDb().prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(second.id)) {
+    const encoded = JSON.parse(row.evidence_json);
+    assert.ok(encoded.source_pointer); assert.ok(encoded.source_key); assert.equal(Object.hasOwn(encoded, 'text'), false);
+    // Keep the frozen pointer and canonical identity when changing only the label.
+    const ref = `E${10000 + Number(encoded.ref.slice(1))}`;
+    getDb().prepare('UPDATE sync_items SET evidence_json=? WHERE sync_id=? AND event_key=?')
+      .run(JSON.stringify({ ...encoded, ref }), second.id, row.event_key);
+  }
   store.configureModels(second.id, { ...second.models, max_invocations: 1 });
   const result = await generateReply(second.id);
   assert.equal(calls().length - count, 1); assert.equal(calls().at(-1).model, ASTRA); assert.ok(result.tree.run.cache_hits);

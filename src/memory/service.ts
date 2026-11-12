@@ -1,8 +1,9 @@
 import path from 'path';
 import { fork, type ChildProcess } from 'child_process';
-import { getDataDir, getDb } from '../db/schema';
+import { getDb } from '../db/schema';
+import { getDataDir } from '../data-dir';
 import { getSourceRoots } from '../sources/registry';
-import { HttpError } from '../sync/store';
+import { HttpError } from '../errors';
 import { historyUpdate, type HistoryPage, type HistoryProgress, type HistoryQuery, type HistoryResults, type HistoryUpdate } from './types';
 import { storedHistoryReadiness } from './readiness';
 import { scanSessions } from '../sync/collector';
@@ -18,6 +19,8 @@ interface Work {
 let child: ChildProcess | undefined, directory = '', sessionRoot = '', sequence = 0, active: Work | undefined;
 let idle: NodeJS.Timeout | undefined;
 const retiring = new Set<ChildProcess>(), queue: Work[] = [];
+const retirementWaiters = new Set<() => void>();
+let shuttingDown = false;
 const failure = () => new HttpError(503, 'History could not be prepared or searched. Check network access on first use; if session files changed or moved, scan sessions again, then retry your question. Completed work is cached; no other provider or search mode was substituted.');
 const cancelled = () => new HttpError(409, 'History lookup stopped. Completed work is retained for the next request.');
 function settle(work: Work, error?: Error, value?: unknown) {
@@ -68,13 +71,18 @@ function start() {
   });
   const exited = () => {
     retiring.delete(processChild);
+    if (!retiring.size) { for (const done of retirementWaiters) done(); retirementWaiters.clear(); }
     if (child === processChild) { child = undefined; if (active) settle(active, failure()); }
     pump();
   };
-  processChild.once('error', exited); processChild.once('exit', exited);
+  processChild.once('error', () => {
+    if (!processChild.pid) exited();
+    else if (child === processChild) { if (active) settle(active, failure()); retire(); }
+  });
+  processChild.once('exit', exited);
 }
 function pump() {
-  if (active || retiring.size) return;
+  if (shuttingDown || active || retiring.size) return;
   clearTimeout(idle);
   if (!queue.length) { if (child) { idle = setTimeout(stopHistory, 5 * 60000); idle.unref(); } return; }
   const work = queue.shift()!;
@@ -91,6 +99,7 @@ function pump() {
   } catch { settle(work, failure()); retire(); if (!retiring.size) pump(); }
 }
 function request<T>(method: string, args: Record<string, unknown> = {}, signal?: AbortSignal, background = false): Promise<T> {
+  if (shuttingDown) return Promise.reject(new HttpError(503, 'Draken is stopping. No new history work can start.'));
   if (signal?.aborted) return Promise.reject(cancelled());
   const roots = JSON.stringify(getSourceRoots());
   if (directory !== getDataDir() || sessionRoot !== roots) { stopHistory(); directory = getDataDir(); sessionRoot = roots; }
@@ -107,11 +116,16 @@ function request<T>(method: string, args: Record<string, unknown> = {}, signal?:
     queue.push(work); pump();
   });
 }
-export function stopHistory() {
+export function stopHistory(): Promise<void> {
   clearTimeout(idle);
   if (active) settle(active, cancelled());
   for (const work of queue.splice(0)) settle(work, cancelled());
   retire();
+  return retiring.size ? new Promise(resolve => retirementWaiters.add(resolve)) : Promise.resolve();
+}
+export function shutdownHistory(): Promise<void> {
+  shuttingDown = true;
+  return stopHistory();
 }
 export function validateHistoryQuery(value: unknown): HistoryQuery {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'A history query is required');

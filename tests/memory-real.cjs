@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { LocalEmbedder } = require('../dist/memory/model');
+const { modelFilesPresent, prepareModelFiles } = require('../dist/memory/model-assets');
 const service = require('../dist/memory/service');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { getSync } = require('../dist/sync/store');
@@ -12,12 +13,12 @@ const { generateReply, launchChat } = require('../dist/sync/manager');
 const live = require('../dist/voice/live');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const modelDirectory = process.argv.find(arg => arg.startsWith('--model-dir='))?.slice(12) || path.join(os.tmpdir(), 'draken-synthetic-memory-model');
-const model = new LocalEmbedder(path.resolve(modelDirectory));
+const model = new LocalEmbedder(path.resolve(modelDirectory), Math.min(4, os.availableParallelism()));
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-memory-local-proof-')); fs.chmodSync(root, 0o700);
 let cache;
 (async () => {
-  if (process.argv.includes('--download-model')) await model.setup();
-  if (!model.ready()) throw new Error('Model absent. Pass --download-model explicitly, or --model-dir=<existing pinned model directory>.');
+  if (process.argv.includes('--download-model')) await prepareModelFiles(path.resolve(modelDirectory));
+  if (!modelFilesPresent(path.resolve(modelDirectory))) throw new Error('Model absent. Pass --download-model explicitly, or --model-dir=<existing pinned model directory>.');
   // Prove inference itself is offline; model loading must not fetch code/assets.
   const fetch = global.fetch; global.fetch = () => { throw new Error('Unexpected inference network request'); };
   const a = await model.embed('Retire Whisper and Kokoro. Native ChatGPT voice is the only supported speech path.', false);
@@ -56,7 +57,7 @@ let cache;
   const warmStart = Date.now(); await service.searchHistory({ question: 'Why did we stop using the speech pipeline on our machine?' });
   const warmLookupMs = Date.now() - warmStart;
   const unrelated = await service.searchHistory({ question: 'How many moons orbit Jupiter?' }); assert.equal(unrelated.results.length, 0);
-  service.stopHistory(); await delay(150); // Readiness survives worker retirement; call creation cannot prepare it again.
+  await service.stopHistory(); // Readiness survives worker retirement; call creation cannot prepare it again.
   assert.equal(service.historyReadiness().ready, true);
   cache = new (require('better-sqlite3'))(path.join(process.env.DRAKEN_DATA_DIR, 'memory/index.sqlite'), { readonly: true });
   const cacheVersion = cache.pragma('data_version', { simple: true });
@@ -87,7 +88,7 @@ let cache;
   assert.equal(cache.pragma('data_version', { simple: true }), chatVersion, 'Chat must not write the corpus index'); cache.close(); cache = null;
   assert.equal(protectedRows(), original); assert.equal(getSync(syncId).decisions, '');
   assert.equal(getSync(syncId).status, 'open');
-  service.stopHistory();
+  await service.stopHistory();
   const cancel = new AbortController();
   const cancelled = service.searchHistory({ question: 'speech' }, cancel.signal); cancel.abort();
   await assert.rejects(cancelled, /stopped/);
@@ -97,5 +98,5 @@ let cache;
     unrelatedQuestionAbstained: true, nativeContextAndHistoryLinked: true, callReadyAfterWorkerRestart: true, callCorpusWrites: 0, textReplyCitationsValidated: true, preparedChatFollowup: true, chatCorpusWrites: 0, chatCreatedVoiceCall: false, cancelResume: true,
     canonicalEvidenceUnchanged: true, coverage: 0, productionWrites: 0, realProviderCalls: 0 }, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
-  await live.stopLiveCalls(); service.stopHistory(); await delay(150); cache?.close(); closeDb(); fs.rmSync(root, { recursive: true, force: true });
+  await live.stopLiveCalls(); await service.stopHistory(); cache?.close(); closeDb(); fs.rmSync(root, { recursive: true, force: true });
 });

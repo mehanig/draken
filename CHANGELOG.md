@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0
+
+### User-triggered syncs, automatic local indexing
+
+- Automatic indexing accumulates searchable history without creating syncs, summaries, recaps or briefings and without provider model calls. Only an explicit user action creates a sync and prepares its briefing from all eligible accumulated entries.
+- Rename the setting to **Automatically index history**. Preserve saved indexing choices, migrate legacy combined-only preferences, and retire automatic-briefing job controls. Existing automatic snapshots, conversations, notes, cached work and cost history remain intact; new requests do not silently claim or resume them.
+- Keep local batching, durable checkpoints, foreground priority and bounded retries. See [MEMORY.md](MEMORY.md#optional-background-indexing) for the policy.
+
+### Ownership and reliability
+
+- Separate shared retrieval, configuration, embedding assets and inference ownership. Live evidence requires verified original-backed pointers; migration-only historical compatibility and reusable vectors remain supported.
+- Hold exclusive data-directory ownership until listeners and owned jobs/processes have drained. Suspended servers cannot be displaced by an expired heartbeat; unconfirmed cleanup retains ownership rather than allowing a second server to start.
+- Confirm native helper/group exit for calls, metadata checks and terminal commands. Cancel stale browser source reads when switching sources, navigating or closing a call.
+- Strengthen historical compatibility, process-lifetime, package and optional qualification regressions. Documentation retains current contracts rather than implementation/review transcripts.
+
+### Upgrading
+
+Back up original agent logs and Draken state, finish active work, stop the server, install the new version and restart. The retired automatic-briefing settings are removed, but existing sync data is not deleted or rewritten. Local indexing can remain enabled without spending summary-provider quota. Node.js 22.19+ is still required; there are no dependency-version changes in this release. Synthetic qualification does not establish real-provider audio or physical-device acceptance.
+
 ## 0.5.1
 
 - Reflow overlong recap prose at existing spaces rather than rejecting it solely for line width. No words, qualifications or original point boundaries are dropped; the same five-line, 160-character-per-line and 600-character-total limits still apply. Other invalid output still gets at most one correction.

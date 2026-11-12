@@ -3,7 +3,7 @@ import path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { createInterface } from 'readline/promises';
-import { getDataDir } from '../db/schema';
+import { getDataDir } from '../data-dir';
 import { npmCli } from '../npm-cli';
 import { executable, isolatedFlags, managedEnvironment, PI_PACKAGE, PI_VERSION, piPaths, piSetupStatus, privateDirectory, selectedPi } from './runtime';
 
@@ -86,11 +86,4 @@ export async function doctor(): Promise<void> {
   for (const model of status.models) console.log(`  ${model.model}: ${model.state}`);
   console.log('Credential checks do not generate text, verify provider access or measure billing.\nVoice is separate: draken voice setup → draken voice login\nHistory sources: Settings → Agents & sessions. Then Sync with Draken.');
   if (status.state !== 'configured') process.exitCode = 1;
-}
-
-export async function voiceSetup(action: string): Promise<void> {
-  const flag = ({ setup: '--install', login: '--login', status: '--check' } as Record<string, string>)[action];
-  if (!flag) throw new Error('Usage: draken voice setup | login | status');
-  if (action === 'login' && !process.stdin.isTTY) throw new Error('Run draken voice login in an interactive terminal on the server.');
-  await run(process.execPath, [path.resolve(__dirname, '../../voice/realtime/setup.mjs'), flag], process.env, process.cwd());
 }

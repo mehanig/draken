@@ -4,18 +4,22 @@ import fs from 'fs';
 import https from 'https';
 import { randomUUID } from 'crypto';
 import { rememberServer } from './server-state';
+import { getDataDir } from './data-dir';
+import { ownServerDirectory } from './server-ownership';
+import { activity } from './sync/activity';
 import { getDb, closeDb } from './db/schema';
 import { authMiddleware, isLoopbackHost, isNoAuthMode, validateAuthConfig } from './auth/middleware';
 import authRouter from './routes/auth';
 import syncRouter from './routes/sync';
 import memoryRouter from './routes/memory';
-import { stopHistory } from './memory/service';
-import { startBackgroundIndexing, stopBackgroundIndexing } from './memory/automatic';
+import { shutdownHistory } from './memory/service';
+import { startBackgroundIndexing, stopBackgroundIndexing } from './sync/background';
 import voiceRouter from './routes/voice';
 import { recoverLegacyCalls } from './voice/legacy-history';
-import { validateVoiceConfig, recoverLiveCalls, stopLiveCalls } from './voice/live';
-import { HttpError, recoverInterruptedRuns } from './sync/store';
-import { stopManagerProcesses } from './sync/manager';
+import { validateVoiceConfig, recoverLiveCalls, shutdownLiveVoice } from './voice/live';
+import { recoverInterruptedRuns } from './sync/store';
+import { HttpError } from './errors';
+import { stopManagerProcesses } from './sync/pi';
 import { stopPiChecks } from './pi/runtime';
 
 export function createApp(options: { staticDir?: string; instanceId?: string } = {}) {
@@ -70,6 +74,7 @@ export function startServer(trayOwned = false): void {
   // Bind before recovery: a second launch on an occupied port must not mark the
   // actual server's active runs/calls interrupted or mutate its database.
   let ready = false, listening = 0, stopping = false;
+  let releaseDirectory: (() => void) | undefined;
   const instanceId = randomUUID();
   const app = express();
   app.use((_req, res, next) => ready ? next() : res.status(503).json({ error: 'Draken is starting or stopping.' }));
@@ -77,6 +82,7 @@ export function startServer(trayOwned = false): void {
   const bound = () => {
     if (++listening !== (tls ? 2 : 1) || stopping) return;
     try {
+      releaseDirectory = ownServerDirectory(getDataDir());
       getDb(); recoverInterruptedRuns(); recoverLegacyCalls(); recoverLiveCalls();
       const httpAddress = server.address(), secureAddress = secureServer?.address();
       if (!httpAddress || typeof httpAddress === 'string' || typeof secureAddress === 'string') throw new Error('Cannot record the listening address');
@@ -94,12 +100,24 @@ export function startServer(trayOwned = false): void {
   const server = app.listen(port, host, bound);
   const shutdown = (code = 0) => {
     if (stopping) return; stopping = true; ready = false;
-    const backgroundStopped = stopBackgroundIndexing();
-    stopManagerProcesses(); stopHistory();
-    secureServer?.close();
+    const activityStopped = activity.shutdown();
+    // SQLite ownership alone does not keep Node's event loop alive.
+    const keepAlive = setInterval(() => {}, 60_000);
+    let reported = false;
+    const unconfirmed = () => {
+      if (!reported) console.error('Shutdown is unconfirmed. This process retains data-directory ownership; no replacement server may start. Inspect the owned resources before forcing termination.');
+      reported = true; process.exitCode = 1;
+    };
+    const deadline = setTimeout(unconfirmed, 6500);
     const closed = new Promise<void>(resolve => server.close(() => resolve()));
-    void Promise.all([closed, stopLiveCalls(), backgroundStopped, stopPiChecks()]).finally(() => { closeDb(); process.exit(code); });
-    setTimeout(() => process.exit(code), 6500).unref();
+    const secureClosed = new Promise<void>(resolve => secureServer ? secureServer.close(() => resolve()) : resolve());
+    void Promise.allSettled([closed, secureClosed, activityStopped, stopBackgroundIndexing(),
+      stopManagerProcesses(), shutdownHistory(), shutdownLiveVoice(), stopPiChecks()]).then(results => {
+      if (results.some(result => result.status === 'rejected')) { unconfirmed(); return; }
+      try { closeDb(); releaseDirectory?.(); }
+      catch { unconfirmed(); return; }
+      clearTimeout(deadline); clearInterval(keepAlive); process.exit(code);
+    });
   };
   const failed = (error: NodeJS.ErrnoException) => {
     console.error(error.code === 'EADDRINUSE' ? 'Draken could not bind: a configured port is already in use. Run draken status; do not start a second server.' : `Draken could not listen (${error.code || 'unknown error'}). Check the bind address, ports and server log.`);

@@ -46,7 +46,7 @@ export function PreparationUsageDashboard({ active }: { active: boolean }) {
   const unit = metric === 'cost' ? 'USD' : 'Batches';
   return <section className="preparation-usage" aria-labelledby="preparation-usage-title">
     <h3 id="preparation-usage-title">Preparation usage</h3>
-    <p className="small muted">Automatic and manual preparation, including retries and discarded batches. Estimates use recorded model usage and prices—not your bill, subscription charge or remaining quota.</p>
+    <p className="small muted">Preparation history, including past automatic work, retries and discarded batches. Automatic indexing now makes no provider model calls. Estimates use recorded model usage and prices—not your bill, subscription charge or remaining quota.</p>
     <div className="usage-controls">
       <label>Look back<select value={range} onChange={event => setRange(event.target.value as UsageRange)}><option value="6h">6 hours</option><option value="1d">1 day</option><option value="7d">7 days</option><option value="14d">14 days</option></select></label>
       <label>Bucket size<select value={bucket} onChange={event => setBucket(event.target.value as UsageBucket)}><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option></select></label>

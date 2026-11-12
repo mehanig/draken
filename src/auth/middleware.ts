@@ -35,11 +35,7 @@ export function isNoAuthMode(): boolean {
   return isLoopbackHost(process.env.DRAKEN_HOST || '127.0.0.1') && !credentialsConfigured;
 }
 
-// Get auth configuration from environment variables
-// Returns null only if NO_AUTH mode is enabled
-// Throws error if auth is required but not properly configured
 export function getAuthConfig(): AuthConfig | null {
-  // Loopback defaults to no login; an explicit override is also supported.
   if (isNoAuthMode()) {
     return null;
   }
@@ -48,7 +44,6 @@ export function getAuthConfig(): AuthConfig | null {
   const password = process.env.DRAKEN_PASSWORD;
   const jwtSecret = process.env.DRAKEN_JWT_SECRET;
 
-  // All three are required when auth is enabled
   const missing: string[] = [];
   if (!username) missing.push('DRAKEN_USERNAME');
   if (!password) missing.push('DRAKEN_PASSWORD');
@@ -69,26 +64,21 @@ export function getAuthConfig(): AuthConfig | null {
   };
 }
 
-// Validate auth config on startup (call this early in server initialization)
 export function validateAuthConfig(): void {
   if (isNoAuthMode()) {
     console.log('Local mode: no dashboard login (loopback only).');
     return;
   }
 
-  // This will throw if config is invalid
   const config = getAuthConfig();
   console.log(`Authentication enabled for user: ${config!.username}`);
 }
 
-// Check if authentication is enabled
 export function isAuthEnabled(): boolean {
   return !isNoAuthMode();
 }
 
-// Authentication middleware
 export function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
-  // If NO_AUTH mode, allow all requests
   if (isNoAuthMode()) {
     return next();
   }
@@ -116,7 +106,6 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
   }
 }
 
-// Generate JWT token
 export function generateToken(username: string): string {
   const config = getAuthConfig();
   if (!config) {
@@ -128,13 +117,11 @@ export function generateToken(username: string): string {
   });
 }
 
-// Validate credentials
 export function validateCredentials(username: string, password: string): boolean {
   const config = getAuthConfig();
   if (!config) {
     return false;
   }
 
-  // Simple comparison - credentials are from env vars
   return username === config.username && password === config.password;
 }

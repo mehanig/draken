@@ -4,7 +4,8 @@ import { createHash } from 'crypto';
 import Database from 'better-sqlite3';
 import { sourceStamps } from './stamps';
 import { sourceRoots, type RootInput } from '../sources/registry';
-import { MODEL_ID, FILES } from './model-files';
+import { MODEL_ID } from './model-files';
+import { modelFilesPresent } from './model-assets';
 
 const KEY = 'call-history-ready-v1';
 export interface HistoryReadiness { ready: boolean; before: string | null }
@@ -87,7 +88,7 @@ export function storedHistoryReadiness(directory: string, source: Database.Datab
     db.pragma('query_only = ON'); db.pragma('busy_timeout = 1000');
     if ((db.prepare("SELECT value FROM meta WHERE key='model'").get() as { value: string } | undefined)?.value !== MODEL_ID) return { ready: false, before: null };
     if (db.prepare('SELECT 1 FROM passages WHERE embedded=1 LIMIT 1').get()
-      && !FILES.every(file => { try { return fs.statSync(path.join(directory, 'memory', 'model', file.name)).size === file.size; } catch { return false; } })) return { ready: false, before: null };
+      && !modelFilesPresent(path.join(directory, 'memory', 'model'))) return { ready: false, before: null };
     return indexReadiness(db, source, capturedOnly);
   } catch { return { ready: false, before: null }; }
   finally { db?.close(); }

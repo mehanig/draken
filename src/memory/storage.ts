@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_BYTES, validEmbedding } from './embedding-contract';
 
 /** One physical passage/vector, many scoped occurrences. `chunks` and
  * `embedding_cache` are read views, not additional text/vector stores. */
@@ -23,7 +24,7 @@ export function initHistoryStorage(db: Database.Database, fingerprint: string): 
       CREATE TABLE IF NOT EXISTS chunk_links(id INTEGER PRIMARY KEY AUTOINCREMENT,ref TEXT NOT NULL REFERENCES records(ref) ON DELETE CASCADE,offset INTEGER NOT NULL,passage_id INTEGER NOT NULL REFERENCES passages(id));
       CREATE INDEX IF NOT EXISTS links_ref ON chunk_links(ref);
       CREATE INDEX IF NOT EXISTS links_passage ON chunk_links(passage_id);
-      CREATE VIRTUAL TABLE IF NOT EXISTS passage_vectors USING vec0(embedding float[384] distance_metric=cosine);
+      CREATE VIRTUAL TABLE IF NOT EXISTS passage_vectors USING vec0(embedding float[${EMBEDDING_DIMENSIONS}] distance_metric=cosine);
     `);
     if (prior === 'history-index-v1') {
       const sequence = (db.prepare("SELECT seq FROM sqlite_sequence WHERE name='chunks'").get() as any)?.seq || 0;
@@ -50,7 +51,7 @@ export function initHistoryStorage(db: Database.Database, fingerprint: string): 
           bytes ||= saved;
         }
         if (!bytes) continue;
-        if (bytes.length !== 1536 || [...new Float32Array(Uint8Array.from(bytes).buffer)].some(value => !Number.isFinite(value))) throw new Error('Invalid retained embedding');
+        if (bytes.length !== EMBEDDING_BYTES || !validEmbedding(new Float32Array(Uint8Array.from(bytes).buffer))) throw new Error('Invalid retained embedding');
         save.run(BigInt(passage.id), bytes); db.prepare('UPDATE passages SET embedded=1 WHERE id=?').run(passage.id);
       }
       // Preserve the external-content FTS index and occurrence IDs, including

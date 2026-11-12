@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { ModelCallMetric, PreparationUsage, PreparationUsageTotals, UsageBucket, UsageRange } from '../types';
 import { recordedCost } from './cost';
-import { HttpError } from './store';
+import { HttpError } from '../errors';
 
 const ranges = { '6h': 6, '1d': 24, '7d': 168, '14d': 336 };
 const widths = { '1h': 1, '6h': 6, '24h': 24 };

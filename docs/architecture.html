@@ -74,8 +74,8 @@
             </div>
             <div class="branch-label">The server owns four connections ↓</div>
             <div class="branches">
-              <div class="branch"><div class="kicker">Reads →</div><h3>Pi session files</h3><p>Original coding history. Draken does not rewrite the source logs or edit projects.</p></div>
-              <div class="branch"><div class="kicker">Reads &amp; writes ↔</div><h3>SQLite</h3><p>Copied evidence, notes, conversations, review status and reusable summaries.</p></div>
+              <div class="branch"><div class="kicker">Reads →</div><h3>Enabled agent session files</h3><p>Original coding history. Draken does not rewrite the source logs or edit projects.</p></div>
+              <div class="branch"><div class="kicker">Reads &amp; writes ↔</div><h3>SQLite</h3><p>Evidence pointers, notes, conversations, review status and reusable summaries.</p></div>
               <div class="branch"><div class="kicker">Starts →</div><h3>Isolated pi processes</h3><p>Briefings, text questions and recaps. Tools and session persistence are disabled.</p></div>
               <div class="branch"><div class="kicker">Manages →</div><h3>Official voice helper</h3><p>A pinned Codex helper manages the native ChatGPT voice session. No coding execution.</p></div>
             </div>
@@ -84,7 +84,7 @@
             <figcaption>Audio has its own browser-to-provider connection. It is not a sequence of locally transcribed and synthesized voice turns.</figcaption>
           </figure>
           <div class="note yellow"><strong>“Read-only” means read-only toward your coding work.</strong> Draken still writes its own database when you start a sync, talk, save notes or explicitly mark evidence reviewed.</div>
-          <p class="why"><strong>Why one server?</strong> This is a personal tool. One application and database are easier to run and back up. The tradeoff: active jobs and call ownership also live in memory, so this is not a multi-user, multi-server service without further work.</p>
+          <p class="why"><strong>Why one server?</strong> A kernel-backed lock enforces one owner per data directory before initialization or recovery. Jobs and calls have process-local leases; shutdown retains directory ownership until resource exit is confirmed. The tray’s separate heartbeat is discovery/presentation, not server authority. See <a href="../ARCHITECTURE.md#languages-and-build-output">ownership and shutdown</a>. This remains a personal tool, not a distributed multi-user service.</p>
         </section>
 
         <section class="chapter" id="journey" aria-labelledby="journey-title">
@@ -92,14 +92,14 @@
           <p class="lead">The ordinary path is <strong>Sync with Draken → prepared snapshot → call</strong>. It creates one coherent conversation, not a set of artificial user-facing batches.</p>
           <ol class="flow">
             <li><span class="step">01</span><strong>Scan</strong><p>Read complete new records from eligible local session files.</p></li>
-            <li><span class="step">02</span><strong>Freeze</strong><p>Copy all currently available entries into a new snapshot.</p></li>
+            <li><span class="step">02</span><strong>Freeze</strong><p>Freeze membership and verified source pointers in a new snapshot.</p></li>
             <li><span class="step">03</span><strong>Prepare</strong><p>Make short prior-sync memory, then the new briefing.</p></li>
             <li><span class="step">04</span><strong>Talk</strong><p>Start the call only from the still-valid browser action.</p></li>
             <li><span class="step">05</span><strong>Remember</strong><p>Keep the exchange and request a short recap on call-UI closure.</p></li>
           </ol>
           <div class="two">
             <div class="card"><h3>Home stays compact</h3><p>History cards help you recognize earlier conversations. Each <code>/syncs/:id</code> page keeps the full briefing, notes, discussion and expandable sources.</p></div>
-            <div class="card"><h3>Failure does not erase work</h3><p>If preparation fails or is cancelled, the snapshot and valid cached summaries stay. Recovery is an explicit retry, not a hidden restart.</p></div>
+            <div class="card"><h3>Failure does not erase work</h3><p>If preparation fails or is cancelled, the snapshot and valid cached summaries stay. Briefing recovery requires an explicit retry; automatic local indexing never resumes snapshot or model work.</p></div>
           </div>
           <div class="note blue"><strong>A URL is not microphone permission.</strong> Call-start intent exists only in browser memory. Reloading or sharing a sync URL cannot start capture. A hidden page, denied permission or failed preparation requires explicit recovery.</div>
           <details><summary>Under the button: request IDs, background work and progress</summary><div><p><code>POST /api/syncs/start-call</code> receives a unique request ID. Repeating the same ID returns the same sync rather than making duplicates.</p><p>The server responds with <strong>202 Accepted</strong> after launching preparation. That means “work accepted,” not “briefing finished.” The browser polls progress. The request itself cannot open a microphone; the browser controller performs call setup separately when preparation is ready and its original intent is still valid.</p></div></details>
@@ -108,7 +108,7 @@
 
         <section class="chapter" id="evidence" aria-labelledby="evidence-title">
           <div class="section-head"><span class="number">03</span><h2 id="evidence-title">Included is<br>not reviewed.</h2></div>
-          <p class="lead">The local index can change as new activity arrives. A snapshot is a fixed copy of evidence for a particular conversation. Several snapshots can stay open at once.</p>
+          <p class="lead">The local index can change as new activity arrives. A snapshot fixes evidence membership and projection for a particular conversation; excerpts require the verified originals. Several snapshots can stay open at once.</p>
           <figure class="diagram">
             <div class="state-line">
               <div class="node"><b>Available</b><small>Eligible for a new snapshot</small></div><div class="edge" aria-hidden="true">→</div>
@@ -124,12 +124,12 @@
           <div class="table-wrap"><table><thead><tr><th scope="col">State</th><th scope="col">What it actually means</th></tr></thead><tbody>
             <tr><td><span class="status">Indexed</span></td><td>The collector read an entry into the local index.</td></tr>
             <tr><td><span class="status">Available</span></td><td>Eligible, not covered, and not held by another open snapshot.</td></tr>
-            <tr><td><span class="status held">Included</span></td><td>A fixed snapshot contains a copy of that evidence.</td></tr>
+            <tr><td><span class="status held">Included</span></td><td>A fixed snapshot contains a verified pointer and frozen projection for that evidence.</td></tr>
             <tr><td><span class="status">Processed</span></td><td>The entry passed through a successful first-level summary. This is not review.</td></tr>
             <tr><td><span class="status done">Reviewed</span></td><td>You explicitly completed review; the server wrote coverage.</td></tr>
           </tbody></table></div>
           <div class="formula"><b>Available entries</b> = eligible source entries − reviewed entries − entries reserved by other open syncs.</div>
-          <details><summary>How the collector and fixed copies work</summary><div><p>The collector reads complete JSONL records, remembers read positions, follows the saved active branch and avoids double-counting inherited entries. It omits unsupported content such as thinking blocks and applies best-effort secret removal.</p><p>Stored evidence is a bounded text excerpt, not a byte-for-byte archive of every field. A snapshot copies the text and source details so later scans cannot silently rewrite an old conversation. Legacy capped snapshots have a separate explicit expansion operation that preserves earlier notes and citations.</p><p>Only explicit review writes <code>sync_coverage</code>. A generation run that started but did not finish successfully blocks review instead of presenting partial work as complete.</p></div></details>
+          <details><summary>How the collector and frozen pointers work</summary><div><p>The collector reads complete JSONL records, remembers read positions, follows the saved active branch and avoids double-counting inherited entries. It omits unsupported content such as thinking blocks and applies best-effort secret removal.</p><p>Snapshots retain source pointers, attribution, selected edits and hashes, not copied source text. Later scans cannot silently change their membership or projection. Excerpts are reconstructed from verified originals; missing or changed originals produce an explicit unavailable state, without erasing saved notes, conversations or reference identities. Legacy capped snapshots have a separate explicit expansion operation that preserves earlier notes and citations.</p><p>Only explicit review writes <code>sync_coverage</code>. A generation run that started but did not finish successfully blocks review instead of presenting partial work as complete.</p></div></details>
           <p class="why"><strong>Why freeze evidence?</strong> A conversation needs a stable meaning. “What did we know in that sync?” should not change merely because the original session grew later.</p>
         </section>
 
@@ -141,10 +141,8 @@
             <div class="tree-row leaves"><div class="tree-cell"><b>Session A</b>Earlier entries</div><div class="tree-cell"><b>Session A</b>Later entries</div><div class="tree-cell"><b>Session B</b>Earlier entries</div><div class="tree-cell"><b>Session B</b>Later entries</div></div>
             <div class="tree-join">Cheaper model · chronological chunks</div>
             <div class="tree-row leaves"><div class="tree-cell"><b>Chunk A1</b>Small summary</div><div class="tree-cell"><b>Chunk A2</b>Small summary</div><div class="tree-cell"><b>Chunk B1</b>Small summary</div><div class="tree-cell"><b>Chunk B2</b>Small summary</div></div>
-            <div class="tree-join">Cheaper model · reconcile each session</div>
-            <div class="tree-row sessions"><div class="tree-cell"><b>Reconcile A</b>Compare plans with later outcomes</div><div class="tree-cell"><b>Reconcile B</b>Keep corrections and unresolved work</div></div>
-            <div class="tree-join">Cheaper model · repeat levels as needed</div>
-            <div class="tree-row"><div class="tree-cell merge"><b>Related work across sessions</b>Group and merge the shared threads</div></div>
+            <div class="tree-join">Default Luna path · one global reconciliation</div>
+            <div class="tree-row"><div class="tree-cell merge"><b>Reconcile across complete batches</b>Compare plans, later outcomes, corrections and unresolved work</div></div>
             <div class="tree-join">Bounded summaries + selected original excerpts + saved notes</div>
             <div class="tree-row"><div class="tree-cell final"><b>Stronger model</b>Opening briefing or answer to a text question</div></div>
             <figcaption>All eligible snapshot entries can be processed, but the output is still lossy. This is not proof that every fact survived or that any claim was independently verified.</figcaption>
@@ -156,7 +154,7 @@
           <h3>References are a trail, not a truth stamp.</h3>
           <div class="label-row"><code>S1 — one model request</code><code>[E3] — snapshot evidence</code><code>[C2] — snapshot context</code></div>
           <p>The model uses short labels; the server maps them to actual sources. A reader can open a cited excerpt. Those labels are local to their request or snapshot, not universal identifiers.</p>
-          <details><summary>Citation repair and chunk limits</summary><div><p>Chronological leaves target at most 100 entries and 48,000 serialized characters. These are internal processing units, not a limit on the user’s whole snapshot.</p><p>A summary observation can cite at most 16 distinct references. If the only validation error is the count, the existing second attempt asks the same model to select from that observation’s original references. It does not rewrite the claim, guess IDs, silently take the first 16 or add retries. Other malformed output uses the normal bounded repair.</p><p>If validation still fails, the run stops and keeps valid cached work. Shape and source-membership checks cannot prove that an excerpt supports the model’s interpretation.</p></div></details>
+          <details><summary>Citation repair and chunk limits</summary><div><p>The default Luna path uses larger token-bounded complete batches and one global reconciliation. Other models retain conservative multilevel processing. These are internal processing units, not limits on the whole snapshot; see <a href="../ARCHITECTURE.md">the canonical summary-pipeline explanation</a> for current budgets.</p><p>A summary observation can cite at most 16 distinct references. If the only validation error is the count, the existing second attempt asks the same model to select from that observation’s original references. It does not rewrite the claim, guess IDs, silently take the first 16 or add retries. Other malformed output uses the normal bounded repair.</p><p>If validation still fails, the run stops and keeps valid cached work. Shape and source-membership checks cannot prove that an excerpt supports the model’s interpretation.</p></div></details>
           <p class="why"><strong>Why this tree?</strong> Large histories become practical to retry without paying to redo every successful step. The cost is information loss; original evidence must remain inspectable.</p>
         </section>
 
@@ -171,7 +169,7 @@
           <figure class="diagram"><div class="connection"><div><b>Three recent syncs</b><span class="sub">Non-discarded; open ones included</span></div><span class="arrow" aria-hidden="true">→</span><div><b>Short frozen memory</b><span class="sub">For the new sync</span></div></div><figcaption>The new one-click sync freezes prior inputs. It does not silently inherit a moving window of every later edit.</figcaption></figure>
           <p>Recap generation processes the supplied briefing, messages and notes in parts, then combines them. It does not just grab the last few messages. Each final recap is <strong>one to five lines, no more than 600 characters</strong>.</p>
           <p>New discussion or notes make the old recap stale. Closing the call UI requests a refresh; a browser exit cannot guarantee that it happens. You can refresh explicitly. Saved fragments can be reused, and an older frozen input cannot overwrite a newer recap.</p>
-          <div class="note yellow"><strong>No idle inference.</strong> There is no background timer spending model requests just because Draken is open. Preparation, questions and recap generation are explicit actions or documented parts of the call flow.</div>
+          <div class="note yellow"><strong>Automatic indexing stays local.</strong> Settings → Automatically index history saves your indexing choice. While enabled, the scheduler checks once a minute and indexes at 64 changed source records; smaller tails wait for explicit foreground preparation. History accumulates without creating syncs, summaries or briefings or making provider model calls. Local embeddings use CPU, memory and disk and may download pinned search model files on first use. Only your explicit Sync or Chat instead action creates a snapshot and starts its briefing. Existing snapshots and notes stay untouched; indexing never starts microphone capture or marks evidence reviewed. See <a href="../MEMORY.md">local indexing, resources and thresholds</a>.</div>
           <p class="why"><strong>Why keep memory small?</strong> It makes history easier to browse and avoids resending every previous exchange. The tradeoff is incomplete recall. For detail, go back to the original sync.</p>
         </section>
 
@@ -180,12 +178,12 @@
           <p class="lead">One persistent browser audio connection, through a separate native ChatGPT sign-in and the pinned official Codex helper. <strong>No local speech engine, Platform API-key fallback or alternative-provider fallback.</strong></p>
           <figure class="diagram">
             <div class="voice-path"><div class="path-title">Audio — does not pass through a local speech model</div><div class="connection"><div><b>Browser mic / speaker</b><span class="sub">Controller owns capture &amp; playback</span></div><span class="arrow" aria-hidden="true">↔</span><div><b>OpenAI live voice</b><span class="sub">WebRTC</span></div></div></div>
-            <div class="voice-path"><div class="path-title">Control and context</div><div class="voice-chain"><div class="node"><b>Browser</b><p>Start, type, stop, end</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>Draken</b><p>Call ownership and frozen evidence</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>Official helper</b><p>Native account and session</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>OpenAI</b><p>Generated conversation</p></div></div></div>
-            <div class="voice-path"><div class="path-title">If more evidence is requested</div><div class="connection"><div><b>Read-only lookup</b><span class="sub">Search this frozen snapshot</span></div><span class="arrow" aria-hidden="true">→</span><div><b>Selected text</b><span class="sub">Not a coding model or tool result to execute</span></div></div></div>
+            <div class="voice-path"><div class="path-title">Control and context</div><div class="voice-chain"><div class="node"><b>Browser</b><p>Start, type, stop, end</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>Draken</b><p>Call ownership and bounded evidence</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>Official helper</b><p>Native account and session</p></div><div class="edge" aria-hidden="true">→</div><div class="node"><b>OpenAI</b><p>Generated conversation</p></div></div></div>
+            <div class="voice-path"><div class="path-title">If more evidence is requested</div><div class="connection"><div><b>Read-only lookup</b><span class="sub">Prepared history; explicit frozen-source reads</span></div><span class="arrow" aria-hidden="true">→</span><div><b>Selected text</b><span class="sub">Not a coding model or tool result to execute</span></div></div></div>
             <figcaption>Provider credentials remain on the server. Pi credentials are not copied or converted. No raw microphone recording is stored locally; transcript text is.</figcaption>
           </figure>
           <div class="two">
-            <div class="card"><h3>Context is bounded data</h3><p>The call starts with a briefing, notes and excerpts. Initial context is at most 24,000 UTF-8 bytes; lookup packets are at most 3,500 bytes. Original source roles and dates matter.</p><p>Explicit recall can supply dated history. Prior recaps are labelled as summaries, not quotations. Old requests are not reissued as new instructions.</p></div>
+            <div class="card"><h3>Context is bounded data</h3><p>The call starts with a briefing, notes and excerpts. Historical lookup uses a fixed prepared cutoff; explicit frozen-source requests retain their snapshot meaning. Evidence travels in acknowledged context parts, separately from the small handoff receipt. Original source roles and dates matter. See <a href="../VOICE.md">retrieval scope and transport limits</a>.</p><p>Explicit recall can supply dated history. Prior recaps are labelled as summaries, not quotations. Old requests are not reissued as new instructions.</p></div>
             <div class="card"><h3>No path from speech to execution</h3><p>Tool and approval requests are denied. The helper’s local endpoint can return assistant text, not executable tool calls. It cannot run shell commands, edit projects, save decisions by instruction or advance review.</p><p>Malformed endpoint requests are contained, and lookup limits are validated.</p></div>
           </div>
           <div class="limits"><div class="limit"><strong>30 min</strong><span>Maximum call duration</span></div><div class="limit"><strong>60</strong><span>User-message limit</span></div><div class="limit"><strong>90 sec</strong><span>Disconnect lease</span></div><div class="limit"><strong>120</strong><span>Delegated lookups per call</span></div></div>
@@ -208,19 +206,19 @@
           <div class="section-head"><span class="number">08</span><h2 id="storage-title">Keep the record.<br>Not a running action.</h2></div>
           <p class="lead">Private state lives outside the checkout, by default under <code>~/.draken/</code>. The main database is <code>~/.draken/draken.db</code>. Credentials, installed helper files and TLS keys are private runtime material, not application assets.</p>
           <div class="table-wrap"><table><thead><tr><th scope="col">Records</th><th scope="col">Tables and responsibility</th></tr></thead><tbody>
-            <tr><td>Source index</td><td><code>pi_sessions</code>, <code>pi_entries</code>, <code>sync_settings</code><br>Read positions, source entries and selection settings.</td></tr>
-            <tr><td>Fixed snapshots</td><td><code>syncs</code>, <code>sync_items</code><br>Copied evidence; notes and the briefing live on the sync.</td></tr>
+            <tr><td>Source index</td><td><code>agent_sessions</code>, <code>agent_entries</code>, <code>sync_settings</code><br>Read positions, source entries and selection settings.</td></tr>
+            <tr><td>Fixed snapshots</td><td><code>syncs</code>, <code>sync_items</code><br>Frozen membership and source pointers; notes and the briefing live on the sync.</td></tr>
             <tr><td>Discussion &amp; review</td><td><code>sync_messages</code>, <code>sync_coverage</code><br>History and separately recorded explicit review.</td></tr>
             <tr><td>Preparation</td><td><code>sync_runs</code>, <code>sync_tree_nodes</code>, <code>summary_cache</code><br>Progress, tree structure and valid reusable summaries.</td></tr>
             <tr><td>Short memory</td><td><code>sync_presentations</code>, <code>sync_recap_cache</code><br>Card recaps, frozen prior inputs and cached recap parts.</td></tr>
             <tr><td>Native calls</td><td><code>live_calls</code>, <code>live_messages</code><br>Call state and independent user/assistant messages.</td></tr>
             <tr><td>Preserved old calls</td><td><code>voice_calls</code>, <code>voice_turns</code><br>Historical local-engine records. Not a new-call execution path.</td></tr>
           </tbody></table></div>
-          <div class="two"><div class="card green"><h3>Survives a server restart</h3><p>Snapshots, copied evidence, saved notes, conversations, review coverage and successful cached summaries.</p></div><div class="card"><h3>Does not silently restart</h3><p>In-flight model work and calls. Startup records interruptions; the user must retry. The microphone never reopens automatically.</p></div></div>
+          <div class="two"><div class="card green"><h3>Survives a server restart</h3><p>Snapshot membership, pointers, reference identities, saved notes, conversations, review coverage and successful cached summaries. Source excerpts still require their originals.</p></div><div class="card"><h3>Recovery follows permission</h3><p>Calls and briefing retries need fresh intent. The saved automatic indexing preference survives restart, but never resumes snapshot or provider model work. Foreground work takes priority; disabling cancels only automatic indexing, retaining completed vectors. Local failures back off at least five minutes; foreground preemption at least one minute. The microphone never reopens automatically. See the <a href="../ARCHITECTURE.md#6-memory-is-not-the-same-as-a-decision">canonical indexing policy</a>.</p></div></div>
           <p>Closing a browser page does not cancel an ordinary server-side preparation job. A voice call loses its connection and is cleaned up; page exit cannot guarantee a final recap request. These are different lifetimes.</p>
-          <p>Transactions keep related writes together: snapshot plus copied entries, or completed review plus coverage. Schema changes preserve historical rows, including older tables no longer used by the current app.</p>
-          <div class="note yellow"><strong>Copied history has its own lifetime.</strong> Deleting original pi logs does not erase prior snapshots. There is no in-app retention/purge UI yet. Back up current data before deployment; never restore a stale database merely to update code.</div>
-          <p class="why"><strong>Why preserve records but stop actions?</strong> A restart should not lose what happened, but it should not quietly spend model usage or resume audio capture either.</p>
+          <p>Transactions keep related writes together: snapshot plus frozen pointers, or completed review plus coverage. Schema changes preserve historical rows, including older tables no longer used by the current app.</p>
+          <div class="note yellow"><strong>Source text and saved conversations have different lifetimes.</strong> Losing original logs makes their excerpts unavailable, while notes, conversations and reference identities remain. Draken does not silently substitute copied source text. See <a href="../ARCHITECTURE.md">the canonical storage contract</a>. Back up current data before deployment; never restore a stale database merely to update code.</div>
+          <p class="why"><strong>Why preserve records but stop actions?</strong> A restart should preserve what happened and respect the saved local indexing choice—not create snapshots, resume provider model work or capture audio.</p>
         </section>
 
         <section class="chapter" id="boundaries" aria-labelledby="boundaries-title">

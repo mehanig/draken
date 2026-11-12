@@ -1,16 +1,18 @@
-import { Router, Request, Response, NextFunction } from 'express';
-import { getDb, getDataDir } from '../db/schema';
+import { Router, Request } from 'express';
+import { route } from './http';
+import { HttpError } from '../errors';
+import { getDb } from '../db/schema';
+import { getDataDir } from '../data-dir';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, HttpError, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync, busySyncs, activeVoiceSyncs, claimAutomaticSync } from '../sync/store';
+import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
-import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../memory/automatic';
-import { callReadiness, prepareCall } from '../voice/preparation';
+import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../sync/background';
+import { callReadiness, prepareCall } from '../sync/preparation';
 import { preparationUsage } from '../sync/usage';
+import { activity } from '../sync/activity';
 
 const router = Router();
-const route = (handler: (req: Request, res: Response) => unknown | Promise<unknown>) =>
-  (req: Request, res: Response, next: NextFunction) => { Promise.resolve().then(() => handler(req, res)).catch(next); };
 function id(req: Request): number {
   const value = Number(req.params.id);
   if (!Number.isSafeInteger(value) || value < 1) throw new HttpError(400, 'Invalid sync ID');
@@ -28,8 +30,7 @@ router.get('/setup', route(async (req, res) => {
 router.get('/settings/preparation-usage', route((req, res) => res.json(preparationUsage(getDb(), req.query))));
 router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettings())));
 router.patch('/settings/auto-index', route((req, res) => {
-  if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => !['enabled', 'preparation_scope'].includes(key))) throw new HttpError(400, 'Only enabled and preparation_scope are accepted');
-  if (req.body.enabled && req.body.preparation_scope !== 'index-and-briefing-v1') throw new HttpError(409, 'Refresh Draken before enabling automatic preparation. This mode includes summary and briefing model usage, not only local indexing.');
+  if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => key !== 'enabled')) throw new HttpError(400, 'Only boolean enabled is accepted');
   res.json(setAutoIndex(req.body.enabled));
 }));
 router.use((req, _res, next) => {
@@ -47,26 +48,22 @@ async function completeScan() {
   if (scan.warnings.length) throw new HttpError(409, 'History import could not finish. Check session sources and scan again; no new snapshot was prepared.');
   return scan;
 }
-let starting = false;
 router.post(['/syncs/start-call', '/syncs/start-chat'], route(async (req, res) => {
   const requestId = req.body?.request_id;
   if (typeof requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestId)) throw new HttpError(400, 'A request ID is required');
-  // One scan/start operation at a time, including the async indexing interval.
-  if (starting) throw new HttpError(409, 'A sync is already being prepared');
+  if (activity.starting) throw new HttpError(409, 'A sync is already being prepared');
   const prior = getDb().prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
   if (prior) { res.status(202).json({ sync: getSync(prior.sync_id), scan: { files: 0, added: 0, warnings: [] } }); return; }
-  if (busySyncs.size || activeVoiceSyncs.size) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
-  starting = true;
-  busySyncs.add(0); // Reserve foreground ownership during async setup and scanning.
+  const releaseStart = activity.beginStart();
   try {
     const setup = await piSetupStatus(true);
     if (setup.state !== 'configured') throw new HttpError(503, setup.message);
     const scan = await completeScan();
-    busySyncs.delete(0);
+    releaseStart();
     const sync = startConversationSync(requestId);
     const ready = callReadiness(sync.id, req.path.endsWith('/start-chat')).ready;
     res.status(202).json({ sync: ready ? sync : launchReply(sync.id), scan });
-  } finally { busySyncs.delete(0); starting = false; }
+  } finally { releaseStart(); }
 }));
 router.post('/syncs/:id/recap', route((req, res) => res.status(202).json(launchRecap(id(req)))));
 router.get('/overview', route((_req, res) => res.json(overview())));
@@ -105,7 +102,6 @@ router.patch('/syncs/:id/models', route((req, res) => {
 }));
 router.post('/syncs/:id/cancel', route((req, res) => {
   cancelReply(id(req));
-  claimAutomaticSync(id(req));
   res.status(202).json(getProgress(id(req)));
 }));
 router.patch('/syncs/:id/notes', route((req, res) => {
@@ -113,7 +109,6 @@ router.patch('/syncs/:id/notes', route((req, res) => {
 }));
 router.post('/syncs/:id/briefing', route((req, res) => {
   const sync = launchReply(id(req));
-  claimAutomaticSync(sync.id);
   res.status(202).json(sync);
 }));
 router.post('/syncs/:id/messages', route((req, res) => {

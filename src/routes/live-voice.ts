@@ -1,16 +1,11 @@
-import { Router, Request, Response, NextFunction } from 'express';
-import { HttpError } from '../sync/store';
+import { Router } from 'express';
+import { route, connected } from './http';
+import { HttpError } from '../errors';
 import { createLiveCall, connectLiveCall, liveEvents, sendLiveText, interruptLiveCall, endLiveCall, observeLiveAudio } from '../voice/live';
-import { yieldBackgroundIndexing } from '../memory/automatic';
+import { yieldBackgroundIndexing } from '../sync/background';
 const router = Router();
-const route = (fn: (req: Request, res: Response) => unknown | Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { Promise.resolve().then(() => fn(req, res)).catch(next); };
 const id = (value: unknown) => { if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/.test(value)) throw new HttpError(400, 'Invalid call identifier'); return value; };
 const number = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) => { const n = Number(value); if (!Number.isSafeInteger(n) || n < min || n > max) throw new HttpError(400, 'Invalid live call resource'); return n; };
-async function connected(res: Response, fn: (signal: AbortSignal) => Promise<unknown>) {
-  const controller = new AbortController(); const close = () => { if (!res.writableEnded) controller.abort(); }; res.on('close', close);
-  if (res.destroyed) controller.abort();
-  try { return await fn(controller.signal); } finally { res.off('close', close); }
-}
 router.post('/calls', route(async (req, res) => {
   if (Object.keys(req.body || {}).some(key => !['syncId', 'requestId'].includes(key))) throw new HttpError(400, 'Unknown call option. Refresh the page.');
   const requestId = req.body?.requestId === undefined ? undefined : id(req.body.requestId);

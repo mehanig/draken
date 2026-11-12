@@ -54,11 +54,11 @@ const { getDb, closeDb } = require('../../dist/db/schema');
 // Shared foreground UI fixture explicitly opts out to avoid timer-dependent
 // interference. The default-on timer is exercised with a controlled clock in
 // automatic-index.test.cjs; settings UI tests exercise persisted toggles.
-getDb().prepare("UPDATE sync_settings SET value='false' WHERE key IN ('auto_index','auto_prepare_conversations')").run();
+getDb().prepare("UPDATE sync_settings SET value='false' WHERE key='auto_index'").run();
 const { stopLiveCalls } = require('../../dist/voice/live');
 const { stopHistory } = require('../../dist/memory/service');
-const { stopBackgroundIndexing } = require('../../dist/memory/automatic');
+const { stopBackgroundIndexing } = require('../../dist/sync/background');
 const server = createApp({ staticDir: process.env.DRAKEN_TEST_STATIC_DIR }).listen(41889, '127.0.0.1');
-const shutdown = async () => { await stopBackgroundIndexing(); stopHistory(); await stopLiveCalls(); server.close(() => { closeDb(); fs.rmSync(temp, { recursive: true, force: true }); process.exit(0); }); };
+const shutdown = async () => { await stopBackgroundIndexing(); await stopHistory(); await stopLiveCalls(); server.close(() => { closeDb(); fs.rmSync(temp, { recursive: true, force: true }); process.exit(0); }); };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

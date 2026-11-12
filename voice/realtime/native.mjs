@@ -2,8 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { NativeHelperProcess } from './helper-process.mjs';
 import { NativeRpc } from './rpc.mjs';
 import { createReadOnlyBackend } from './backend.mjs';
 
@@ -19,7 +18,47 @@ export function codexExecutable(root, platform = process.platform, arch = proces
 }
 export const defaultBinary = codexExecutable(realtimeRoot);
 export const defaultHome = path.join(realtimeRoot, 'account');
-const exec = promisify(execFile);
+const checks = new Set();
+let checksStopping = false;
+
+function inspectNative({ binary, home, signal }) {
+  let helper;
+  if (!checksStopping && !signal?.aborted) {
+    try { helper = new NativeHelperProcess(binary, ['--version'], { env: helperEnvironment(home) }); } catch { /* Structural status only. */ }
+  }
+  if (!helper) return { stop() {}, done: Promise.resolve({ installed: false, exited: true }) };
+  let stdout = '', failed = false;
+  const stop = () => { failed = true; helper.close(); };
+  const check = { helper, stop }; checks.add(check);
+  const timer = setTimeout(stop, 5000);
+  helper.child.stdout.setEncoding('utf8');
+  helper.child.stdout.on('data', chunk => {
+    if (failed) return;
+    if (Buffer.byteLength(stdout) + Buffer.byteLength(chunk) > 4096) { stop(); return; }
+    stdout += chunk;
+  });
+  helper.child.on('error', stop); helper.child.stdin.on('error', stop); helper.child.stdin.end();
+  signal?.addEventListener('abort', stop, { once: true });
+  if (signal?.aborted) stop();
+  const done = helper.waitForExit(7500).then(exited => {
+    clearTimeout(timer); signal?.removeEventListener('abort', stop);
+    if (exited) checks.delete(check);
+    return { installed: exited && !failed && helper.child.exitCode === 0 && stdout.trim() === `codex-cli ${CODEX_VERSION}`, exited };
+  });
+  return { stop, done };
+}
+
+export async function stopNativeChecks() {
+  checksStopping = true;
+  const pending = [...checks];
+  for (const check of pending) check.stop();
+  const results = await Promise.all(pending.map(async check => {
+    const exited = await check.helper.waitForExit();
+    if (exited) checks.delete(check);
+    return exited;
+  }));
+  if (results.some(exited => !exited)) throw new Error('Native status helper exit could not be confirmed.');
+}
 
 // Positive allowlist: no API keys, pi session ownership, cloud credentials,
 // proxy overrides, provider URLs, NODE_OPTIONS, or user agent configuration.
@@ -36,12 +75,8 @@ export function hasNativeLogin(home) {
       ['access_token', 'refresh_token', 'id_token'].every(key => typeof value.tokens?.[key] === 'string' && value.tokens[key].length > 0);
   } catch { return false; }
 }
-export async function nativeStatus({ binary = defaultBinary, home = defaultHome } = {}) {
-  let installed = false;
-  try {
-    const { stdout } = await exec(binary, ['--version'], { env: helperEnvironment(home), timeout: 5000, maxBuffer: 4096 });
-    installed = stdout.trim() === `codex-cli ${CODEX_VERSION}`;
-  } catch { /* Report a structural status only; never leak subprocess output. */ }
+export async function nativeStatus({ binary = defaultBinary, home = defaultHome, signal } = {}) {
+  const { installed } = await inspectNative({ binary, home, signal }).done;
   return { installed, expectedVersion: CODEX_VERSION, nativeLoginPresent: hasNativeLogin(home),
     readyForProbe: installed && hasNativeLogin(home), audioVerified: false };
 }
@@ -97,6 +132,7 @@ export class NativeVoice {
   #answer;
   #cleanup;
   #unsubscribe;
+  #preflight;
   constructor({ binary = defaultBinary, home = defaultHome, answer } = {}) { this.#binary = binary; this.#home = home; this.#answer = answer; }
   subscribe(listener) { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
   #emit(event) { for (const listener of this.#listeners) { try { listener(event); } catch { void this.close(); } } }
@@ -104,15 +140,16 @@ export class NativeVoice {
     if (this.#closed || this.#opened) throw new Error('A native voice instance can open only once.');
     this.#opened = true;
     if (typeof sdp !== 'string' || sdp.length > 64_000 || !sdp.startsWith('v=0') || (sdp.match(/^m=audio /gm) || []).length !== 1 || /^m=video /m.test(sdp)) throw new Error('One audio track and a bounded SDP offer are required.');
-    const status = await nativeStatus({ binary: this.#binary, home: this.#home });
-    if (!status.installed) throw new Error(`Install the pinned Codex ${CODEX_VERSION} helper first.`);
-    if (!status.nativeLoginPresent) throw new Error('A separate native ChatGPT sign-in is required. Run npm run voice:realtime:login. The pi login is not copied or converted.');
-    if (fs.existsSync(path.join(this.#home, 'config.toml'))) throw new Error('Use the dedicated voice account directory without a custom Codex config.');
-    if (signal?.aborted || this.#closed) throw new Error('Native voice setup cancelled.');
     const abort = () => { void this.close(); };
     signal?.addEventListener('abort', abort, { once: true });
     this.#cleanup = () => signal?.removeEventListener('abort', abort);
     try {
+      this.#preflight = inspectNative({ binary: this.#binary, home: this.#home, signal });
+      const status = await this.#preflight.done;
+      if (signal?.aborted || this.#closed) throw new Error('Native voice setup cancelled.');
+      if (!status.installed) throw new Error(`Install the pinned Codex ${CODEX_VERSION} helper first.`);
+      if (!hasNativeLogin(this.#home)) throw new Error('A separate native ChatGPT sign-in is required. Run npm run voice:realtime:login. The pi login is not copied or converted.');
+      if (fs.existsSync(path.join(this.#home, 'config.toml'))) throw new Error('Use the dedicated voice account directory without a custom Codex config.');
       this.#deny = await createReadOnlyBackend({ answer: this.#answer, maxRequests: 120,
         authorize: headers => {
           // Native auth already accompanies the helper's backing requests. Match
@@ -197,11 +234,14 @@ export class NativeVoice {
   }
   async #closeResources() {
     this.#cleanup?.(); this.#unsubscribe?.();
+    this.#preflight?.stop();
+    const preflightExited = !this.#preflight || (await this.#preflight.done).exited;
     if (this.#thread && this.#rpc && !this.#rpc.closed) {
       try { await this.#rpc.request('thread/realtime/stop', { threadId: this.#thread }, { timeoutMs: 1500 }); } catch { /* Terminate below, even if stop was rejected. */ }
     }
     this.#rpc?.close();
-    const exited = !this.#rpc || await this.#rpc.waitForExit();
+    const rpcExited = !this.#rpc || await this.#rpc.waitForExit();
+    const exited = preflightExited && rpcExited;
     await this.#deny?.close();
     this.#emit({ method: 'draken/closed', params: { reason: exited ? 'Native voice connection closed.' : 'Native helper exit could not be confirmed.', helperExited: exited } });
     this.#listeners.clear();

@@ -1,6 +1,6 @@
 import path from 'path';
 import { spawn } from 'child_process';
-import { getDataDir } from '../db/schema';
+import { getDataDir } from '../data-dir';
 
 export function assertTrayDesktop(platform = process.platform, env = process.env): void {
   if (platform !== 'darwin' && platform !== 'win32') throw new Error('The tray currently supports macOS and Windows desktops only. On this system use draken and draken status; no server was started.');

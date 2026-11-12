@@ -8,11 +8,7 @@ import { SyncCost } from '../components/SyncCost';
 import { SetupPanel } from '../components/SetupPanel';
 import { AutomaticPreparation } from '../components/AutomaticPreparation';
 
-export type Navigate = (path: string, call?: boolean) => void;
-export const linkClick = (event: React.MouseEvent<HTMLAnchorElement>, navigate: Navigate, path: string) => {
-  if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault(); navigate(path);
-};
+import { linkClick, type Navigate } from '../navigation';
 const date = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 export function Home({ navigate }: { navigate: Navigate }) {
@@ -53,14 +49,14 @@ export function Home({ navigate }: { navigate: Navigate }) {
       <div className="conversation-actions"><button className="btn btn-secondary" disabled={!home || !textReady || Boolean(work || home?.busy || home?.active_call)} onClick={() => void start('chat')}><MessageSquare size={17} />Chat instead</button>
       {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div></div>
     {!window.isSecureContext && <p className="small muted">Use trusted HTTPS or localhost for the combined sync and call.</p>}
-    <p className="home-hint muted small">With automatic preparation enabled, new history becomes a ready briefing before you arrive. Join the prepared conversation, or catch up the newest entries in one final preparation. Nothing is marked reviewed until you confirm it.</p>
+    <p className="home-hint muted small">Automatic indexing accumulates searchable history locally. Click Sync with Draken or Chat instead to collect available entries into a snapshot and prepare its briefing. Nothing is marked reviewed until you confirm it.</p>
     <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> not yet in a sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> included, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
     <AutomaticPreparation />
     <details className="home-preparation-info">
-      <summary>Automatic preparation and cost tracking</summary>
-      <p><strong>Automatic compaction:</strong> new installations automatically index history, summarize new work and prepare a briefing while the server runs. Turn it off in <strong>Settings → Automatically prepare conversations</strong>. Existing installations keep their previous choice, including off. This mode uses your configured models and their quota or API billing within the saved invocation limit. Cached summaries and ready briefings are reused when their inputs match.</p>
-      <p>Compaction creates derived summaries; it does not edit or delete original agent logs. It never starts a call, saves decisions or marks work reviewed automatically.</p>
-      <p><strong>Preparation spending estimates:</strong> open <strong>Settings → Preparation usage</strong> for estimated USD cost, completed batches and model requests over time. Manual and automatic preparation, retries and failed work are included; missing prices remain unavailable or partial.</p>
+      <summary>Automatic indexing and cost tracking</summary>
+      <p><strong>Automatic local indexing:</strong> new installations automatically accumulate searchable history while the server runs, checking once a minute and indexing batches at 64 source changes. Smaller tails wait for explicit foreground preparation; there is no timed flush. Turn it off in <strong>Settings → Automatically index history</strong>. Existing installations keep their previous choice, including off. Local embeddings use CPU, memory and disk; first use may download about 136 MB of search model files.</p>
+      <p>Automatic indexing makes no provider model calls and creates no syncs, summaries or briefings. Only your Sync with Draken or Chat instead action creates a snapshot and starts its briefing, using configured models and their quota or API billing. Matching cached summaries can be reused. Indexing does not edit or delete original agent logs, existing snapshots or notes. It never starts a call, saves decisions or marks work reviewed automatically.</p>
+      <p><strong>Preparation spending estimates:</strong> open <strong>Settings → Preparation usage</strong> for estimated USD cost, completed batches and model requests over time. Preparation history, including past automatic work, retries and failed work, is retained; missing prices remain unavailable or partial.</p>
       <p className="small muted">Not total spending, a provider invoice or account quota. Chat, voice, standalone post-conversation recaps and local machine/network costs are excluded. Opening this explanation or the usage dashboard does not start preparation.</p>
     </details>
     {work && <p role="status" className="working"><span className="spinner" />{work}</p>}

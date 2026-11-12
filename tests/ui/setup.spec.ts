@@ -15,9 +15,14 @@ test('first-run instructions explain private pi and separate voice login; readin
   } }));
   await page.goto('/'); const panel = page.getByRole('region', { name: 'Draken setup' }), start = page.getByRole('button', { name: 'Sync with Draken' });
   await expect(panel).toContainText('First-time setup'); await expect(panel).toContainText('pi not found'); await expect(start).toBeDisabled();
-  await expect(panel).toContainText('New installations enable automatic indexing, summaries and briefings');
-  await expect(panel).toContainText('quota or API billing'); await expect(panel).toContainText('before configuring models');
-  await expect(panel).toContainText('Existing installations keep their previous choice');
+  await expect(panel).toContainText('New installations enable automatic local indexing');
+  await expect(panel).toContainText('without creating syncs, summaries or briefings');
+  await expect(panel).toContainText('makes no provider model calls');
+  await expect(panel).toContainText('CPU, memory and disk'); await expect(panel).toContainText('136 MB');
+  await expect(panel).toContainText('Settings → Automatically index history');
+  await expect(panel).toContainText('Only your Sync with Draken or Chat instead action starts a new snapshot and briefing');
+  await expect(panel).toContainText('quota or API billing');
+  await expect(panel).toContainText('Existing installations keep their saved indexing choice');
   await expect(panel).toContainText('draken setup'); await expect(panel).toContainText('draken login'); await expect(panel).toContainText('/login');
   await expect(panel).toContainText('draken voice setup'); await expect(panel).toContainText('draken voice login'); await expect(panel).toContainText('same environment');
   state = 'needs_login'; await panel.getByRole('button', { name: 'Check setup again' }).click(); await expect(panel).toContainText('sign-in needed'); await expect(start).toBeDisabled();

@@ -1,15 +1,18 @@
 import { randomUUID } from 'crypto';
 import { getDb } from '../db/schema';
-import { activeVoiceSyncs, assertEvidenceAvailable, getSync, HttpError, requireOpen } from '../sync/store';
+import { assertEvidenceAvailable, getSync, requireOpen } from '../sync/store';
+import { activity } from '../sync/activity';
+import { HttpError } from '../errors';
 import { cleanText } from '../sync/normalize';
 import { SyncDetail } from '../types';
 import { invalidateRecap } from '../sync/recap';
 import { LIVE_PROMPT, liveEvidence, liveRetrievalQuestion } from './live-context';
-import { DISCUSSION_HISTORY_BYTES, historyContext } from '../memory/context';
+import { historyContext } from '../memory/context';
+import { DISCUSSION_HISTORY_BYTES } from '../memory/packet';
 import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyReadiness } from '../memory/service';
 import { ReplyContinuation } from './continuation';
-import { discussionFocus, voiceHistoryQuery, type VoiceHistoryFocus } from './history-focus';
+import { discussionFocus, historyQuery, type HistoryFocus } from '../memory/focus';
 import type { HistoryQuery } from '../memory/types';
 
 // Resource limits, not a subscription spending guarantee.
@@ -21,7 +24,7 @@ type Native = { subscribe(fn: (event: any) => void): () => void; open(sdp: strin
 const runtime = () => require('../../voice/realtime/native.mjs') as { nativeStatus(options?: any): Promise<any>; NativeVoice: new (options?: any) => Native };
 interface Message { id: number; role: 'user' | 'assistant'; text: string; final: boolean; interrupted?: boolean; refs: string[]; started: number }
 interface Turn { user: Message; life: AbortController; continuation: ReplyContinuation; query?: HistoryQuery; refs: string[]; lookups: Map<string, Promise<EvidencePacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
-interface Call { turn?: Turn; id: string; sync: SyncDetail; historyBefore: string; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; focus?: VoiceHistoryFocus; contextDelivery: Promise<void> }
+interface Call { turn?: Turn; id: string; sync: SyncDetail; historyBefore: string; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; release(): void; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; focus?: HistoryFocus; contextDelivery: Promise<void> }
 const calls = new Map<string, Call>();
 // End can overtake creation on a second HTTP connection. Retain unknown-ID
 // cancellations for the HTTP request window, bounded independently of calls.
@@ -106,7 +109,7 @@ function beginTurn(call: Call, user: Message, spoken: boolean) {
 async function lookup(call: Call, question: string, turn: Turn) {
   const currentQuestion = turn.user.text;
   if (!turn.query) {
-    const plan = voiceHistoryQuery(getDb(), currentQuestion, call.focus);
+    const plan = historyQuery(getDb(), currentQuestion, call.focus);
     turn.query = plan.query; call.focus = plan.focus;
   }
   const snapshot = /\b[EC]\d+\b/.test(question) ? liveEvidence(call.sync, question, false, currentQuestion) : undefined;
@@ -223,23 +226,24 @@ export async function createLiveCall(syncId: number, signal: AbortSignal, reserv
   pruneReservations();
   if (signal.aborted || cancelledReservations.has(reservationId)) throw new HttpError(409, 'Call setup cancelled');
   if (getDb().prepare('SELECT 1 FROM live_calls WHERE id=?').get(reservationId)) throw new HttpError(409, 'Call request was already used');
-  sweep(); if ([...calls.values()].some(call => !call.released) || activeVoiceSyncs.size) throw new HttpError(409, 'End the existing call first.');
+  sweep(); if (activity.callActive) throw new HttpError(409, 'End the existing call first.');
   const sync = requireOpen(syncId);
   assertEvidenceAvailable(sync);
   if (!sync.tree.complete || !sync.briefing) throw new HttpError(409, 'Prepare the briefing before calling.');
   if (!historyReadiness().ready) throw new HttpError(409, 'Prepare history before calling. No call was started.');
   if (!(await runtime().nativeStatus(nativeOptions())).readyForProbe) throw new HttpError(503, 'Native voice needs its pinned helper and ChatGPT sign-in on the server.');
   if (signal.aborted || cancelledReservations.has(reservationId)) throw new HttpError(409, 'Call setup cancelled');
-  if ([...calls.values()].some(call => !call.released) || activeVoiceSyncs.size) throw new HttpError(409, 'End the existing call first.');
+  if (activity.callActive) throw new HttpError(409, 'End the existing call first.');
   if (getDb().prepare('SELECT 1 FROM live_calls WHERE id=?').get(reservationId)) throw new HttpError(409, 'Call request was already used');
   const latest = requireOpen(syncId); assertEvidenceAvailable(latest);
   if (!latest.tree.complete || !latest.briefing) throw new HttpError(409, 'Prepare the briefing before calling.');
   const history = historyReadiness();
   if (!history.ready || !history.before) throw new HttpError(409, 'History changed. Prepare history before calling. No call was started.');
   const now = Date.now();
-  const call: Call = { id: reservationId, sync: latest, historyBefore: history.before, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController(), focus: discussionFocus(getDb(), latest.id), contextDelivery: Promise.resolve() };
-  getDb().prepare('INSERT INTO live_calls(id, sync_id, started_at) VALUES (?, ?, ?)').run(call.id, syncId, new Date(now).toISOString());
-  calls.set(call.id, call); activeVoiceSyncs.add(syncId);
+  const call: Call = { id: reservationId, sync: latest, historyBefore: history.before, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController(), focus: discussionFocus(getDb(), latest.id), contextDelivery: Promise.resolve(), release: activity.beginCall(syncId) };
+  try { getDb().prepare('INSERT INTO live_calls(id, sync_id, started_at) VALUES (?, ?, ?)').run(call.id, syncId, new Date(now).toISOString()); }
+  catch (error) { call.release(); throw error; }
+  calls.set(call.id, call);
   if (!sweepTimer) { sweepTimer = setInterval(sweep, 10000); sweepTimer.unref(); }
   // No corpus preparation, provider session or microphone is started here.
   // Retrieval stays within the history cutoff prepared before this reservation.
@@ -327,14 +331,24 @@ export function endLiveCall(id: string, reason = 'Ended by user'): Promise<void>
   call.closing = Promise.resolve().then(async () => {
     const result = await call.native?.close();
     if (call.native && !result?.helperExited) throw new HttpError(503, 'Native helper exit could not be confirmed. No new call will start.');
-    call.released = true; activeVoiceSyncs.delete(call.sync.id);
+    call.released = true; call.release();
     call.native = undefined;
     // Closed calls retain only a small event tail for a polling browser. The
     // full immutable snapshot stays in SQLite, not in retired call objects.
     call.sync.items = []; call.sync.context = []; call.sync.messages = []; call.sync.memory = [];
   }); return call.closing;
 }
-export async function stopLiveCalls() { await Promise.allSettled([...calls.values()].map(call => endLiveCall(call.id, 'Server stopped'))); clearInterval(sweepTimer); sweepTimer = undefined; calls.clear(); cancelledReservations.clear(); }
+export async function stopLiveCalls() {
+  const results = await Promise.allSettled([...calls.values()].map(call => endLiveCall(call.id, 'Server stopped')));
+  clearInterval(sweepTimer); sweepTimer = undefined;
+  if (results.some(result => result.status === 'rejected')) throw new HttpError(503, 'Native helper cleanup remains unconfirmed. Server ownership must be retained.');
+  calls.clear(); cancelledReservations.clear();
+}
+export async function shutdownLiveVoice() {
+  const { stopNativeChecks } = require('../../voice/realtime/native.mjs') as { stopNativeChecks(): Promise<void> };
+  const results = await Promise.allSettled([stopNativeChecks(), stopLiveCalls()]);
+  if (results.some(result => result.status === 'rejected')) throw new HttpError(503, 'Native voice shutdown remains unconfirmed.');
+}
 export function recoverLiveCalls() {
   getDb().prepare("UPDATE live_messages SET status = 'interrupted' WHERE status = 'streaming'").run();
   getDb().prepare("UPDATE live_calls SET status = 'interrupted', ended_at = ?, end_reason = 'Server restarted' WHERE status = 'active'").run(new Date().toISOString());

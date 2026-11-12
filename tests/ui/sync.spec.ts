@@ -120,30 +120,30 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
   expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}`)).json()).items).toEqual(original.items);
 });
 
-test('settings persist one combined preparation mode without browser capture or automatic review', async ({ page }) => {
+test('settings persist local-only indexing without sync creation, browser capture or automatic review', async ({ page }) => {
  await microphone(page);await fixtures(page);await page.request.patch('/api/settings/auto-index',{data:{enabled:false}});
  const before=await(await page.request.get('/api/home')).json();let settingsReads=0,settingsWrites=0;
  page.on('request',request=>{if(new URL(request.url()).pathname==='/api/settings/auto-index'){if(request.method()==='GET')settingsReads++;else settingsWrites++;}});
  await page.goto('/');const button=page.getByRole('banner').getByRole('button',{name:'Settings',exact:true});await expect(button).toBeVisible();
  await expect(page.getByText('LOCAL PROTOTYPE',{exact:true})).toHaveCount(0);await expect(page.locator('main .index-toggle')).toHaveCount(0);await expect.poll(() => settingsReads).toBeGreaterThan(0);
  await button.click();const dialog=page.getByRole('dialog',{name:'Settings',exact:true}),close=dialog.getByRole('button',{name:'Close settings'});
- const toggle=dialog.getByRole('switch',{name:/Automatically prepare conversations/});await expect(toggle).toBeEnabled();await expect(toggle).not.toBeChecked();
+ const toggle=dialog.getByRole('switch',{name:/Automatically index history/});await expect(toggle).toBeEnabled();await expect(toggle).not.toBeChecked();
  await expect(close).toBeFocused();await page.keyboard.press('Tab');await expect(dialog.getByRole('combobox',{name:'Look back',exact:true})).toBeFocused();await page.keyboard.press('Shift+Tab');await expect(close).toBeFocused();
  await page.keyboard.press('Escape');await expect(dialog).not.toBeVisible();await expect(button).toBeFocused();expect(settingsWrites).toBe(0);
  await page.keyboard.press('Enter');await expect(dialog).toBeVisible();
  try {
   await toggle.check();await expect.poll(async()=>(await(await page.request.get('/api/settings/auto-index')).json()).enabled).toBe(true);
   await page.reload();await button.click();await expect(toggle).toBeChecked();
-  await expect(dialog).toContainText('64 source changes or waiting entries');
+  await expect(dialog).toContainText('64 source changes');
   await expect(dialog).toContainText('there is no timed flush');
   await expect(dialog).not.toContainText('after five minutes');
-  await expect(dialog).toContainText('configured pi summary and final models');
+  await expect(dialog).toContainText('Indexing makes no provider model calls');
   await expect(dialog).toContainText('Existing conversations, notes and frozen snapshots are not rewritten');
   await page.setViewportSize({width:320,height:700});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   expect(await dialog.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
   await close.click();await expect(button).toBeVisible();await page.getByRole('link',{name:'Search history',exact:true}).click();await expect(page).toHaveURL(/\/history$/);
   await button.click();await expect(toggle).toBeChecked();await close.click();await expect(button).toBeFocused();
-  expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get('/api/home')).json()).covered).toEqual(before.covered);
+  expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);const after=await(await page.request.get('/api/home')).json();expect(after.covered).toEqual(before.covered);expect(after.syncs.map((sync:any)=>sync.id)).toEqual(before.syncs.map((sync:any)=>sync.id));
   await button.click();await toggle.uncheck();await expect.poll(async()=>(await(await page.request.get('/api/settings/auto-index')).json()).enabled).toBe(false);
  }finally{await page.request.patch('/api/settings/auto-index',{data:{enabled:false}});}
 });

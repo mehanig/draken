@@ -4,7 +4,8 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const Database = require('better-sqlite3');
 const { getDb, closeDb, initSchema } = require('../dist/db/schema');
 const { scanSessions } = require('../dist/sync/collector');
-const { EntryReader, fileRecords } = require('../dist/sync/source-files');
+const { EntryReader } = require('../dist/sync/source-files');
+const { fileRecords } = require('../dist/sync/jsonl');
 const { normalizeEntry, digest } = require('../dist/sync/normalize');
 const { EvidenceReader } = require('../dist/db/evidence');
 const { migratePointers } = require('../dist/db/pointer-migration');
@@ -155,6 +156,94 @@ test('search migration keeps every compatible vector byte and FTS occurrence, wi
   }
   assert.equal(embedder.calls, calls + 3, 'only three query vectors, no passage re-embedding');
   assert.equal(JSON.stringify(['agent_entries', 'syncs', 'sync_items', 'sync_coverage'].map(table => db.prepare(`SELECT * FROM ${table}`).all())), canonical);
+  assert.deepEqual(old.pragma('foreign_key_check'), []);
+});
+
+test('frozen historical search windows survive migration, ordinary preparation and prepared-only lookup without re-embedding', async () => {
+  const { fingerprint, records: frozenRecords, chunks: frozenChunks } = require('./fixtures/search-cache.cjs');
+  const { sourceEntry } = require('./fixtures/source-entry.cjs');
+  for (const chunk of frozenChunks) {
+    assert.match(chunk.hash, /^[a-f0-9]{64}$/);
+    assert.equal(Buffer.from(chunk.bytes, 'hex').length, 1536);
+  }
+  for (const record of frozenRecords) sourceEntry(db, process.env.DRAKEN_PI_SESSIONS_DIR, record.text,
+    { session: record.session, name: record.title, role: record.role, timestamp: at });
+  // Only attribution comes from canonical sources. No live index supplies any
+  // historical offset, body, hash or vector in this fixture.
+  const records = [...historySources(db)];
+  assert.equal(records.length, 2);
+  for (const record of records) {
+    const expected = frozenRecords.find(item => item.session === record.session_id);
+    assert.equal(record.title, expected.title); assert.equal(record.role, expected.role); assert.equal(record.text, expected.text);
+  }
+  const old = cache(), embeddings = frozenChunks.map(chunk => ({ hash: chunk.hash, embedding: Buffer.from(chunk.bytes, 'hex') }));
+  const chunks = frozenChunks.map((chunk, i) => ({ ...chunk, id: i + 1, embedded: 1,
+    ref: records.find(record => record.session_id === chunk.session).ref }));
+  legacyIndex(old, records, chunks, embeddings, fingerprint);
+  const bytes = () => old.prepare('SELECT hash,lower(hex(embedding)) bytes FROM embedding_cache ORDER BY hash').all();
+  const expectedBytes = frozenChunks.map(({ hash, bytes }) => ({ hash, bytes })).sort((a, b) => a.hash.localeCompare(b.hash));
+  const links = () => old.prepare('SELECT ref,offset,hash,embedded FROM chunks ORDER BY ref,offset').all();
+  const expectedLinks = sources => sources.flatMap(record => frozenChunks
+    .filter(chunk => chunk.keep && chunk.session === record.session_id)
+    .map(chunk => ({ ref: record.ref, offset: chunk.offset, hash: chunk.hash, embedded: 1 })))
+    .sort((a, b) => a.ref.localeCompare(b.ref) || a.offset - b.offset);
+  let queries = 0;
+  const embedder = { fingerprint, ready: () => true, setup: async () => {},
+    async embed(_body, query) {
+      assert.equal(query, true, 'Historical passage vectors must be reused, never re-embedded');
+      queries++; const vector = new Float32Array(384); vector[0] = 1; return vector;
+    } };
+  const restored = new HistoryIndex(old, db, embedder);
+  assert.equal(queries, 0);
+  assert.deepEqual(bytes(), expectedBytes, 'including the now-unlinked covered-tail vector');
+  assert.deepEqual(links(), expectedLinks(records));
+  assert.deepEqual(old.prepare('SELECT id FROM chunks ORDER BY id').all().map(row => row.id), [1, 2, 4, 5]);
+  assert.equal(old.prepare("SELECT COUNT(*) n FROM words WHERE words MATCH 'Frozen'").get().n, 4);
+  await restored.prepare(); assert.equal(queries, 0);
+  assert.deepEqual(links(), expectedLinks(records));
+
+  // Newly frozen aliases force the ordinary live recipe to look up these old
+  // hashes, rather than merely accepting already-embedded legacy occurrences.
+  const snapshot = store.startSync(), aliases = [...historySources(db)];
+  assert.equal(aliases.length, 4);
+  await restored.prepare(); assert.equal(queries, 0);
+  assert.deepEqual(links(), expectedLinks(aliases)); assert.deepEqual(bytes(), expectedBytes);
+  assert.ok((await restored.search({ question: 'Frozen', session_id: 'frozen-multi' })).results.length);
+  assert.equal(queries, 1, 'ordinary search embeds only its question');
+
+  const cutoff = '2021-01-01T00:00:00.000Z';
+  const cold = new HistoryIndex(old, db, { ...embedder, setup: async (_report, allowDownload) => assert.equal(allowDownload, false) });
+  const writes = old.prepare('SELECT total_changes() n').get().n;
+  const canonical = JSON.stringify(['agent_entries', 'syncs', 'sync_items', 'sync_coverage'].map(table => db.prepare(`SELECT * FROM ${table}`).all()));
+  for (const scope of [{ session_id: 'frozen-multi' }, { session_id: 'frozen-unicode' }, { sync_id: snapshot.id }]) {
+    const found = await cold.search({ question: 'Frozen', before: cutoff, ...scope }, undefined, true);
+    assert.ok(found.results.length);
+    for (const result of found.results) {
+      assert.ok(aliases.some(record => record.ref === result.ref));
+      for (const [key, value] of Object.entries(scope)) assert.equal(result[key], value);
+    }
+  }
+  assert.equal(queries, 4, 'three prepared queries, no passage inference');
+  for (const record of records) {
+    const page = cold.read(record.ref, 700, cutoff);
+    assert.equal(page.record.ref, record.ref); assert.equal(page.offset, 700);
+    assert.equal(page.record.text, record.text.slice(700)); assert.equal(page.total, record.text.length);
+  }
+  assert.equal(old.prepare('SELECT total_changes() n').get().n, writes, 'prepared lookups and source reads do not rewrite the cache');
+  assert.deepEqual(bytes(), expectedBytes); assert.deepEqual(links(), expectedLinks(aliases));
+  assert.equal(JSON.stringify(['agent_entries', 'syncs', 'sync_items', 'sync_coverage'].map(table => db.prepare(`SELECT * FROM ${table}`).all())), canonical);
+
+  const file = db.prepare("SELECT path FROM agent_sessions WHERE id='frozen-multi'").get().path;
+  const original = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, original.replace('a'.repeat(699), 'z'.repeat(699)));
+  await assert.rejects(cold.search({ question: 'Frozen', session_id: 'frozen-multi', before: cutoff }, undefined, true), /unavailable/);
+  assert.equal(queries, 4, 'source verification precedes query inference');
+  assert.deepEqual(bytes(), expectedBytes);
+  fs.writeFileSync(file, original);
+  db.prepare("UPDATE agent_sessions SET included=0 WHERE id='frozen-multi'").run();
+  assert.deepEqual((await cold.search({ question: 'Frozen', session_id: 'frozen-multi', before: cutoff }, undefined, true)).results, []);
+  assert.throws(() => cold.read(records.find(record => record.session_id === 'frozen-multi').ref, 0, cutoff), /no longer admitted/);
+  old.prepare("INSERT INTO words(words,rank) VALUES('integrity-check',1)").run();
   assert.deepEqual(old.pragma('foreign_key_check'), []);
 });
 

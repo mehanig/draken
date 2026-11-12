@@ -57,9 +57,9 @@ export class LiveVoiceSession {
     const source = this.inputContext.createConstantSource(); source.offset.value = 0; source.connect(destination); source.start();
     return destination.stream;
   }
-  async start(syncId: number, beforeStart?: () => Promise<void>) {
+  async start(syncId: number) {
     try {
-      await beforeStart?.(); if (!this.alive) return;
+      if (!this.alive) return;
       this.set({ notice: 'Connecting your call. Your microphone is still off.' });
       // The server only accepts already-prepared history. A stale readiness
       // check fails without starting indexing, a provider session or capture.
@@ -108,7 +108,6 @@ export class LiveVoiceSession {
     let input = 0;
     if (!this.state.muted) { this.inputMeter.getFloatTimeDomainData(this.micBuffer); input = Math.sqrt(this.micBuffer.reduce((sum, sample) => sum + sample * sample, 0) / this.micBuffer.length) * 10; }
     if (this.stopped && input > 0.08) this.newQuestion = true;
-    this.options.onLevel?.(Math.min(1, Math.max(output, input)));
     if (output > 0.02) {
       this.speechAt = now; this.observed += 80;
       if (this.state.phase !== 'speaking') this.set({ phase: 'speaking' });
@@ -217,7 +216,7 @@ export class LiveVoiceSession {
     this.peer.close(); void this.inputContext.close().catch(() => {});
     try { this.options.onPlayback?.(null); } catch { /* Presentation only. */ }
     this.pendingAnswer = false; this.awaitingUser = false;
-    this.options.onLevel?.(0); this.set({ phase: 'ended', muted: true, notice: '', replyPendingSince: 0 });
+    this.set({ phase: 'ended', muted: true, notice: '', replyPendingSince: 0 });
     if (this.id) {
       const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 4000);
       try { await voiceRequest(`/live/calls/${this.id}/end`, { method: 'POST', keepalive: true, signal: controller.signal }); }

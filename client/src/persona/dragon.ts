@@ -15,7 +15,6 @@ export function createDragon(parent: THREE.Object3D, a: StudioAssets, m: StudioM
   for (let i = 0; i < 4; i++) {
     const ring = a.mesh(chest, new THREE.TorusGeometry(0.236, 0.025, 8, 32), m.brass, [0, 1.99 + i * 0.055, 0.02]); ring.rotation.x = Math.PI / 2;
   }
-  // Folded fabric-and-wood wings: asymmetrical silhouette, not a generic lizard.
   const wings: THREE.Group[] = [];
   for (const side of [-1, 1]) {
     const wing = new THREE.Group(); wing.position.set(side * 0.43, 1.87, -0.33); wing.scale.x = side; wing.rotation.y = side * -0.28; root.add(wing); wings.push(wing);
@@ -31,7 +30,6 @@ export function createDragon(parent: THREE.Object3D, a: StudioAssets, m: StudioM
   for (let i = 0; i < 5; i++) {
     const spike = a.mesh(root, new THREE.ConeGeometry(0.095 - i * 0.008, 0.18, 4), m.red, [0.6 + i * 0.19, 0.63 - Math.sin(i * 0.6) * 0.1, -0.36 + i * 0.12]); spike.rotation.z = -0.15;
   }
-  // Articulated sweater sleeves, exposed pivot plates, padded mechanical paws.
   const arms: THREE.Group[] = [];
   for (const side of [-1, 1]) {
     const arm = new THREE.Group(); arm.position.set(side * 0.47, 1.77, 0.03); root.add(arm); arms.push(arm);
@@ -52,7 +50,6 @@ export function createDragon(parent: THREE.Object3D, a: StudioAssets, m: StudioM
   const head = new THREE.Group(); head.position.set(0, 2.25, 0.13); root.add(head);
   a.box(head, [0.98, 0.72, 0.81], [0, 0.08, 0], m.blue, 0.19);
   a.box(head, [0.86, 0.32, 0.94], [0, -0.19, 0.56], m.blue, 0.11);
-  // Raised center stripe ties the knit hat to the long, recognizable dragon snout.
   a.box(head, [0.15, 0.43, 0.08], [0, 0.16, 0.423], m.red, 0.025);
   a.box(head, [0.16, 0.045, 0.71], [0, -0.009, 0.66], m.red, 0.018);
   for (const side of [-1, 1]) {
@@ -60,12 +57,10 @@ export function createDragon(parent: THREE.Object3D, a: StudioAssets, m: StudioM
     a.sphere(head, [0.018, 0.083, 0.083], [side * 0.546, -0.15, 0.16], m.brass);
     a.sphere(head, [0.012, 0.047, 0.047], [side * 0.56, -0.15, 0.16], m.iron);
     a.box(head, [0.035, 0.008, 0.07], [side * 0.57, -0.15, 0.16], m.brass, 0.002);
-    // Nostril ports are recessed dark wells with a separate enamel/brass collar.
     const nostril = new THREE.Group(); nostril.position.set(side * 0.28, -0.095, 1.006); nostril.rotation.x = -0.15; head.add(nostril);
     const ring = a.mesh(nostril, new THREE.TorusGeometry(0.071, 0.018, 10, 28), m.darkBlue);
     ring.scale.y = 1.1; a.sphere(nostril, [0.056, 0.063, 0.012], [0, 0, -0.009], m.black);
     for (let i = 0; i < 3; i++) a.sphere(head, [0.012, 0.012, 0.009], [side * 0.35, -0.29, 0.48 + i * 0.17], m.brass);
-    // Small triangular ear fins; warm wood rather than fleshy ears.
     const earShape = new THREE.Shape(); earShape.moveTo(0, 0); earShape.lineTo(side * 0.37, 0.12); earShape.lineTo(side * 0.17, -0.12); earShape.closePath();
     a.mesh(head, new THREE.ExtrudeGeometry(earShape, { depth: 0.06, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.01, bevelSegments: 2, steps: 1 }), m.red, [side * 0.43, 0.22, -0.13]);
   }
@@ -89,7 +84,6 @@ export function createDragon(parent: THREE.Object3D, a: StudioAssets, m: StudioM
     a.tapered(head, [[side * 0.32, -0.32, 0.84], [side * 0.32, -0.38, 0.87]], 0.03, m.ivory);
     a.tube(head, [[side * 0.41, -0.31, 0.3], [side * 0.43, -0.33, 0.66], [side * 0.38, -0.32, 1.005]], 0.018, m.darkBlue);
   }
-  // Soft ribbed beanie, with horn openings and a small woven maker's label.
   a.sphere(head, [0.54, 0.37, 0.46], [0, 0.63, -0.035], m.knit);
   const band = a.mesh(head, new THREE.CylinderGeometry(0.53, 0.53, 0.17, 64), m.knit, [0, 0.4, -0.025]); band.scale.z = 0.88;
   for (let i = 0; i < 44; i++) {

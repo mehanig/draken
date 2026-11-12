@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, MessageSquare, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
 import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
-import { HistorySource } from '../pages/History';
+import { HistorySource } from './HistorySource';
 import { HistoryProgress } from './HistoryProgress';
 import { VoiceCaptions } from './VoiceCaptions';
 import { PersonaStage } from '../persona/PersonaStage';
 import type { PlaybackCue } from '../audio/playback';
 import { LiveVoiceSession } from '../voice/live-session';
-import { INITIAL_CALL, voiceRequest, voiceHeaders, type CallState, type CallHistory, type VoiceStatus } from '../voice/api';
+import { INITIAL_CALL, voiceRequest, type CallState, type CallHistory, type VoiceStatus } from '../voice/api';
+import { authorizationHeaders } from '../auth/session';
 
 const labels = {
   connecting: 'Getting ready', listening: 'Your turn', hearing: 'Listening to you',
@@ -82,7 +83,6 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
       setCall({ ...INITIAL_CALL }); setElapsed(0); setTranscript([]); setDraft(''); setSource(''); setTyping(false); setShowDetails(false); setHistoryLookup(false); setOpen(true); onActiveChange(true);
       const controller = new LiveVoiceSession({
         onState: state => { if (mounted.current) { setCall(state); if (!state.microphone && state.muted) setTyping(true); } },
-        onLevel: () => {}, // Captions replace the old standalone input meter.
         onPlayback: cue => { playback.current = cue; },
         onTurn: (question, answer, refs, id) => {
           if (mounted.current) setTranscript(old => old.some(turn => turn.id === id)
@@ -111,6 +111,7 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
   const close = async () => {
     if (closing.current) return;
     closing.current = true;
+    setSource('');
     await session.current?.end(); session.current = null;
     if (mounted.current) { setOpen(false); setHistory(null); onActiveChange(false); }
     try { await onClosed(); await refreshStatus(); }
@@ -122,7 +123,7 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
   };
   const downloadCertificate = async () => {
     try {
-      const response = await fetch('/api/voice/certificate', { headers: voiceHeaders(false) });
+      const response = await fetch('/api/voice/certificate', { headers: authorizationHeaders() });
       if (!response.ok) throw new Error('Could not download the local certificate. Check your dashboard login.');
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement('a'); link.href = url; link.download = 'draken-local-root.crt'; link.click();
@@ -225,8 +226,8 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
           {!transcript.length && <p className="small muted">No transcript yet.</p>}
           <p className="small muted">Live generated transcripts, not word-timed subtitles. Exact playback and agreement are not confirmed. Full text is retained here even when the scene shows only its latest lines.</p>
           {call.evidence.length > 0 && <details className="voice-history"><summary>Sources supplied ({call.evidence.length})</summary><p className="small muted">Context available to the voice model, not verified citations for every spoken claim.</p><div className="voice-sources">{call.evidence.map(ref => <button className="citation" key={ref} onClick={event => { const list = event.currentTarget.closest('details'); if (list) list.open = false; setSource(source === ref ? '' : ref); }}>{ref.startsWith('H') ? `History ${ref.slice(-6)}` : `Source ${ref}`}</button>)}</div></details>}
-          {/^H[a-f0-9]{24}$/.test(source) && <section className="voice-source" ref={sourcePanel}><button className="btn btn-secondary" onClick={() => setSource('')}>Close historical source</button><HistorySource reference={source} /></section>}
-          {selected && <section className="voice-source" ref={sourcePanel}><div className="section-heading"><strong>{selected.ref} · {selected.session_name || selected.cwd}</strong><button className="icon-button" aria-label="Close source" onClick={() => setSource('')}><X size={16} /></button></div><pre>{selected.text}</pre></section>}
+          {open && /^H[a-f0-9]{24}$/.test(source) && <section className="voice-source" ref={sourcePanel}><button className="btn btn-secondary" onClick={() => setSource('')}>Close historical source</button><HistorySource reference={source} /></section>}
+          {open && selected && <section className="voice-source" ref={sourcePanel}><div className="section-heading"><strong>{selected.ref} · {selected.session_name || selected.cwd}</strong><button className="icon-button" aria-label="Close source" onClick={() => setSource('')}><X size={16} /></button></div><pre>{selected.text}</pre></section>}
         </div>
       </details>
       <div className="voice-footer"><AudioLines size={14} /><span>Experimental live audio to OpenAI · Generated, not verified · 30-minute limit</span></div>

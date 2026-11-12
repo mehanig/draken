@@ -1,7 +1,8 @@
 import { getDb } from '../db/schema';
 import { Evidence, ModelCallMetric, NodeKind, NodeSummary, SyncDetail, TopicGroups } from '../types';
 import { cleanText, digest, sourceKey } from './normalize';
-import { assertEvidenceAvailable, HttpError } from './store';
+import { assertEvidenceAvailable } from './store';
+import { HttpError } from '../errors';
 import { invokePi } from './pi';
 import { prepareModelInput } from './references';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens, summaryTokens } from './summary-budget';
@@ -98,7 +99,6 @@ export function validateSummary(value: unknown, allowed: Set<string>, limits = L
   if (!observations.length && !limitations.length) throw new Error('An empty summary must explain its limitations');
   const result = { observations, limitations };
   if (JSON.stringify(result).length > limits.characters) throw new Error('Summary is too large');
-  // Check ALL schema fields and source membership before considering a citation-only repair.
   if (observations.some(item => item.evidence.length > MAX_EVIDENCE)) throw new CitationLimitError(result);
   return result;
 }
@@ -184,7 +184,6 @@ export class SummaryTree {
     const estimatedTokens = promptTokens(prompt, system);
     if (large && estimatedTokens > LUNA_BATCH.requestTokens) throw new HttpError(400, 'Summary request exceeds its token safety budget; cached work is intact.');
     if (final && isBatchSummaryModel(this.sync.models.summary) && estimatedTokens > LUNA_BATCH.finalTokens) throw new HttpError(400, 'The final input exceeds its compact token budget; no larger or more expensive request was substituted. Cached summaries are intact.');
-    // Reserve one invocation for the final verdict. Retries count against the same ceiling.
     const limit = this.sync.models.max_invocations - (final ? 0 : 1);
     const started = Date.now(), request = payload as { task?: string; stage?: string; repair?: unknown };
     const pending: ModelCallMetric = { started_at: new Date(started).toISOString(), task: request.task || 'unknown', stage: request.stage || null,
@@ -404,7 +403,6 @@ export class SummaryTree {
           const first = positions.get(sourceKey(batch[0]))!;
           const background = first ? items.slice(Math.max(0, first - 2), first).map(item => sourceData(item, true))
             : this.sync.context.filter(item => item.session_id === session).slice(-6).map(item => sourceData(item, true));
-          // No sync ID, E-reference or display ordinal in the cache key.
           const input = { session, workspace: batch[0].cwd, evidence: batch.map(item => sourceData(item)), background };
           const allowed = new Set([...input.evidence, ...background].map(item => item.id));
           const wire = prepareModelInput('chunk', input, allowed);
@@ -464,8 +462,6 @@ export class SummaryTree {
       summary: await this.node(spec, (value, refs) => validateSummary(value, refs, spec.batch ? BATCH_OUTPUT : LEGACY_OUTPUT)) });
     const processed = (this.db.prepare('SELECT processed_entries FROM sync_runs WHERE id=?').get(this.runId) as { processed_entries: number }).processed_entries;
     if (processed !== this.sync.items.length) throw new Error('Incomplete source coverage: refusing to generate a final verdict');
-    // One global Luna reconciliation instead of session merges → routing →
-    // topic merges. Add a level only when the combined input exceeds a budget.
     for (let depth = 0; nodes.length > 1; depth++) {
       if (depth > 20) throw new Error('Summary tree depth exceeded');
       const groups = this.tokenBatches(nodes, node => this.mergePayload([node], true));
@@ -521,7 +517,6 @@ export class SummaryTree {
     const topics: SummaryNode[] = [];
     for (const group of topicGroups.values()) {
       const members = group.members.map(id => descriptorMap.get(id)!);
-      // Input observations have been partitioned exactly once by validateGroups.
       const pieces: SummaryNode[] = members.map(item => ({ ...item.node, key: item.id,
         summary: { observations: [item.observation], limitations: item.node.summary.limitations } }));
       const chunks = pack(pieces, item => JSON.stringify(this.mergePayload([item])).length, MERGE_CHARS, 12);

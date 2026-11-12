@@ -60,8 +60,15 @@ WebGL initialization/context loss switches to the static poster; voice continues
 npm test                 # Includes pure audio-clock/pose and module-boundary checks
 npm run test:ui          # Includes preview, reduced motion, context loss and call regressions
 
-# Explicit opt-in: synthetic evidence/audio, real ChatGPT voice, staged frontend:
-DRAKEN_TEST_STATIC_DIR=/path/to/stage node tests/live-voice-real.cjs --allow-provider
+# Validate the qualification fixture/current build without a provider or local model:
+npm run build
+node tests/live-voice-real.cjs --check
+
+# Explicit opt-in: synthetic evidence/audio, real ChatGPT voice, current build:
+node tests/live-voice-real.cjs --allow-provider
+# Set DRAKEN_TEST_STATIC_DIR only when intentionally qualifying an alternate build.
 ```
+
+The fixture-only check blocks voice API calls, supplies synthetic readiness metadata, and never starts a native call. It does not qualify provider access or real embeddings.
 
 Browser checks cover a chrome-free call image, cached blur reuse/resize, high-quality shader compilation (also exercised on software GL), audible sample mouth motion, stopping, desktop/mobile sizing, local-only requests, no preview microphone access, WebGL loss/retry, unavailable WebGL during a working call, and context disposal on hang-up. Native controller/peer tests cover speaker/headphone gating, interruption, mute, permission refusal and cleanup. Main UI tests cover supplied sources, generated/interrupted history, explicit retry and preservation of retired-engine records. No production snapshot is changed by these tests.

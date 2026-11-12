@@ -2,13 +2,14 @@ require('./fixtures/fake-memory.cjs');
 const {test,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{randomUUID}=require('node:crypto');
 const {getDb,closeDb}=require('../dist/db/schema'),store=require('../dist/sync/store');
+const {activity}=require('../dist/sync/activity');
 const {scanSessions}=require('../dist/sync/collector'),{generateReply,launchRecap,cancelReply}=require('../dist/sync/manager');
 const {summarizeRecap}=require('../dist/sync/recap'),{createApp}=require('../dist/server');
 let root,control,log,server;
 beforeEach(()=>{root=fs.mkdtempSync(path.join(os.tmpdir(),'draken-home-test-'));fs.mkdirSync(path.join(root,'sessions'));const fake=path.join(root,'pi');fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),fake);fs.chmodSync(fake,0o700);control=path.join(root,'control.json');log=path.join(root,'calls.jsonl');fs.writeFileSync(control,'{}');Object.assign(process.env,{DRAKEN_DATA_DIR:path.join(root,'state'),DRAKEN_PI_SESSIONS_DIR:path.join(root,'sessions'),DRAKEN_PI_BIN:fake,DRAKEN_PI_SUMMARY_MODEL:'test/cheap',DRAKEN_PI_FINAL_MODEL:'test/strong',DRAKEN_FAKE_CONTROL:control,DRAKEN_TEST_CALL_LOG:log,DRAKEN_HOST:'127.0.0.1',DRAKEN_NO_AUTH:'true'});delete process.env.DRAKEN_PI_MAX_INVOCATIONS;});
-afterEach(async()=>{for(const id of [...store.busySyncs])cancelReply(id);await waitIdle();if(server)await new Promise(r=>server.close(r));server=null;closeDb();fs.rmSync(root,{recursive:true,force:true});});
+afterEach(async()=>{for(const id of activity.busyIds)cancelReply(id);await waitIdle();if(server)await new Promise(r=>server.close(r));server=null;closeDb();fs.rmSync(root,{recursive:true,force:true});});
 function session(count){const id=randomUUID(),timestamp='2026-01-01T00:00:00Z';fs.writeFileSync(path.join(root,'sessions',id+'.jsonl'),[{type:'session',version:3,id,cwd:'/demo',timestamp},...Array.from({length:count},(_,i)=>({type:'message',id:String(i),parentId:i?String(i-1):null,timestamp,message:{role:i?'assistant':'user',content:id+' synthetic check '+i}}))].map(JSON.stringify).join('\n')+'\n');}
-async function waitIdle(){const deadline=Date.now()+15000;while(store.busySyncs.size){if(Date.now()>deadline)throw Error('Test job did not stop');await new Promise(r=>setTimeout(r,20));}}
+async function waitIdle(){const deadline=Date.now()+15000;while(activity.busy){if(Date.now()>deadline)throw Error('Test job did not stop');await new Promise(r=>setTimeout(r,20));}}
 const calls=()=>fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse):[];
 test('new snapshots reserve all available entries without review; discard releases them and request IDs deduplicate',async()=>{
  session(130);await scanSessions();const key=randomUUID(),first=store.startConversationSync(key);assert.equal(first.items.length,130);assert.equal(store.homeOverview().available,0);assert.equal(store.homeOverview().included_unreviewed,130);assert.equal(store.pendingCount(),130);assert.equal(store.startConversationSync(key).id,first.id);

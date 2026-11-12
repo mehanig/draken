@@ -15,7 +15,6 @@ interface LoginRequest {
   password: string;
 }
 
-// Check if auth is enabled
 router.get('/status', (req: Request, res: Response) => {
   res.json({
     application: 'draken',
@@ -24,7 +23,6 @@ router.get('/status', (req: Request, res: Response) => {
   });
 });
 
-// Login endpoint
 router.post('/login', (req: Request, res: Response) => {
   const { username, password } = req.body as LoginRequest;
 
@@ -50,7 +48,6 @@ router.post('/login', (req: Request, res: Response) => {
   });
 });
 
-// Verify token endpoint (check if current token is valid)
 router.get('/verify', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   if (!isAuthEnabled()) {
     return res.json({ valid: true, authEnabled: false });
@@ -63,8 +60,6 @@ router.get('/verify', authMiddleware, (req: AuthenticatedRequest, res: Response)
   });
 });
 
-// Logout is handled client-side (just delete the token)
-// But we provide an endpoint for completeness
 router.post('/logout', (_req: Request, res: Response) => {
   res.json({ message: 'Logged out successfully' });
 });

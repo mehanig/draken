@@ -4,9 +4,10 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), os = requ
 const Database = require('better-sqlite3');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
-const { historyPacket } = require('../dist/memory/context');
+const { historySources } = require('../dist/memory/sources');
+const { historyPacket } = require('../dist/memory/packet');
 const { reconciliationGaps } = require('../dist/sync/reconciliation');
-const { voiceHistoryQuery } = require('../dist/voice/history-focus');
+const { historyQuery: voiceHistoryQuery } = require('../dist/memory/focus');
 const { sourceEntry } = require('./fixtures/source-entry.cjs');
 let root, db, cache, index;
 const cutoff = '2026-01-08T13:00:00.000Z';
@@ -90,11 +91,17 @@ test('an original H status question searches for updates, while an offset read r
   service.searchPreparedHistory = query => { searches++; return index.search(query, undefined, true); };
   service.readHistory = (id, offset, _signal, before) => { reads++; return index.read(id, offset, before); };
   try {
-    const selection = { kind: 'sources', session_ids: ['trailboard'] };
+    const selection = { kind: 'sources', session_ids: ['trailboard'], reconcile: true };
     const result = await require('../dist/memory/context').historyContext(`Is ${ids.old} still blocked?`, cutoff, undefined, 24000, true, selection);
     assert.ok(result.refs.includes(ids.client)); assert.equal(searches, 1); assert.equal(reads, 0);
     await require('../dist/memory/context').historyContext(`${ids.old} offset 30`, cutoff, undefined, 7000, true, selection);
     assert.equal(reads, 1); assert.equal(searches, 1);
+    const small = await require('../dist/memory/context').historyContext(`Is ${ids.old} still blocked?`, cutoff, undefined, 7000, true, selection);
+    assert.equal(searches, 2, 'a smaller transport budget must not disable reconciliation');
+    assert.ok(Buffer.byteLength(small.text) <= 7000);
+    await require('../dist/memory/context').historyContext(`Is ${ids.old} still blocked?`, cutoff, undefined, 24000, true, { ...selection, reconcile: false });
+    assert.equal(reads, 2, 'a larger budget must not turn a reference read into a search');
+    assert.equal(searches, 2);
   } finally { Object.assign(service, saved); }
 });
 test('the citation guard also catches old frozen E/C aliases; an unrelated alias cannot satisfy it', async () => {
@@ -106,21 +113,22 @@ test('the citation guard also catches old frozen E/C aliases; an unrelated alias
   const citations = Object.values(ids).map(id => `[${id}]`).join(' ');
   assert.deepEqual(reconciliationGaps(citations + ' [E7]', packet, aliases), []);
 });
-test('a retrieved follow-up is checked again when its own pending sub-task was completed later', async () => {
+test('a retrieved follow-up is checked again when its own pending sub-task was completed later', () => {
   const old = add('Permission callbacks and account cleanup remain unfinished. The app integration is blocked.', '2026-01-06T12:00:00.000Z');
   const client = add('Implemented permission callbacks and account cleanup.\n\nRemaining: durable backend delivery jobs are unfinished. Provider activation remains disabled.', '2026-01-06T14:00:00.000Z');
   const jobs = add('Implemented durable backend delivery jobs: atomic inbox creation, leases and bounded retries.\n\nDelivery remains disabled; shared dispatcher implementation is still pending.', '2026-01-06T16:00:00.000Z');
-  await index.prepare({ before: cutoff });
-  const records = [...index.current.values()], seed = records.find(record => record.ref === ref(old));
+  const records = [...historySources(db)], byPosition = position => records.find(record => record.group === 'session:trailboard' && record.position === position);
+  const seed = byPosition(old);
   const found = require('../dist/memory/reconcile').reconcileHistory(records, [{ ...seed, offset: 0, score: 1 }], { question: 'Current status', kind: 'sources', reconcile: true, before: cutoff });
-  assert.ok(found.reconciliation.threads.some(thread => thread.earlier_ref === ref(client) && thread.later_refs.includes(ref(jobs))));
+  assert.ok(found.reconciliation.threads.some(thread => thread.earlier_ref === byPosition(client).ref && thread.later_refs.includes(byPosition(jobs).ref)));
   const packet = historyPacket({ ...found, mode: 'hybrid', limitations: 'Synthetic.' }, 32000, 3000);
   assert.match(packet.text, /Implemented permission callbacks/); assert.match(packet.text, /Implemented durable backend delivery jobs/); assert.match(packet.text, /shared dispatcher implementation is still pending/);
 });
 test('voice carries the same expanded evidence and later-update graph as chat without truncating it into a handoff', async () => {
   const ids=await timeline();
   const service=require('../dist/memory/service'),saved=service.searchPreparedHistory;
-  const {historyContext,DISCUSSION_HISTORY_BYTES}=require('../dist/memory/context');
+  const {historyContext}=require('../dist/memory/context');
+  const {DISCUSSION_HISTORY_BYTES}=require('../dist/memory/packet');
   const {historyDelivery}=require('../dist/voice/history-delivery');
   const changes=cache.prepare('SELECT total_changes() n').get().n;
   service.searchPreparedHistory=query=>{assert.equal(query.reconcile,true);return index.search(query,undefined,true);};

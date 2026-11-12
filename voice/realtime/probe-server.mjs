@@ -11,9 +11,16 @@ export async function createProbeServer({ voiceFactory = () => new NativeVoice({
 }), leaseMs = 10_000, lifetimeMs = 90_000 } = {}) {
   const token = randomBytes(32).toString('hex');
   const expected = Buffer.from(`Bearer ${token}`);
-  let call, accepted = false, touched = Date.now(), origin, closing;
+  let call, accepted = false, touched = Date.now(), origin, closing, serverClosing;
   const events = []; let sequence = 0;
-  const finish = () => { if (!closing) closing = Promise.resolve().then(() => call?.close()); return closing; };
+  const finish = () => {
+    if (!closing) {
+      closing = Promise.resolve().then(() => call?.close());
+      // Event/lease shutdown may precede the terminal owner's awaited close.
+      closing.catch(() => {});
+    }
+    return closing;
+  };
   const body = async req => {
     req.setEncoding('utf8');
     let data = ''; for await (const chunk of req) { data += chunk; if (data.length > 64_000) throw new Error('Request too large.'); }
@@ -73,7 +80,7 @@ export async function createProbeServer({ voiceFactory = () => new NativeVoice({
         res.end(JSON.stringify({ helperExited: result?.helperExited !== false })); return;
       }
       res.writeHead(404); res.end();
-    } catch { await finish(); if (!res.headersSent) res.writeHead(502); res.end('Native voice qualification failed. No provider fallback was attempted.'); }
+    } catch { await finish().catch(() => {}); if (!res.headersSent) res.writeHead(502); res.end('Native voice qualification failed. No provider fallback was attempted.'); }
   });
   server.requestTimeout = 65_000;
   server.headersTimeout = 10_000;
@@ -82,5 +89,18 @@ export async function createProbeServer({ voiceFactory = () => new NativeVoice({
   const sweep = setInterval(() => { if (accepted && Date.now() - touched > leaseMs) void finish(); }, Math.min(1000, leaseMs)); sweep.unref();
   const deadline = setTimeout(() => { void finish(); }, lifetimeMs); deadline.unref();
   return { origin, token, events,
-    async close() { clearInterval(sweep); clearTimeout(deadline); await finish(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
+    close() {
+      if (!serverClosing) {
+        clearInterval(sweep); clearTimeout(deadline);
+        const completion = finish();
+        serverClosing = (async () => {
+          const listener = new Promise(resolve => server.close(resolve));
+          server.closeAllConnections();
+          const [helper] = await Promise.allSettled([completion, listener]);
+          if (helper.status === 'rejected') throw helper.reason;
+          if (helper.value?.helperExited === false) throw new Error('Native probe helper exit could not be confirmed.');
+        })();
+      }
+      return serverClosing;
+    } };
 }

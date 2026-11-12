@@ -5,7 +5,7 @@ import { startServer } from './server';
 import { serverTarget } from './server-state';
 import { probeServer } from './server-status';
 import { launchTray } from './tray/launcher';
-import { doctor, installPi, loginPi, voiceSetup } from './pi/setup';
+import { doctor, installPi, loginPi } from './pi/setup';
 
 const version = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8')).version;
 const args = process.argv.slice(2);
@@ -59,7 +59,11 @@ Native voice has a separate account. No startup action captures audio or calls m
   if (args[0] === 'setup' && (args.length === 1 || args.length === 2 && args[1] === '--yes')) return installPi(args[1] === '--yes');
   if (args[0] === 'login' && args.length === 1) return loginPi();
   if (args[0] === 'doctor' && args.length === 1) return doctor();
-  if (args[0] === 'voice' && args.length === 2) return voiceSetup(args[1]);
+  if (args[0] === 'voice' && args.length === 2) {
+    if (args[1] === 'login' && !process.stdin.isTTY) throw new Error('Run draken voice login in an interactive terminal on the server.');
+    const { voiceSetup } = require('../voice/realtime/setup.mjs') as { voiceSetup(action: string): Promise<void> };
+    return voiceSetup(args[1]);
+  }
   if (args[0] === 'status' && args.length === 1) {
     const target = serverTarget(), url = target.url;
     try {

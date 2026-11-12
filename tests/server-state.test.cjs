@@ -33,6 +33,39 @@ test('corrupt, oversized, symlinked and non-origin records fail visibly rather t
  process.env.DRAKEN_HOST='127.0.0.1';process.env.DRAKEN_PORT='40333';assert.equal(serverTarget().url,'http://127.0.0.1:40333','explicit operator override remains usable');
 });
 
+test('a data directory has one server owner across different listening ports, until shutdown', async () => {
+ const freePort=()=>new Promise(resolve=>{const s=net.createServer().listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});
+ const port=await freePort(), otherPort=await freePort();
+ const env={...process.env,DRAKEN_NO_AUTH:'true',DRAKEN_HOST:'127.0.0.1',DRAKEN_PORT:String(port)};
+ let child,closed,db;
+ const start=async configuration=>{
+  child=spawn(process.execPath,[cli],{env:configuration,cwd:root,stdio:['ignore','pipe','pipe']});
+  closed=new Promise(resolve=>child.once('close',resolve));let out='',err='';child.stdout.on('data',v=>out+=v);child.stderr.on('data',v=>err+=v);
+  for(let i=0;i<150&&!out.includes('Draken sync running');i++){if(child.exitCode!==null)throw Error(err);await new Promise(resolve=>setTimeout(resolve,30));}
+  assert.match(out,/Draken sync running/,err);
+ };
+ const stop=async()=>{if(child){child.kill('SIGTERM');await closed;child=undefined;}};
+ try {
+  await start(env);
+  db=new(require('better-sqlite3'))(path.join(env.DRAKEN_DATA_DIR,'draken.db'));
+  const at='2026-01-01T00:00:00.000Z';
+  const id=Number(db.prepare('INSERT INTO syncs(created_at,snapshot_at) VALUES(?,?)').run(at,at).lastInsertRowid);
+  db.prepare("INSERT INTO sync_runs(sync_id,summary_model,final_model,max_invocations,total_entries,started_at) VALUES(?,'test/cheap','test/final',2,0,?)").run(id,at);
+  db.prepare("INSERT INTO live_calls(id,sync_id,started_at) VALUES('synthetic-active',?,?)").run(id,at);
+  const before=fs.readFileSync(record());
+  const duplicate=await command([],{...env,DRAKEN_PORT:String(otherPort)});
+  assert.equal(duplicate.code,1,duplicate.err);assert.match(duplicate.err,/owns this data directory/);
+  assert.deepEqual(fs.readFileSync(record()),before);
+  assert.equal(db.prepare('SELECT status FROM sync_runs WHERE sync_id=?').get(id).status,'running');
+  assert.equal(db.prepare("SELECT status FROM live_calls WHERE id='synthetic-active'").get().status,'active');
+  assert.equal((await command(['status'],env)).code,0,'the original server remains responsive');
+  db.close();db=undefined;await stop();
+  await start({...env,DRAKEN_PORT:String(otherPort)});
+  assert.notEqual(fs.readFileSync(record(),'utf8'),before.toString());
+  assert.equal((await command(['status'],{...env,DRAKEN_PORT:String(otherPort)})).code,0);
+ } finally {db?.close();await stop();}
+});
+
 test('bare CLI discovers a non-default authenticated bind, rejects stale/wrong instances, and follows restart',async()=>{
  const port=await new Promise(resolve=>{const s=net.createServer().listen(0,'127.0.0.2',()=>{const n=s.address().port;s.close(()=>resolve(n));});});
  const env={...process.env,DRAKEN_HOST:'127.0.0.2',DRAKEN_PORT:String(port),DRAKEN_NO_AUTH:'false',DRAKEN_USERNAME:'synthetic',DRAKEN_PASSWORD:'synthetic',DRAKEN_JWT_SECRET:'synthetic-local-status-test-only'};
