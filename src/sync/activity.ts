@@ -1,10 +1,19 @@
 import { HttpError } from '../errors';
 
+/** Callable release remains compatible with existing call owners. All child
+ * leases close over this reservation, never a sync ID that can be reused. */
+export interface VoiceLease {
+  (): void;
+  connected(): void;
+  hold(): () => void;
+  beginTurn(): () => void;
+}
+
 /** Process-local ownership, separate from durable run status. Cancellation only
  * requests a stop: the owner keeps its lease until its resources are released. */
 class SyncActivity {
   private jobs = new Map<number, { controller: AbortController }>();
-  private call?: { id: number; token: symbol };
+  private call?: { id: number; token: symbol; connected: boolean; holds: Set<symbol>; turns: Set<symbol> };
   private start?: symbol;
   private stopping = false;
   private drained?: Promise<void>;
@@ -23,6 +32,8 @@ class SyncActivity {
   get busy(): boolean { return Boolean(this.start || this.jobs.size); }
   get starting(): boolean { return this.start !== undefined; }
   get callActive(): boolean { return this.call !== undefined; }
+  get backgroundIdle(): boolean { return !this.stopping && !this.busy && (!this.call || (this.call.connected && !this.call.holds.size && !this.call.turns.size)); }
+  voiceTurnActive(id: number): boolean { return this.call?.id === id && this.call.turns.size > 0; }
   jobActive(id: number): boolean { return this.jobs.has(id); }
   voiceActive(id: number): boolean { return this.call?.id === id; }
 
@@ -46,12 +57,23 @@ class SyncActivity {
     const token = Symbol(); this.start = token;
     return () => { if (this.start === token) { this.start = undefined; this.changed(); } };
   }
-  beginCall(id: number): () => void {
+  beginCall(id: number): VoiceLease {
     this.admit();
     if (this.call) throw new HttpError(409, 'End the existing call first.');
     if (this.jobs.has(id)) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
-    const token = Symbol(); this.call = { id, token };
-    return () => { if (this.call?.token === token) { this.call = undefined; this.changed(); } };
+    const token = Symbol();
+    const owner = { id, token, connected: false, holds: new Set<symbol>(), turns: new Set<symbol>() };
+    this.call = owner;
+    const lease = (leases: Set<symbol>) => {
+      if (this.call !== owner) return () => {};
+      const child = Symbol(); leases.add(child);
+      return () => { leases.delete(child); };
+    };
+    return Object.assign(() => { if (this.call === owner) { this.call = undefined; this.changed(); } }, {
+      connected: () => { if (this.call === owner) owner.connected = true; },
+      hold: () => lease(owner.holds),
+      beginTurn: () => lease(owner.turns),
+    });
   }
 }
 

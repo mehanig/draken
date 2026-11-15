@@ -19,13 +19,36 @@ test('off and foreground work perform no scans or embedding; full batches run on
  f.rows.delete('0');await f.worker.tick();assert.equal(f.worker.state.pending_records,1);f.now=172800000;await f.worker.tick();assert.equal(f.prepares,2);
  f.rows.clear();await f.worker.tick();assert.equal(f.prepares,3,'a full batch of removals also refreshes admission');
 });
-test('0, 1 and 63 pending records never flush on a timer; the 64th triggers a background batch',async()=>{
+test('without an active conversation, 0, 1 and 63 pending records never flush on a timer; the 64th triggers a background batch',async()=>{
  for(const size of [0,1,63]){
   const f=fixture(size);
   for(const now of [0,300000,86400000,30*86400000]){f.now=now;await f.worker.tick();assert.equal(f.prepares,0);assert.equal(f.worker.state.pending_records,size);}
  }
  const f=fixture(63);await f.worker.tick();f.now=86400000;f.rows.set('63','v1');await f.worker.tick();assert.equal(f.prepares,1);assert.equal(f.worker.state.pending_records,0);
  f.rows.set('64','new tail');f.now=30*86400000;await f.worker.tick();assert.equal(f.prepares,1);assert.equal(f.worker.state.pending_records,1);
+});
+test('active conversations prepare the first local change, then return to strict64 when no longer active',async()=>{
+ const f=fixture(1);let active=true;f.ops.activeConversations=()=>active;
+ await f.worker.tick();assert.equal(f.prepares,1);assert.equal(f.worker.state.pending_records,0);
+ await f.worker.tick();assert.equal(f.prepares,1,'unchanged live checks do not infer');
+ f.rows.set('0','changed');f.now=60000;await f.worker.tick();assert.equal(f.prepares,2);
+ f.rows.delete('0');f.now=120000;await f.worker.tick();assert.equal(f.prepares,3,'a single removal refreshes admission');
+ active=false;f.rows.set('tail','new');f.now=180000;await f.worker.tick();assert.equal(f.prepares,3);assert.equal(f.worker.state.pending_records,1);
+});
+test('active zero-delta receipt/link recovery is local, bounded and not attempted for idle conversations',async()=>{
+ const f=fixture(0);let active=false,stale=true,attempts=0;f.ops.activeConversations=()=>active;f.ops.needsPreparation=()=>stale;
+ f.ops.prepare=async()=>{attempts++;throw Error('PRIVATE stale receipt recovery failure');};
+ await f.worker.tick();assert.equal(attempts,0);active=true;await f.worker.tick();assert.equal(attempts,1);
+ f.now=60000;await f.worker.tick();assert.equal(attempts,1,'failed recovery retains five-minute local backoff');
+ f.now=300000;f.ops.prepare=async()=>{attempts++;stale=false;};await f.worker.tick();assert.equal(attempts,2);assert.equal(f.worker.state.phase,'waiting');
+ f.now=360000;await f.worker.tick();assert.equal(attempts,2,'successful recovery is not a timed rewrite');
+});
+test('expiry runs even with indexing disabled, foreground admission blocked, or an owned job running',async()=>{
+ const f=fixture(1),expired=[];f.ops.expire=now=>expired.push(now);f.on=false;
+ await f.worker.tick();f.on=true;f.idle=false;f.now=60000;await f.worker.tick();assert.equal(f.scans,0);
+ f.idle=true;f.now=120000;let release;f.ops.scan=()=>new Promise(r=>release=r);const running=f.worker.tick();
+ f.now=180000;const duplicate=f.worker.tick();release({warnings:[]});await Promise.all([running,duplicate]);
+ assert.deepEqual(expired,[0,60000,120000,180000]);assert.equal(f.prepares,0);
 });
 test('only one job runs and disabling during a scan prevents embeddings; shutdown waits for owned work',async()=>{
  const f=fixture(70);let release;f.ops.scan=()=>new Promise(r=>release=r);const running=f.worker.tick();let stopped=false;
@@ -38,6 +61,22 @@ test('foreground work arriving during a scan wins before embedding or checkpoint
  const running=f.worker.tick();f.idle=false;release({warnings:[]});await running;
  assert.equal(f.prepares,0);assert.equal(completed,0);assert.equal(f.worker.state.phase,'paused');
  f.idle=true;f.now=60000;f.ops.scan=async()=>({warnings:[]});await f.worker.tick();assert.equal(f.prepares,1);assert.equal(completed,1);
+});
+test('connected voice is background-idle only between turns; preemption aborts and awaits the owned local job',async()=>{
+ const {activity}=require('../dist/sync/activity');const voice=activity.beginCall(991),f=fixture(1);
+ f.ops.idle=()=>activity.backgroundIdle;f.ops.activeConversations=()=>true;
+ const prepare=f.ops.prepare;let signal,release,finishTurn;
+ try{
+  await f.worker.tick();assert.equal(f.scans,0,'voice connection setup is foreground work');
+  voice.connected();assert.equal(activity.backgroundIdle,true);
+  f.ops.prepare=(_before,s)=>{signal=s;return new Promise(r=>release=r);};const running=f.worker.tick();while(!signal)await Promise.resolve();
+  finishTurn=voice.beginTurn();assert.equal(activity.backgroundIdle,false);
+  let drained=false;const yielding=f.worker.stop().then(()=>drained=true);await Promise.resolve();
+  assert.equal(signal.aborted,true);assert.equal(drained,false,'cancellation request alone is not owned-job completion');
+  release();await Promise.all([running,yielding]);assert.equal(drained,true);assert.equal(f.worker.state.last_completed_at,null);
+  f.now=60000;await f.worker.tick();assert.equal(f.scans,1,'no mutation is admitted during the voice turn');
+  finishTurn();finishTurn=undefined;f.ops.prepare=prepare;await f.worker.tick();assert.equal(f.prepares,1);
+ }finally{finishTurn?.();release?.();await f.worker.stop();voice();}
 });
 test('an incomplete scan never advances the baseline or leaks private scan warnings',async()=>{
  const f=fixture(64);let completed=0;f.ops.completed=()=>{completed++;};
@@ -123,4 +162,48 @@ test('the fresh default timer indexes synthetic originals without snapshots or p
   noSyncs();assert.equal(require('../dist/sync/store').availableCount(),71);
   assert.equal(fs.readFileSync(root+'/sessions/auto.jsonl','utf8'),contents+tail);
  }finally{await stopBackgroundIndexing();t.mock.timers.reset();service.prepareHistory=original;cache.close();}
+});
+test('the production minute timer expires conversations while local indexing is off, without browser or source work',async t=>{
+ const now=Date.now(),db=getDb(),created=new Date(now-31*60000).toISOString();
+ const id=Number(db.prepare("INSERT INTO syncs(created_at,snapshot_at,status) VALUES(?,?,'open')").run(created,created).lastInsertRowid);
+ t.mock.timers.enable({apis:['setInterval','Date'],now});
+ try{
+  setAutoIndex(false);assert.equal(db.prepare('SELECT conversation_ended_at FROM syncs WHERE id=?').get(id).conversation_ended_at,null);
+  t.mock.timers.tick(60000);await Promise.resolve();
+  assert.equal(db.prepare('SELECT conversation_ended_at FROM syncs WHERE id=?').get(id).conversation_ended_at,new Date(now+60000).toISOString(),'the timer persists actual expiry time');
+  assert.equal(db.prepare('SELECT status FROM syncs WHERE id=?').get(id).status,'open','expiry is not review/completion');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);
+  assert.equal(fs.existsSync(root+'/state/memory'),false);
+ }finally{await stopBackgroundIndexing();t.mock.timers.reset();}
+});
+test('an active production conversation gets a two-record local tail on the next minute, without rewriting its cutoff or snapshot',async t=>{
+ const Database=require('better-sqlite3'),{HistoryIndex}=require('../dist/memory/index'),service=require('../dist/memory/service');
+ const {scanSessions}=require('../dist/sync/collector'),{indexReadiness}=require('../dist/memory/readiness');
+ const {markConversationPrepared,captureConversationHistory}=require('../dist/sync/conversation');
+ const now=Date.now(),before=new Date(now-1000).toISOString(),at=new Date(now-5000).toISOString(),db=getDb();
+ const file=root+'/sessions/live.jsonl',message=(id,parentId,timestamp,text)=>({type:'message',id,parentId,timestamp,message:{role:'assistant',content:text}});
+ fs.writeFileSync(file,[{type:'session',version:3,id:'live',cwd:'/synthetic/live',timestamp:at},message('old',null,at,'Original report; acceptance not checked.')].map(JSON.stringify).join('\n')+'\n');
+ assert.deepEqual((await scanSessions()).warnings,[]);fs.mkdirSync(root+'/state/memory',{recursive:true});const cache=new Database(root+'/state/memory/index.sqlite');
+ let jobs=0,embeddings=0;const index=new HistoryIndex(cache,db,{fingerprint:'synthetic-live-timer',ready:()=>true,setup:async()=>{},embed:async()=>{embeddings++;const v=new Float32Array(384);v[0]=1;return v;}});
+ await index.prepare({before},undefined,true);
+ const id=Number(db.prepare("INSERT INTO syncs(created_at,snapshot_at,status,briefing) VALUES(?,?,'open','Immutable initial briefing')").run(new Date(now).toISOString(),before).lastInsertRowid);
+ markConversationPrepared(id,before);
+ const originalPrepare=service.prepareHistory,originalReadiness=service.historyReadiness;
+ service.prepareHistory=async(cutoff,signal,background)=>{assert.equal(signal.aborted,false);assert.equal(background,true);jobs++;await index.prepare({before:cutoff},undefined,true);};
+ service.historyReadiness=captured=>indexReadiness(cache,db,captured);
+ const saved=JSON.stringify(db.prepare('SELECT * FROM syncs WHERE id=?').get(id));
+ t.mock.timers.enable({apis:['setInterval','Date'],now});
+ try{
+  const later=new Date(now+1000).toISOString();fs.appendFileSync(file,[message('new','old',later,'New implementation report.'),message('qualification','new',later,'Acceptance tests remain pending.')].map(JSON.stringify).join('\n')+'\n');
+  startBackgroundIndexing();t.mock.timers.tick(60000);
+  for(let n=0;n<200&&!autoIndexSettings().last_completed_at;n++)await new Promise(r=>setTimeout(r,10));
+  assert.equal(jobs,1);assert.equal(embeddings,3);assert.equal(autoIndexSettings().pending_records,0);assert.equal(indexReadiness(cache,db).ready,true);
+  assert.equal(JSON.stringify(db.prepare('SELECT * FROM syncs WHERE id=?').get(id)),saved,'background completion does not adopt a conversation cutoff or rewrite its briefing');
+  const captured=captureConversationHistory(id);assert.ok(captured>before,'only the next turn adopts the completed cutoff');
+  assert.ok((await index.search({question:'implementation',before:captured},undefined,true)).results.some(row=>row.at===later));
+  const afterQuery=embeddings;t.mock.timers.tick(60000);for(let n=0;n<200&&autoIndexSettings().phase==='scanning';n++)await new Promise(r=>setTimeout(r,10));
+  assert.equal(jobs,1);assert.equal(embeddings,afterQuery,'unchanged live tick has no inference');
+  for(const table of ['sync_items','sync_messages','sync_runs','sync_coverage','summary_cache','background_runs','live_calls'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM syncs').get().n,1);
+ }finally{await stopBackgroundIndexing();t.mock.timers.reset();service.prepareHistory=originalPrepare;service.historyReadiness=originalReadiness;cache.close();}
 });

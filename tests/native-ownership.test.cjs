@@ -94,7 +94,7 @@ test('unconfirmed native cleanup retains the call lease and refuses replacement 
         fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'scenario.txt'),'conversation');
         fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'auth.json'),JSON.stringify({auth_mode:'chatgpt',tokens:{access_token:'synthetic',refresh_token:'synthetic',id_token:'synthetic'}}));
         const at=new Date().toISOString();
-        const id=Number(getDb().prepare("INSERT INTO syncs(created_at,snapshot_at,snapshot_version,briefing,compression_complete) VALUES(?,?,2,'Synthetic ready briefing',1)").run(at,at).lastInsertRowid);
+        const id=Number(getDb().prepare("INSERT INTO syncs(created_at,snapshot_at,snapshot_version,briefing,compression_complete,conversation_before) VALUES(?,?,2,'Synthetic ready briefing',1,?)").run(at,at,at).lastInsertRowid);
         const call=await live.createLiveCall(id,new AbortController().signal);
         await live.connectLiveCall(call.id,'v=0\\r\\nm=audio 9 test',new AbortController().signal);
         const {NativeVoice}=await import('./voice/realtime/native.mjs');

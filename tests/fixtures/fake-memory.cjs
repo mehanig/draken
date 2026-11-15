@@ -1,8 +1,10 @@
 // Test-only module mocks. Never imported by production code and no runtime env
 // switch can select them. Ordinary tests must not download/run a real model.
 const service = require('../../dist/memory/service');
-service.prepareHistory = async () => {};
-service.historyReadiness = () => ({ ready: true, before: new Date().toISOString() });
+let preparedBefore = new Date().toISOString();
+service.prepareHistory = async before => { preparedBefore = before || new Date().toISOString(); };
+// Readiness reads do not advance a preparation receipt or adopt new evidence.
+service.historyReadiness = () => ({ ready: true, before: preparedBefore });
 service.searchHistory = async () => ({ mode: 'hybrid', results: [], limitations: 'Synthetic empty historical lookup.' });
 service.searchPreparedHistory = (...args) => service.searchHistory(...args);
 

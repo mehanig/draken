@@ -11,6 +11,7 @@ import { admittedAgent, agentSources, AGENTS } from '../sources/registry';
 import { HttpError } from '../errors';
 
 import { activity } from './activity';
+import { assertConversationActive, conversationStatus, conversationStatuses, expireConversations } from './conversation';
 import { defaultModels } from './models';
 import type { SummaryInput } from './tree';
 const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.briefing, s.decisions, s.carry_forward,
@@ -22,7 +23,7 @@ const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.bri
 const historyWindow = `e.timestamp >= COALESCE((SELECT value FROM sync_settings WHERE key = 'history_since'), '')`;
 const pendingWhere = `e.active = 1 AND e.present = 1 AND e.is_activity = 1 AND e.effective_length > 0
   AND ${historyWindow} AND s.included = 1 AND s.missing = 0 AND ${admittedAgent('s')} AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)`;
-const availableFilter = (exceptSync = 0) => `${pendingWhere} AND NOT EXISTS (SELECT 1 FROM sync_items i JOIN syncs held ON held.id=i.sync_id WHERE i.event_key=e.event_key AND held.status='open' AND held.id != ${exceptSync})`;
+const availableFilter = (exceptSync = 0) => `${pendingWhere} AND NOT EXISTS (SELECT 1 FROM sync_items i JOIN syncs held ON held.id=i.sync_id WHERE i.event_key=e.event_key AND held.status='open' AND held.conversation_ended_at IS NULL AND held.id != ${exceptSync})`;
 const availableWhere = availableFilter();
 const evidenceSelect = `SELECT s.agent,e.id AS source_id, e.event_key, e.session_id, s.name AS session_name, s.path AS source_path,
   s.cwd, e.entry_id, e.timestamp, e.role FROM agent_entries e JOIN agent_sessions s ON s.id = e.session_id`;
@@ -44,11 +45,12 @@ export function overview(): Overview {
     AND e.present = 1 AND e.is_activity = 1 AND e.effective_length > 0 AND ${historyWindow}
     AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)) AS pending
     FROM agent_sessions s ORDER BY s.modified_at DESC`).all() as ObservedSession[];
-  const syncs = (db.prepare(`${summaryQuery} ORDER BY s.id DESC LIMIT 50`).all() as SyncSummary[])
-    .map(row => ({ ...row, aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)) }));
+  const rows = db.prepare(`${summaryQuery} ORDER BY s.id DESC LIMIT 50`).all() as SyncSummary[];
+  const conversations = conversationStatuses(rows.map(row => row.id));
+  const syncs = rows.map((row, index) => ({ ...row, conversation: conversations[index], aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)) }));
   const models = defaultModels();
   return {
-    agents: agentSources(db), sessions, syncs, pending: pendingCount(), active_sync_id: syncs.find(s => s.status === 'open')?.id || null,
+    agents: agentSources(db), sessions, syncs, pending: pendingCount(), active_sync_id: syncs.find(s => s.status === 'open' && !s.conversation?.ended_at)?.id || null,
     session_root: getSessionRoot(), model: models.final || 'pi configured default', summary_model: models.summary,
     history_since: historySince(),
     history_initialized: Boolean(db.prepare("SELECT 1 FROM sync_settings WHERE key = 'history_since'").get()),
@@ -63,7 +65,8 @@ export function homeOverview(before?: number): HomeOverview {
   const db = getDb();
   const rows = db.prepare(`${summaryQuery} WHERE s.id < ? ORDER BY s.id DESC LIMIT 21`).all(before || Number.MAX_SAFE_INTEGER) as SyncSummary[];
   const available = availableCount();
-  return { syncs: rows.slice(0, 20).map(row => ({ aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)), id: row.id, status: row.status, created_at: row.created_at, item_count: row.item_count,
+  const page = rows.slice(0, 20), conversations = conversationStatuses(page.map(row => row.id));
+  return { syncs: page.map((row, index) => ({ conversation: conversations[index], aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)), id: row.id, status: row.status, created_at: row.created_at, item_count: row.item_count,
     preview: row.recap || row.briefing.replace(/\[([EC]\d+)\]/g, '').replace(/\s+/g, ' ').slice(0, 600),
     preview_kind: row.recap ? row.recap_state === 'ready' ? 'recap' : 'previous_recap' : row.briefing ? 'briefing' : 'empty', busy: activity.jobActive(row.id), active_call: activity.voiceActive(row.id),
     needs_retry: row.status === 'open' && !row.briefing && ['failed', 'cancelled', 'interrupted'].includes((db.prepare('SELECT status FROM sync_runs WHERE sync_id=? ORDER BY id DESC LIMIT 1').get(row.id) as any)?.status),
@@ -107,7 +110,7 @@ export function getSync(id: number): SyncDetail {
   try {
     const items = (db.prepare('SELECT evidence_json FROM sync_items WHERE sync_id = ? ORDER BY rowid').all(id) as any[]).map(item => reader.read(item.evidence_json, true));
     return {
-      ...row, aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
+      ...row, conversation: conversationStatus(id), aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
       messages: db.prepare('SELECT id, role, content, created_at FROM sync_messages WHERE sync_id = ? ORDER BY id').all(id) as SyncDetail['messages'],
       busy: activity.jobActive(id), history_since: historySince(),
       models: { ...defaultModels(), ...JSON.parse(extra.model_config_json) }, tree: getProgress(id),
@@ -191,9 +194,10 @@ function persistItems(id: number, items: Evidence[]): void {
 }
 
 export function startSync(since?: string | null): SyncDetail {
+  expireConversations();
   const db = getDb();
   return db.transaction(() => {
-    const existing = db.prepare("SELECT id FROM syncs WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
+    const existing = db.prepare("SELECT id FROM syncs WHERE status = 'open' AND conversation_ended_at IS NULL ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
     if (existing) return getSync(existing.id);
     if (!db.prepare("SELECT 1 FROM sync_settings WHERE key = 'history_since'").get()) {
       const parsed = since ? new Date(since) : null;
@@ -216,6 +220,7 @@ export function startSync(since?: string | null): SyncDetail {
 /** New one-click workflow: reserve previously unassigned entries, never review them.
  * Repeated transport requests reuse the same immutable snapshot. */
 export function startConversationSync(requestId: string): SyncDetail {
+  expireConversations();
   const db = getDb();
   return db.transaction(() => {
     const existing = db.prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
@@ -241,6 +246,7 @@ function archiveBriefing(sync: SyncDetail, reason: string): void {
 }
 
 export function expandSnapshot(id: number): SyncDetail {
+  assertConversationActive(id);
   const db = getDb();
   return db.transaction(() => {
     const sync = requireOpen(id);
@@ -257,6 +263,7 @@ export function expandSnapshot(id: number): SyncDetail {
 }
 
 export function configureModels(id: number, models: SyncModels): SyncDetail {
+  assertConversationActive(id);
   const sync = requireOpen(id);
   for (const model of [models.summary, models.final]) {
     if (typeof model !== 'string' || (model !== '' && !/^[a-zA-Z0-9][a-zA-Z0-9._/:+@-]{0,199}$/.test(model))) throw new HttpError(400, 'Use a pi provider/model selector, not a shell command');
@@ -287,6 +294,7 @@ export function recoverInterruptedRuns(): void {
   getDb().prepare("UPDATE sync_presentations SET recap_state='failed',recap_error='Recap interrupted by restart. Retry to reuse cached fragments.' WHERE recap_state='running'").run();
   getDb().prepare("UPDATE sync_runs SET status = 'interrupted', error = 'Server restarted. Retry to reuse completed summaries.', completed_at = ? WHERE status = 'running'")
     .run(new Date().toISOString());
+  expireConversations();
 }
 
 export function saveNotes(id: number, decisions: string, carryForward: string): SyncDetail {

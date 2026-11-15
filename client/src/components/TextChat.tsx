@@ -2,13 +2,14 @@ import { useEffect, useRef } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
 import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
+import { ConversationInfo } from './ConversationInfo';
 
-export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, onSend, onCancel, onPrepareHistory, onVoice }: {
+export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, onSend, onCancel, onPrepareHistory, onVoice, updatesUnavailable = false }: {
   sync: SyncDetail; readiness: CallReadiness | null; draft: string; setDraft: (text: string) => void;
   disabled: boolean; sending: boolean; onSend: (text?: string) => void; onCancel: () => void;
-  onPrepareHistory: () => void; onVoice: () => void;
+  onPrepareHistory: () => void; onVoice: () => void; updatesUnavailable?: boolean;
 }) {
-  const run = sync.tree.run, open = sync.status === 'open';
+  const run = sync.tree.run, ended = Boolean(sync.conversation?.ended_at), open = sync.status === 'open' && !ended;
   const pending = sync.busy && run?.status === 'running' && Boolean(run.question);
   const failed = !sync.busy && Boolean(run?.question) && ['failed', 'cancelled', 'interrupted'].includes(run?.status || '');
   const question = sending ? draft : pending || failed ? run?.question : null;
@@ -17,10 +18,11 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
   const thread = useRef<HTMLDivElement>(null), bottom = useRef(true);
   useEffect(() => { if (bottom.current && thread.current) thread.current.scrollTop = thread.current.scrollHeight; }, [sync.messages.length, question, thinking, stage]);
   const evidence = [...sync.items, ...sync.context];
-  const sendDisabled = disabled || !open || !readiness?.ready;
+  const prepared = Boolean(sync.briefing && sync.tree.complete && (sync.conversation?.history_before || readiness?.ready));
+  const sendDisabled = disabled || !open || !prepared;
   return <section className="card text-chat" aria-label="Chat with Draken">
     <header className="chat-heading"><img className="chat-avatar" src="/persona/chat-avatar.webp" alt="Draken" width="52" height="52" />
-      <div><h2>Chat with Draken</h2><p className="small muted">Same history. No microphone or audio.</p></div>
+      <div><h2>Chat with Draken</h2><p className="small muted">Same conversation. No microphone or audio.</p><ConversationInfo state={sync.conversation} unavailable={updatesUnavailable} /></div>
       <button type="button" className="btn btn-ghost" onClick={onVoice}>Voice &amp; call history</button>
     </header>
     <div className="chat-thread" ref={thread} onScroll={() => { const element = thread.current; if (element) bottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
@@ -34,7 +36,7 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
       {failed && <div className="alert warning" role="alert"><strong>{run?.status === 'failed' ? 'Reply failed.' : 'Reply stopped.'}</strong><p>{run?.error || 'The question is retained. Nothing was marked reviewed.'}</p><button className="btn btn-secondary" disabled={sendDisabled} onClick={() => onSend(run?.question || '')}>Retry chat reply</button></div>}
     </div>
     {open && <>
-      {!thinking && <p className="small muted" role="status">{readiness?.ready ? `History cutoff: ${readiness.before ? new Date(readiness.before).toLocaleString() : 'prepared snapshot'}. Refresh for later work.` : sync.busy ? 'Preparing the briefing and history for chat…' : readiness?.briefingReady ? 'Prepare history before sending a message.' : 'Prepare the briefing and history first.'}</p>}
+      {!thinking && <p className="small muted" role="status">{prepared ? 'Newly prepared information is used on your next turn. You can keep chatting while updates are prepared.' : sync.busy ? 'Preparing the briefing and history for chat…' : readiness?.briefingReady ? 'Prepare history before sending a message.' : 'Prepare the briefing and history first.'}</p>}
       {readiness?.error && <p role="alert" className="small">{readiness.error}</p>}
       <form className="chat-compose" onSubmit={event => { event.preventDefault(); if (!sendDisabled && draft.trim()) { bottom.current = true; onSend(); } }}>
         <label htmlFor="chat-question" className="sr-only">Message Draken</label>
@@ -45,9 +47,10 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
           {pending ? <button type="button" className="btn btn-secondary" onClick={onCancel}><Square size={14} />Stop reply</button> : <button className="btn btn-primary" disabled={sendDisabled || !draft.trim()}><ArrowUp size={16} />Send message</button>}
         </div>
       </form>
-      {readiness?.briefingReady && !readiness.preparing && !thinking && <button className="btn btn-secondary chat-refresh" disabled={disabled} onClick={onPrepareHistory}>{readiness.ready ? 'Refresh history' : 'Prepare history'}</button>}
+      {readiness?.briefingReady && !readiness.preparing && !thinking && <button className="btn btn-secondary chat-refresh" disabled={disabled} onClick={onPrepareHistory}>{prepared ? 'Refresh history' : 'Prepare history'}</button>}
     </>}
-    {!open && <p className="small muted">This sync is closed. Its chat is preserved; start a new sync to continue.</p>}
+    {!open && <p className="small muted">{ended && sync.status === 'open' ? 'Session ended after 30 minutes without a user message. Your chat is preserved; start a new sync to continue. Nothing was marked reviewed.' : 'This sync is closed. Its chat is preserved; start a new sync to continue.'}</p>}
+    {!open && draft.trim() && <div className="chat-compose"><label htmlFor="ended-chat-draft">Unsent message — copy it into a new sync</label><textarea id="ended-chat-draft" rows={3} readOnly value={draft} /></div>}
     <p className="small muted chat-boundary">Messages stay with this sync. Calls remain in call history. Chatting never marks anything reviewed or saves decisions for you.</p>
   </section>;
 }

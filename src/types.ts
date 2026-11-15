@@ -60,7 +60,18 @@ export interface PiAccounting {
   models: string[];
 }
 
+export interface ConversationState {
+  readonly last_user_at: string;
+  readonly expires_at: string;
+  readonly ended_at: string | null;
+  readonly history_before: string | null;
+  readonly available_before: string | null;
+  readonly update_state: 'up_to_date' | 'preparing' | 'new_info' | 'paused' | 'error';
+  readonly error: string;
+}
+
 export interface SyncSummary {
+  conversation?: ConversationState;
   id: number;
   status: 'open' | 'completed' | 'discarded';
   created_at: string;
@@ -79,6 +90,7 @@ export interface SyncSummary {
 }
 
 interface SyncCard {
+  conversation?: ConversationState;
   aggregation_cost: SyncCost | null;
   id: number; status: SyncSummary['status']; created_at: string; item_count: number;
   preview: string; preview_kind: 'recap' | 'previous_recap' | 'briefing' | 'empty'; busy: boolean; calls: number; needs_retry: boolean; active_call: boolean;
@@ -105,6 +117,7 @@ interface SyncMessage {
 }
 
 export interface SyncDetail extends SyncSummary {
+  conversation: ConversationState;
   items: Evidence[];
   context: Evidence[];
   memory: { sync_id: number; decisions: string; carry_forward: string; recap?: string; status?: string; snapshot_at?: string }[];

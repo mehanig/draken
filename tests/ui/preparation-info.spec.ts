@@ -13,7 +13,7 @@ test('Home separates local indexing from explicit briefing preparation and retai
   await expect(details).toContainText('Automatic local indexing');
   await expect(details).toContainText('Settings → Automatically index history');
   await expect(details).toContainText('checking once a minute and indexing batches at 64 source changes');
-  await expect(details).toContainText('Smaller tails wait for explicit foreground preparation; there is no timed flush');
+  await expect(details).toContainText('Without an active conversation, smaller tails wait for explicit preparation or a full batch');
   await expect(details).toContainText('makes no provider model calls and creates no syncs, summaries or briefings');
   await expect(details).toContainText('Only your Sync with Draken or Chat instead action creates a snapshot');
   await expect(details).toContainText('CPU, memory and disk');

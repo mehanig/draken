@@ -75,7 +75,7 @@ test('ChatGPT-only call: local test peer audio, dragon, controls, sources, histo
   await page.getByRole('button', { name: 'Mute', exact: true }).click(); expect(await tracksStopped(page)).toBe(true);
   await page.getByRole('button', { name: 'Unmute', exact: true }).click(); expect(await tracksStopped(page)).toBe(false);
   await typeQuestion(page, `What does source ${testRef} report about the export tests?`);
-  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
+  await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Draken is speaking');
   await expect(page.locator('.voice-answer')).toContainText('Deployment remains unverified');
   await page.waitForFunction(() => Number(document.querySelector('.dp-canvas')?.getAttribute('data-mouth')) > 3);
   await expect.poll(() => page.evaluate(() => (window as any).__tracks.at(-1).enabled)).toBe(false);
@@ -86,10 +86,10 @@ test('ChatGPT-only call: local test peer audio, dragon, controls, sources, histo
   await page.getByRole('button', { name: `Source ${testRef}`, exact: true }).click();
   await expect(page.locator('.voice-source pre')).toContainText(/tests/i);
   await page.getByRole('button', { name: 'Stop reply', exact: true }).click();
-  await expect(dialog(page).getByRole('status')).toHaveText('Your turn');
+  await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Your turn');
   await typeQuestion(page, 'What remains unverified?');
-  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
-  await expect(dialog(page).getByRole('status')).toHaveText('Your turn');
+  await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Draken is speaking');
+  await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Your turn');
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     expect(await dialog(page).evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
@@ -164,7 +164,7 @@ test('call sources reset pagination by identity and cancel reads on switching, s
   } finally { finishEnd(); fixture.release(); }
 });
 
-test('history preparation finishes outside the call before Call Draken can be enabled', async ({ page }) => {
+test('new history does not revoke a prepared call; explicit refresh finishes outside the call', async ({ page }) => {
  const {syncId,root,piLog}=await prepare(page); await nativePeer(page);
  await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${syncId}/call-readiness`)).json()).ready).toBe(true);
  const control=path.join(root,'sessions/fake-control.json');await pendingHistory(page,root);
@@ -174,8 +174,8 @@ test('history preparation finishes outside the call before Call Draken can be en
  await page.route('**/api/memory/progress',route=>route.fulfill({json:{active:true,background:false,queued:0,elapsed_ms:1500,updated_at:Date.now(),work:{stage:'indexing',completed:3,total:10,reused:100,remaining_seconds:10,downloaded_bytes:0,download_total_bytes:0}}}));
  try {
   await page.goto(`/syncs/${syncId}`);
-  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
-  await page.getByRole('button',{name:'Prepare history',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Refresh history',exact:true}).click();
   await expect(page.getByRole('region',{name:'Local history progress'})).toContainText('3 / 10 new or changed passages ready');
   await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
   await expect(dialog(page)).not.toBeVisible(); await expect(page.locator('.voice-scene, .dp-stage, .voice-captions')).toHaveCount(0);
@@ -196,13 +196,13 @@ test('cancelled history preparation can be retried without a call, provider summ
  await pendingHistory(page,root);
  const control=path.join(root,'sessions/fake-control.json'),before=piLog();fs.writeFileSync(control,JSON.stringify({delay:20,historyDelay:60000}));
  try{
-  await page.goto(`/syncs/${syncId}`);await page.getByRole('button',{name:'Prepare history',exact:true}).click();
+  await page.goto(`/syncs/${syncId}`);await page.getByRole('button',{name:'Refresh history',exact:true}).click();
   await page.getByRole('button',{name:'Cancel preparation',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('History preparation stopped');
-  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled();
   await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${syncId}/progress`)).json()).busy).toBe(false);
   await page.reload();await expect(dialog(page)).not.toBeVisible();expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
-  fs.writeFileSync(control,JSON.stringify({delay:20}));await page.getByRole('button',{name:'Prepare history',exact:true}).click();
+  fs.writeFileSync(control,JSON.stringify({delay:20}));await page.getByRole('button',{name:'Refresh history',exact:true}).click();
   await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});
   expect(piLog()).toBe(before);expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);await expect(dialog(page)).not.toBeVisible();
   expect((await(await page.request.get(`/api/syncs/${syncId}`)).json()).status).toBe('open');
@@ -239,8 +239,8 @@ test('microphone denial still allows typed ChatGPT voice, without a local speech
   await nativePeer(page, true); await openCall(page, syncId, true);
   await expect(page.getByRole('textbox', { name: 'Type a question for this call' })).toBeVisible();
   await typeQuestion(page);
-  await expect(dialog(page).getByRole('status')).toHaveText('Draken is speaking');
-  await expect(dialog(page).getByRole('status')).toHaveText('Microphone muted');
+  await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Draken is speaking');
+  await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Microphone muted');
   await end(page);
 });
 
@@ -346,7 +346,7 @@ test('failed native setup stops capture instead of trying another voice engine',
   const rejected = page.waitForResponse(response => response.url().includes('/api/voice/live/calls/') && response.url().endsWith('/connect'), { timeout: 15000 });
   await page.getByRole('button', { name: 'Call Draken', exact: true }).click();
   expect((await rejected).status()).toBe(503);
-  await expect(dialog(page).getByRole('status')).toHaveText('Call ended');
+  await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Call ended');
   await expect(dialog(page).getByRole('alert')).toContainText('Voice connection failed or cancelled.');
   expect(await tracksStopped(page)).toBe(true); expect(retired).toEqual([]); expect(piLog()).toBe(before);
   await expect.poll(async () => (await (await page.request.get('/api/voice/status')).json()).activeCall).toBeNull();

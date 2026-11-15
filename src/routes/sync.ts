@@ -12,6 +12,7 @@ import { callReadiness, prepareCall } from '../sync/preparation';
 import { preparationUsage } from '../sync/usage';
 import { summaryPreparationSettings } from '../sync/summary-preparation';
 import { activity } from '../sync/activity';
+import { conversationStatus } from '../sync/conversation';
 
 const router = Router();
 function id(req: Request): number {
@@ -90,6 +91,7 @@ router.post('/syncs', route(async (req, res) => {
   res.json({ sync: startSync(since), scan });
 }));
 router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req)))));
+router.get('/syncs/:id/conversation', route((req, res) => res.json(conversationStatus(id(req)))));
 router.get('/syncs/:id/progress', route((req, res) => res.json(getProgress(id(req)))));
 router.get('/syncs/:id/call-readiness', route((req, res) => res.json(callReadiness(id(req)))));
 router.get('/syncs/:id/chat-readiness', route((req, res) => { res.json(callReadiness(id(req), true)); }));

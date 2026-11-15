@@ -351,7 +351,7 @@ test('manager uses tool-free pi, persists replies and memory, and does not advan
   assert.match(response.messages[1].content, /Prefer correctness/);
 });
 
-test('model failure and timeout keep the sync open and do not save incomplete exchanges', async () => {
+test('model failure and timeout retain accepted user turns without saving incomplete answers', async () => {
   fakePi();
   session([event('u', null, 'Task', 'user')]);
   await scanSessions();
@@ -359,7 +359,9 @@ test('model failure and timeout keep the sync open and do not save incomplete ex
   await assert.rejects(() => generateReply(first.id, 'FAIL'), /provider unavailable/);
   process.env.DRAKEN_PI_TIMEOUT_MS = '1000';
   await assert.rejects(() => generateReply(first.id, 'TIMEOUT'), /timed out/);
-  assert.equal(store.getSync(first.id).messages.length, 0);
+  assert.deepEqual(store.getSync(first.id).messages.map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'FAIL' }, { role: 'user', content: 'TIMEOUT' },
+  ]);
   assert.equal(store.getSync(first.id).busy, false);
   assert.equal(store.getSync(first.id).status, 'open');
   assert.equal(store.pendingCount(), 1);

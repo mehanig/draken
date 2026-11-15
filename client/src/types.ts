@@ -1,1 +1,1 @@
-export type { PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, SummaryPreparationSettings, Evidence, Overview, ScanResult, SyncDetail, HomeOverview, TreeProgress, TreeNode, NodeSummary, TopicGroups } from '../../src/types';
+export type { ConversationState, PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, SummaryPreparationSettings, Evidence, Overview, ScanResult, SyncDetail, HomeOverview, TreeProgress, TreeNode, NodeSummary, TopicGroups } from '../../src/types';

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, MessageSquare, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
 import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
+import { ConversationInfo } from './ConversationInfo';
 import { HistorySource } from './HistorySource';
 import { HistoryProgress } from './HistoryProgress';
 import { VoiceCaptions } from './VoiceCaptions';
@@ -17,10 +18,10 @@ const labels = {
 };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
-export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeStart, onActiveChange, onClosed, onChat, autoStart = false, onAutoStartHandled }: {
+export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeStart, onActiveChange, onClosed, onChat, autoStart = false, onAutoStartHandled, updatesUnavailable = false }: {
   sync: SyncDetail; readiness: CallReadiness | null; onPrepareHistory: () => void; disabled: boolean; beforeStart: () => Promise<void>;
   onActiveChange: (active: boolean) => void; onClosed: () => Promise<void>; onChat: () => void;
-  autoStart?: boolean; onAutoStartHandled?: () => void;
+  autoStart?: boolean; onAutoStartHandled?: () => void; updatesUnavailable?: boolean;
 }) {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [setupError, setSetupError] = useState('');
@@ -44,7 +45,8 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
   const [checking, setChecking] = useState(false);
   const evidence = [...sync.items, ...sync.context];
   const selected = evidence.find(item => item.ref === source);
-  const prepared = readiness?.ready === true;
+  const conversationEnded = Boolean(sync.conversation?.ended_at);
+  const prepared = readiness?.ready === true && !conversationEnded;
   const secure = window.isSecureContext;
   const httpsUrl = new URL(window.location.href);
   httpsUrl.protocol = 'https:'; httpsUrl.port = String(status?.httpsPort || 443);
@@ -139,7 +141,7 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
     <section className="card voice-entry" aria-label="Voice calls">
       <div className="voice-entry-main">
         <div className="voice-entry-icon" aria-hidden="true"><Phone size={22} /></div>
-        <div><h2>Talk it through. Out loud.</h2><p className="muted small">Live voice through ChatGPT. Audio goes to OpenAI; replies may paraphrase.</p></div>
+        <div><h2>Talk it through. Out loud.</h2><p className="muted small">Live voice through ChatGPT. Audio goes to OpenAI; replies may paraphrase.</p><ConversationInfo state={sync.conversation} unavailable={updatesUnavailable} /></div>
         <div className="conversation-actions"><button className="btn btn-secondary" disabled={open || checking} onClick={onChat}><MessageSquare size={16} />Chat instead</button>
         {!secure && status?.httpsPort ? <a className="btn btn-primary" href={httpsUrl.href}>Open secure call page <ExternalLink size={15} /></a> :
           <button className="btn btn-primary" disabled={disabled || checking || !prepared || !status?.installed || Boolean(status?.activeCall) || !secure} onClick={() => void start()}><Phone size={16} />Call Draken</button>}</div>
@@ -154,9 +156,9 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
           <li><strong>Firefox/Linux:</strong> Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import. Trust it to identify websites.</li></ul>
         <p className="small muted">Restart the browser if needed, open the secure page, sign in, and allow the microphone when you start a call. Keep the server’s private keys private. See <code>VOICE.md</code> for an SSH-tunnel alternative.</p>
       </details>}
-      {sync.status === 'open' && <p className="small muted" role="status">{prepared ? `Ready to call. History cutoff: ${readiness?.before ? new Date(readiness.before).toLocaleString() : 'prepared snapshot'}. Refresh history for later work.` : !readiness ? 'Checking call readiness…' : readiness.preparing ? 'Preparing history before calling. Your microphone is off.' : !readiness.briefingReady ? 'Prepare the briefing first.' : 'History needs preparation before you can call.'}</p>}
-      {sync.status === 'open' && readiness?.briefingReady && !readiness.preparing && <button className="btn btn-secondary" disabled={disabled || checking} onClick={onPrepareHistory}>{prepared ? 'Refresh history' : 'Prepare history'}</button>}
-      {readiness?.error && !prepared && <p className="small" role="alert">{readiness.error}</p>}
+      {sync.status === 'open' && !conversationEnded && <p className="small muted" role="status">{prepared ? `Ready to call. History cutoff: ${readiness?.before ? new Date(readiness.before).toLocaleString() : 'prepared snapshot'}. Prepared updates become available between turns.` : !readiness ? 'Checking call readiness…' : readiness.preparing ? 'Preparing history before calling. Your microphone is off.' : !readiness.briefingReady ? 'Prepare the briefing first.' : 'History needs preparation before you can call.'}</p>}
+      {sync.status === 'open' && !conversationEnded && readiness?.briefingReady && !readiness.preparing && <button className="btn btn-secondary" disabled={disabled || checking} onClick={onPrepareHistory}>{prepared ? 'Refresh history' : 'Prepare history'}</button>}
+      {readiness?.error && <p className="small" role="alert">{readiness.error}</p>}
       {sync.status !== 'open' && <p className="small muted">This sync is closed. Start a new sync for another call.</p>}
       {status && !status.installed && <p className="small muted">ChatGPT voice needs server setup and sign-in: <code>npm run voice:realtime:setup</code>, then <code>npm run voice:realtime:login</code>.</p>}
       {setupError && <p className="small" role="alert">{setupError} <button className="btn btn-secondary" onClick={() => void refreshStatus()}>Retry</button></p>}
@@ -182,7 +184,7 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
     </section>
 
     <dialog ref={dialog} className="voice-dialog" aria-labelledby="voice-title" onCancel={event => { event.preventDefault(); void close(); }}>
-      <div className="voice-dialog-header"><div><span className="eyebrow">DRAKEN / VOICE SYNC</span><h2 id="voice-title">Sync #{sync.id}</h2></div>
+      <div className="voice-dialog-header"><div><span className="eyebrow">DRAKEN / VOICE SYNC</span><h2 id="voice-title">Sync #{sync.id}</h2><ConversationInfo state={sync.conversation} unavailable={updatesUnavailable} /></div>
         <span className="voice-clock" aria-label="Call duration">{clock(elapsed)}</span>
         <button className="icon-button" aria-label="Close call" onClick={() => void close()}><X size={18} /></button>
       </div>

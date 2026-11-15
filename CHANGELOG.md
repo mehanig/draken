@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.0
+
+### Live history without rewriting the sync
+
+- Active text and voice conversations adopt newly **prepared original history** between user turns as dated H evidence. Each answer pins one history cutoff; updates do not interrupt an ongoing reply or disable already-prepared chat. The initial snapshot, E/C references, briefing, saved transcript and notes are not rewritten by updates. Initial briefing and history preparation are still required once.
+- Fix readiness invalidation from ordinary source appends and background scan cursor changes. Damaged, missing or excluded captured originals still fail closed. If additional archive lookup is unavailable during an update, replies must qualify that limitation rather than guess or silently substitute old context.
+- With **Automatically index history** enabled, active conversations check once a minute for any positive source changes, without waiting for 64. Connected, idle voice can allow local background work between turns, never during a pending response or context delivery; a user turn preempts and drains owned indexing. With no active conversation, the 64-record threshold and no timed small-tail flush remain.
+- Live H updates are local-only, not per-minute provider calls. **Prepare summaries ahead** remains a separate default-off paid permission with its independent 64-record threshold. Neither background path creates syncs, final briefings, recaps, saved decisions or review. Settings/status GETs remain metadata-only.
+
+### Sessions end without marking work reviewed
+
+- End a conversation after 30 minutes without a real user chat message or voice turn; initial creation counts as initial intent. Polling, background updates, assistant responses and connection heartbeats do not extend it. An ongoing reply finishes before idle expiry.
+- Show **Session ended**, not reviewed or completed. Keep the transcript readable and explicit notes/review available for the old snapshot. Return home and **Start new sync** to chat again; replay, polling and reopening cannot revive an ended session.
+- Persist last user activity and the ended marker across restarts, separately from existing open/completed/discarded review status. Idle ending releases unreviewed reservations for the next explicit sync, without deleting history, changing notes or generating an automatic recap/review. Migration derives activity from stored real user turns; inactive older sessions may end and their unreviewed entries become available again.
+- Simple live status is **Up to date**, **Preparing new info…** or **New info ready**, with honest off/unavailable states where applicable. Voice's separate 30-minute connection limit, 60-turn cap and 90-second disconnect lease remain resource bounds, not unlimited calling or spending guarantees.
+
+### Upgrading and qualification
+
+Back up original agent logs and Draken state, finish active work, stop the server (including any tray-owned server), install 0.8.0 and restart with the same data directory and environment. Node.js 22.19+ remains required. The conversation lifecycle migration is additive; existing review statuses and historical data remain intact. No dependency changes. See [SETUP.md](SETUP.md#upgrade-to-080) and [MEMORY.md](MEMORY.md#live-conversations-and-idle-ending).
+
+Focused coverage includes conversation lifecycle, append-safe readiness and between-turn voice updates, alongside existing activity/indexing regressions. Package and static-site checks protect release copy and fresh paid opt-out. Synthetic checks do not establish real-provider answer quality, latency, quota or physical-device audio acceptance.
+
 ## 0.7.0
 
 ### Optional paid summary preparation, without automatic syncs

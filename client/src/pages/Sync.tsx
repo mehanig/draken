@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check } from 'lucide-react';
 import * as api from '../api';
-import type { CallReadiness, SyncDetail } from '../types';
+import type { CallReadiness, ConversationState, SyncDetail } from '../types';
 import { CitedText, EvidenceList } from '../components/EvidenceList';
 import { SummaryTree } from '../components/SummaryTree';
 import { VoiceCall } from '../components/VoiceCall';
@@ -14,8 +14,14 @@ import { linkClick, type Navigate } from '../navigation';
 export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, setGuard }: {
   id: number; chat?: boolean; callIntent: boolean; consumeIntent: () => void; navigate: Navigate; setGuard: (guard: (() => boolean) | null) => void;
 }) {
-  const [sync, setSync] = useState<SyncDetail | null>(null);
+  const [loadedSync, setSync] = useState<SyncDetail | null>(null);
+  const [conversation, setConversation] = useState<{ id: number; state: ConversationState } | null>(null);
+  // Metadata may arrive before the full snapshot. Retain it independently, and
+  // never let an older full response erase an observed terminal idle ending.
+  const sync = loadedSync && conversation?.id === id && !loadedSync.conversation?.ended_at
+    ? { ...loadedSync, conversation: conversation.state } : loadedSync;
   const [readiness, setReadiness] = useState<CallReadiness | null>(null);
+  const [updatesUnavailable, setUpdatesUnavailable] = useState(false);
   const [work, setWork] = useState(''), [error, setError] = useState('');
   const [voiceActive, setVoiceActive] = useState(false), [callAfterPreparation, setCallAfterPreparation] = useState(false);
   const [decisions, setDecisions] = useState(''), [carry, setCarry] = useState(''), [question, setQuestion] = useState('');
@@ -54,6 +60,21 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
     };
     void poll(); return () => { controller.abort(); clearTimeout(timer); };
   }, [id, sync?.busy, sync?.briefing, sync?.status, voiceActive, chat]);
+  useEffect(() => {
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      let ended = false;
+      try {
+        const value = await api.conversationStatus(id, controller.signal);
+        if (!controller.signal.aborted) {
+          setConversation({ id, state: value });
+          setUpdatesUnavailable(false); ended = Boolean(value.ended_at);
+        }
+      } catch { if (!controller.signal.aborted) setUpdatesUnavailable(true); }
+      if (!controller.signal.aborted && !ended) timer = setTimeout(() => void poll(), 3000);
+    };
+    void poll(); return () => { controller.abort(); clearTimeout(timer); };
+  }, [id]);
   const dirty = Boolean(sync && (decisions !== sync.decisions || carry !== sync.carry_forward));
   const draftDirty = Boolean(question.trim());
   useEffect(() => {
@@ -65,6 +86,7 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
   }, [dirty, draftDirty, voiceActive, setGuard]);
   const consume = () => { consumeIntent(); setCallAfterPreparation(false); };
   const disabled = Boolean(work || sync?.busy || voiceActive), open = sync?.status === 'open';
+  const conversationEnded = Boolean(sync?.conversation?.ended_at), conversationOpen = open && !conversationEnded;
   const evidence = sync ? [...sync.items, ...sync.context] : [];
   const missing = evidence.some(item => item.unavailable);
   const prepare = () => void run('Preparing your conversation…', async () => {
@@ -94,7 +116,10 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
     catch (error) {
       // Recover an accepted job after a lost response; never silently resend it.
       const recovered = await api.sync(id).catch(() => null);
-      if (recovered?.tree.run?.request_id !== pending.id) throw error;
+      if (recovered?.tree.run?.request_id !== pending.id) {
+        if (recovered) setSync(current => current ? { ...current, conversation: recovered.conversation } : current);
+        throw error;
+      }
       value = recovered;
     }
     show(value); setQuestion(''); chatRequest.current = null;
@@ -109,22 +134,23 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
     {error && <div className="alert error" role="alert">{error}</div>}
     {!sync && !error && <p role="status">Opening sync…</p>}
     {sync && <>
-      <div className="page-heading"><div><span className="eyebrow">FROZEN CONVERSATION</span><h1>Sync #{id}</h1><p className="muted">Snapshot created {new Date(sync.snapshot_at).toLocaleString()} · {sync.item_count} entries · <span className={`status ${sync.status}`}>{sync.status === 'completed' ? 'reviewed' : sync.status}</span></p><SyncCost cost={sync.aggregation_cost} /></div>
+      <div className="page-heading"><div><span className="eyebrow">{conversationOpen ? 'LIVE CONVERSATION' : 'SAVED CONVERSATION'}</span><h1>Sync #{id}</h1><p className="muted">Initial snapshot created {new Date(sync.snapshot_at).toLocaleString()} · {sync.item_count} entries · <span className={`status ${sync.status}`}>{sync.status === 'completed' ? 'reviewed' : conversationEnded && open ? 'session ended' : sync.status}</span></p><SyncCost cost={sync.aggregation_cost} /></div>
         {open && <button className="btn btn-secondary" disabled={disabled || missing || Boolean(sync.tree.run && !sync.tree.complete)} onClick={() => {
           if (!window.confirm(`Mark these ${sync.item_count} snapshot entries reviewed? Later activity is not affected. This does not mean every spoken suggestion was agreed.`)) return;
           void run('Marking snapshot reviewed…', async () => { show(await api.finish(id, decisions, carry)); });
         }}><Check size={16} />Mark reviewed</button>}
       </div>
+      {conversationEnded && open && <div className="alert warning" role="status"><strong>Session ended</strong><p>There have been no user messages for 30 minutes. The transcript and notes are retained; nothing was marked reviewed automatically.</p><button className="btn btn-secondary" onClick={() => navigate('/')}>Start a new sync</button></div>}
       {missing && <div className="alert warning" role="alert"><strong>Original session evidence unavailable.</strong><p>Restore the original session files to inspect the missing excerpts, prepare replies, call or mark this snapshot reviewed. Your conversation and saved notes are still available; Draken keeps pointers, not copies of original session text.</p></div>}
       {(work || sync.busy) && !(chat && (work === 'Sending message…' || (sync.tree.run?.question && sync.tree.run.status === 'running'))) && <div className="working" role="status"><span className="spinner" />{work || (sync.recap_state === 'running' ? 'Making a short conversation recap…' : readiness?.preparing ? 'Preparing searchable history…' : sync.tree.run?.stage || 'Preparing your conversation…')}
         {sync.busy && <button className="btn btn-secondary" onClick={cancel}>Cancel preparation</button>}</div>}
       <HistoryProgress enabled={sync.busy} />
       {sync.busy && !sync.tree.run?.question && sync.recap_state !== 'running' && <p className="small muted">The complete new snapshot is being reconciled. Large histories can take a while. Leaving or reloading will not start your microphone.</p>}
-      {preparationFailed && !(chat && sync.tree.run?.question) && <div className="alert warning" role="alert"><strong>{sync.tree.run?.question ? 'Reply stopped.' : 'Preparation stopped.'}</strong><p>{sync.tree.run?.error || 'Your snapshot is retained. Nothing was marked reviewed.'}</p><button className="btn btn-primary" disabled={disabled || missing} onClick={resume}>{sync.tree.run?.question ? 'Retry reply' : chat ? 'Retry preparation' : 'Retry preparation & call'}</button></div>}
-      {open && !sync.briefing && !sync.busy && !preparationFailed && sync.snapshot_version === 2 && <button className="btn btn-primary" disabled={disabled || missing} onClick={prepare}>{chat ? 'Prepare for chat' : 'Prepare & call'}</button>}
-      {chat ? <TextChat sync={sync} readiness={readiness} draft={question} setDraft={setQuestion} disabled={disabled || missing} sending={work === 'Sending message…'} onSend={sendChat} onCancel={cancel} onPrepareHistory={prepareHistory} onVoice={() => navigate(`/syncs/${id}`)} /> : <VoiceCall key={id} sync={sync} readiness={readiness} onPrepareHistory={prepareHistory} disabled={disabled || missing} onActiveChange={setVoiceActive}
+      {preparationFailed && conversationOpen && !(chat && sync.tree.run?.question) && <div className="alert warning" role="alert"><strong>{sync.tree.run?.question ? 'Reply stopped.' : 'Preparation stopped.'}</strong><p>{sync.tree.run?.error || 'Your snapshot is retained. Nothing was marked reviewed.'}</p><button className="btn btn-primary" disabled={disabled || missing} onClick={resume}>{sync.tree.run?.question ? 'Retry reply' : chat ? 'Retry preparation' : 'Retry preparation & call'}</button></div>}
+      {conversationOpen && !sync.briefing && !sync.busy && !preparationFailed && sync.snapshot_version === 2 && <button className="btn btn-primary" disabled={disabled || missing} onClick={prepare}>{chat ? 'Prepare for chat' : 'Prepare & call'}</button>}
+      {chat ? <TextChat sync={sync} updatesUnavailable={updatesUnavailable} readiness={readiness} draft={question} setDraft={setQuestion} disabled={disabled || missing} sending={work === 'Sending message…'} onSend={sendChat} onCancel={cancel} onPrepareHistory={prepareHistory} onVoice={() => navigate(`/syncs/${id}`)} /> : <VoiceCall key={id} sync={sync} updatesUnavailable={updatesUnavailable} readiness={readiness} onPrepareHistory={prepareHistory} disabled={disabled || missing} onActiveChange={setVoiceActive}
         onChat={() => { consume(); navigate(`/syncs/${id}/chat`); }}
-        autoStart={(callIntent || callAfterPreparation) && !preparationFailed && !missing} onAutoStartHandled={consume}
+        autoStart={(callIntent || callAfterPreparation) && conversationOpen && !preparationFailed && !missing} onAutoStartHandled={consume}
         beforeStart={async () => {
           if (dirty) show(await api.notes(id, decisions, carry));
           const value = await api.callReadiness(id); setReadiness(value);
@@ -138,7 +164,7 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
       {sync.memory.length > 0 && <details className="detail-section"><summary>Previous sync recaps</summary>{sync.memory.map(item => <article key={item.sync_id} className="memory-recap"><a href={`/syncs/${item.sync_id}`} onClick={event => linkClick(event, navigate, `/syncs/${item.sync_id}`)}>Sync #{item.sync_id}</a> <span className="small muted">{item.status === 'open' ? 'not marked reviewed' : item.status || 'historical'}</span><p className="prose">{item.recap || 'No automatic recap in this older snapshot.'}</p>{item.decisions && <p className="small prose">Saved decisions: {item.decisions}</p>}{item.carry_forward && <p className="small prose">Carried forward: {item.carry_forward}</p>}</article>)}</details>}
       <details className="detail-section" open={!sync.messages.length && Boolean(sync.briefing)}><summary>Full briefing</summary><section className="briefing-card">
         <p className="small muted">This snapshot contains the entries captured during preparation, not a live view. Check the original source dates in the evidence.</p>
-        {readiness?.before && <p className="small muted">Conversation history cutoff: {new Date(readiness.before).toLocaleString()}. Later activity waits for another preparation.</p>}
+        {readiness?.before && <p className="small muted">Latest ready history cutoff: {new Date(readiness.before).toLocaleString()}. Active conversations adopt prepared updates between turns; this initial briefing stays unchanged.</p>}
         {sync.briefing ? <CitedText text={sync.briefing} evidence={evidence} /> : <p>No briefing yet.</p>}
         {sync.snapshot_version < 2 && <div className="alert warning">This is a historical capped snapshot. Notes and discussion are preserved.
           {open && <button className="btn btn-secondary" disabled={disabled} onClick={() => { if (window.confirm('Expand this legacy snapshot to currently eligible history? Existing notes and citations are retained.')) void run('Expanding snapshot…', async () => show((await api.expand(id)).sync)); }}>Expand to full history</button>}</div>}
@@ -149,7 +175,7 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
       </section></details>}
       <details className="detail-section"><summary>Decisions &amp; carry-forward{dirty ? ' · unsaved' : ''}</summary><section className="notes-card"><div className="notes-grid"><div><label htmlFor="decisions">Decisions</label><textarea id="decisions" rows={4} maxLength={4000} disabled={!open || disabled} value={decisions} onChange={event => setDecisions(event.target.value)} /></div><div><label htmlFor="carry-forward">Carry into the next sync</label><textarea id="carry-forward" rows={4} maxLength={4000} disabled={!open || disabled} value={carry} onChange={event => setCarry(event.target.value)} /></div></div><p className="small muted">Only these explicitly saved notes are decisions. A call or its automatic recap does not mark anything agreed or reviewed.</p>{open && <button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes…', async () => show(await api.notes(id, decisions, carry)))}>Save notes</button>}</section></details>
       <details className="detail-section"><summary>Evidence &amp; preparation details</summary>
-        <SummaryTree syncId={id} progress={sync.tree} evidence={evidence} onResume={open ? resume : undefined} resumeEnabled={!disabled && !missing} onCancel={cancel} />
+        <SummaryTree syncId={id} progress={sync.tree} evidence={evidence} onResume={conversationOpen ? resume : undefined} resumeEnabled={!disabled && !missing} onCancel={cancel} />
         <EvidenceList items={sync.items} title="New evidence in this snapshot" /><EvidenceList items={sync.context} title="Earlier context — not new progress" />
       </details>
       {open && <div className="detail-footer"><p className="small muted">Included does not mean reviewed. You can return to this sync at this URL, or start a separate one for new activity.</p><button className="btn btn-ghost" disabled={disabled} onClick={() => {
