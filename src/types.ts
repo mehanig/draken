@@ -32,10 +32,15 @@ export interface Evidence {
 }
 
 export interface AutoIndexSettings {
-  enabled: boolean; check_seconds: number; batch_records: number;
-  phase: 'off' | 'waiting' | 'scanning' | 'indexing' | 'paused' | 'stopping' | 'error';
+  enabled: boolean; summary_enabled: boolean; check_seconds: number; batch_records: number;
+  phase: 'off' | 'waiting' | 'scanning' | 'indexing' | 'summarizing' | 'paused' | 'stopping' | 'error';
   pending_records: number; last_completed_at: string | null; error: string;
   pending_entries: number;
+}
+export interface SummaryPreparationSettings {
+  enabled: boolean;
+  status: 'off' | 'waiting' | 'running' | 'paused' | 'error';
+  prepared_entries: number; last_completed_at: string | null; error: string;
 }
 export interface SyncCost { usd: number | null; complete: boolean }
 export type UsageRange = '6h' | '1d' | '7d' | '14d';

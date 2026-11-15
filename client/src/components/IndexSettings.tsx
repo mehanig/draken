@@ -6,10 +6,11 @@ import { AutomaticProgress } from './AutomaticPreparation';
 import { AgentSources } from './AgentSources';
 import { SetupPanel } from './SetupPanel';
 import { PreparationUsageDashboard } from './PreparationUsage';
+import { SummaryPreparation } from './SummaryPreparation';
 
 export function IndexSettings() {
   const [open, setOpen] = useState(false), [settings, setSettings] = useState<AutoIndexSettings | null>(null);
-  const [saving, setSaving] = useState(false), [error, setError] = useState('');
+  const [saving, setSaving] = useState(false), [error, setError] = useState(''), [readError, setReadError] = useState('');
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (open && !dialog.current?.open) dialog.current?.showModal();
@@ -18,8 +19,8 @@ export function IndexSettings() {
   useEffect(() => {
     if (!open || saving) return;
     let alive = true;
-    const poll = async () => { try { const value = await autoIndexSettings(); if (alive) { setSettings(value); setError(''); } }
-      catch (error) { if (alive) setError(error instanceof Error ? error.message : 'Could not read settings'); } };
+    const poll = async () => { try { const value = await autoIndexSettings(); if (alive) { setSettings(value); setReadError(''); } }
+      catch (error) { if (alive) setReadError(error instanceof Error ? error.message : 'Could not read settings'); } };
     void poll(); const timer = setInterval(() => void poll(), 4000);
     return () => { alive = false; clearInterval(timer); };
   }, [open, saving]);
@@ -33,15 +34,16 @@ export function IndexSettings() {
         setSettings(current => current ? { ...current, enabled } : current);
         try { setSettings(await setAutoIndex(enabled)); } catch (error) { setSettings(previous); setError(error instanceof Error ? error.message : 'Could not save settings'); }
         finally { setSaving(false); }
-      }} /><span><strong>Automatically index history</strong><span className="small muted">Accumulate searchable history locally, without creating syncs, summaries or briefings.</span></span></label>
+      }} /><span><strong>Automatically index history</strong><span className="small muted">Accumulate searchable history locally. This option alone makes no provider requests.</span></span></label>
     <p className="small muted">On by default for new installations. Existing installations keep their saved indexing choice, including off. While the server runs, check once a minute and index batches at 64 source changes. Smaller tails wait for explicit foreground preparation, such as a sync, Prepare history or search; there is no timed flush. Only your Sync with Draken or Chat instead action creates a snapshot and starts its briefing. Calls and foreground work take priority.</p>
-    <p className="small muted">Indexing makes no provider model calls. Local embeddings use CPU, memory and disk; first use may download about 136 MB of pinned search model files. Disabling cancels automatic indexing, keeping completed embeddings. Local failures back off for at least five minutes; foreground preemption waits at least one minute. Existing conversations, notes and frozen snapshots are not rewritten. Nothing is marked reviewed and no microphone or call starts automatically. Agent and session exclusions remain respected.</p>
+    <p className="small muted">Indexing makes no provider model calls. Local embeddings use CPU, memory and disk; first use may download about 136 MB of pinned search model files. Disabling cancels automatic indexing and summary preparation, keeping completed embeddings and summaries. Local failures back off for at least five minutes; foreground preemption waits at least one minute. Existing conversations, notes and frozen snapshots are not rewritten. Nothing is marked reviewed and no microphone or call starts automatically. Agent and session exclusions remain respected.</p>
     {saving && <p role="status">Saving…</p>}
-    {error && <p className="small" role="alert">{error}</p>}
+    {(error || readError) && <p className="small" role="alert">{error || readError}</p>}
     {open && settings && <AutomaticProgress settings={settings} />}
     {settings?.enabled && settings.phase === 'error' && <button type="button" className="btn btn-secondary" disabled={saving} onClick={async () => {
       setSaving(true); setError(''); try { setSettings(await setAutoIndex(true)); } catch (error) { setError(error instanceof Error ? error.message : 'Could not retry indexing'); } finally { setSaving(false); }
     }}>Retry automatic indexing</button>}
+    <SummaryPreparation active={open} indexing={settings?.enabled || false} controls disabled={saving} onBusyChange={setSaving} />
     <AgentSources open={open} />
     <SetupPanel active={open} always />
     </dialog>

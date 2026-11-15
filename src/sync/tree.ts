@@ -158,25 +158,64 @@ function sourceData(item: Evidence, background = false) {
   return { ...(item.agent && item.agent !== 'pi' ? { agent: item.agent } : {}), id: sourceKey(item), workspace: item.cwd, timestamp: item.timestamp, sequence: item.sequence, role: item.role, background, text: cleanText(item.text, Number.MAX_SAFE_INTEGER) };
 }
 
+/** Evidence and models only: background preparation does not own a sync. */
+export type SummaryInput = Pick<SyncDetail, 'items' | 'context' | 'models'>;
+const BACKGROUND = Symbol('background summary preparation');
+
+/** A receipt identity, not a persisted copy of the evidence. Keep this recipe
+ * version in step with planning/validation/transport changes, even when old
+ * validated leaf cache keys intentionally remain compatible. */
+export function summaryPreparationKey(input: SummaryInput): string {
+  const sources = (items: Evidence[], background: boolean) => items.map(item => ({
+    session: item.session_id, label: item.session_name, ...sourceData(item, background),
+  }));
+  return digest(JSON.stringify({
+    recipe: 'summary-preparation-v1-stable-prefix',
+    prompts: { PROMPT_VERSION, legacySummarySystem, summarySystem, batchSummarySystem, citationRepairSystem, groupingSystem },
+    budgets: { CHUNK_CHARS, MERGE_CHARS, OUTPUT_CHARS, BATCH_OUTPUT, LEGACY_OUTPUT, MAX_EVIDENCE, LUNA_BATCH },
+    // Versions of the shared normalization, short-label transport and token estimator.
+    dependencies: ['normalization-v2', 'references-v2', 'o200k_base-gpt-tokenizer-4.1.0', 'prompt-headroom-1.2-8192'],
+    models: { summary: input.models.summary, final: input.models.final, max_invocations: input.models.max_invocations },
+    items: sources(input.items, false), context: sources(input.context, true),
+  }));
+}
+
 export class SummaryTree {
   private readonly db = getDb();
   private readonly sourceMap: Map<string, Evidence>;
   private readonly primary: Set<string>;
   private readonly accountAggregation: boolean;
-  constructor(private sync: SyncDetail, private runId: number, private signal: AbortSignal) {
+  private readonly runTable: 'sync_runs' | 'background_runs';
+  private readonly background: boolean;
+  private readonly cacheHashes = new Map<string, string>();
+
+  static forBackground(input: SummaryInput, runId: number, signal: AbortSignal): SummaryTree {
+    return new SummaryTree(input, runId, signal, BACKGROUND);
+  }
+
+  constructor(private sync: SummaryInput & { id?: number }, private runId: number, private signal: AbortSignal, mode?: typeof BACKGROUND) {
+    this.background = mode === BACKGROUND;
+    this.runTable = this.background ? 'background_runs' : 'sync_runs';
+    if (!this.background && !Number.isSafeInteger(sync.id)) throw new Error('Foreground summary preparation requires a sync ID');
     assertEvidenceAvailable(sync);
-    this.accountAggregation = (this.db.prepare('SELECT question FROM sync_runs WHERE id=?').get(runId) as { question: string | null } | undefined)?.question === null;
+    this.accountAggregation = this.background || (this.db.prepare('SELECT question FROM sync_runs WHERE id=?').get(runId) as { question: string | null } | undefined)?.question === null;
     this.sourceMap = new Map([...sync.context, ...sync.items].map(item => [sourceKey(item), item]));
     this.primary = new Set(sync.items.map(sourceKey));
     if (this.primary.size !== sync.items.length) throw new Error('Duplicate canonical source IDs in snapshot');
   }
 
-  private stage(stage: string): void {
+  /** Hashes of the validated outputs consumed by this background build. */
+  cacheReceipt(): [string, string][] { return [...this.cacheHashes]; }
+
+  private stage(stage: string, detail?: string): void {
     if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
-    this.db.prepare('UPDATE sync_runs SET stage = ? WHERE id = ?').run(stage, this.runId);
+    // Background accounting must never retain session titles, paths or model prose.
+    const label = !this.background && detail ? `${stage}: ${detail}` : stage;
+    this.db.prepare(`UPDATE ${this.runTable} SET stage = ? WHERE id = ?`).run(label, this.runId);
   }
 
   async call(payload: unknown, system: string, final = false): Promise<string> {
+    if (this.background && final) throw new HttpError(409, 'Background preparation cannot call the final provider');
     if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
     const model = final ? this.sync.models.final : this.sync.models.summary;
     const large = !final && isBatchSummaryModel(model);
@@ -184,14 +223,14 @@ export class SummaryTree {
     const estimatedTokens = promptTokens(prompt, system);
     if (large && estimatedTokens > LUNA_BATCH.requestTokens) throw new HttpError(400, 'Summary request exceeds its token safety budget; cached work is intact.');
     if (final && isBatchSummaryModel(this.sync.models.summary) && estimatedTokens > LUNA_BATCH.finalTokens) throw new HttpError(400, 'The final input exceeds its compact token budget; no larger or more expensive request was substituted. Cached summaries are intact.');
-    const limit = this.sync.models.max_invocations - (final ? 0 : 1);
+    const limit = this.sync.models.max_invocations - (final || this.background ? 0 : 1);
     const started = Date.now(), request = payload as { task?: string; stage?: string; repair?: unknown };
     const pending: ModelCallMetric = { started_at: new Date(started).toISOString(), task: request.task || 'unknown', stage: request.stage || null,
       repair: Boolean(request.repair), model, elapsed_ms: 0, input_characters: prompt.length, input_tokens_estimate: estimatedTokens,
       output_characters: null, output_tokens_estimate: null, status: 'running' };
     // Reserve budget and the timestamped metadata slot atomically. An interrupted
     // request remains explicitly unpriced rather than disappearing from usage.
-    const claimed = this.db.prepare(`UPDATE sync_runs SET invocations=invocations+1,
+    const claimed = this.db.prepare(`UPDATE ${this.runTable} SET invocations=invocations+1,
       metrics_json=json_insert(metrics_json,'$[#]',json(?)) WHERE id=? AND invocations<?
       RETURNING json_array_length(metrics_json)-1 AS metric_index`).get(JSON.stringify(pending), this.runId, limit) as { metric_index: number } | undefined;
     if (!claimed) throw new HttpError(409, 'Invocation budget reached. Completed summaries are cached. Raise the limit and retry; nothing was marked covered.');
@@ -200,19 +239,21 @@ export class SummaryTree {
     try {
       response = await invokePi(prompt, { model, system, signal: this.signal, thinking: final ? 'medium' : 'off', largeSummary: large,
         onAccounting: this.accountAggregation ? value => { accounting = value; } : undefined });
+      if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
       return response;
     } finally {
       const metric: ModelCallMetric = { ...pending, finished_at: new Date().toISOString(), ...(accounting ? { accounting } : {}),
         elapsed_ms: Date.now() - started, input_characters: prompt.length,
         input_tokens_estimate: estimatedTokens, output_characters: response?.length ?? null,
         output_tokens_estimate: response === undefined ? null : summaryTokens(response),
-        status: response !== undefined ? 'completed' : this.signal.aborted ? 'cancelled' : 'failed' };
+        status: this.signal.aborted ? 'cancelled' : response !== undefined ? 'completed' : 'failed' };
       // Metadata only: no prompts, rejected prose, source text, paths or credentials.
-      this.db.prepare('UPDATE sync_runs SET metrics_json=json_set(metrics_json,?,json(?)) WHERE id=?').run(`$[${claimed.metric_index}]`, JSON.stringify(metric), this.runId);
+      this.db.prepare(`UPDATE ${this.runTable} SET metrics_json=json_set(metrics_json,?,json(?)) WHERE id=?`).run(`$[${claimed.metric_index}]`, JSON.stringify(metric), this.runId);
     }
   }
 
   private register(spec: Spec) {
+    if (this.background) return;
     this.db.prepare(`INSERT OR IGNORE INTO sync_tree_nodes(sync_id, key, kind, label, children_json, source_count)
       VALUES (?, ?, ?, ?, ?, ?)`).run(this.sync.id, spec.key, spec.kind, spec.label, JSON.stringify(spec.children), spec.sources.length);
   }
@@ -231,13 +272,20 @@ export class SummaryTree {
   private async node<T extends NodeSummary | TopicGroups>(spec: Spec, validate: (value: unknown, allowed: Set<string>) => T, derived?: T): Promise<T> {
     this.register(spec);
     const limits = spec.batch ? BATCH_OUTPUT : LEGACY_OUTPUT;
-    const setStatus = (status: string, error = '') => this.db.prepare('UPDATE sync_tree_nodes SET status = ?, error = ? WHERE sync_id = ? AND key = ?').run(status, error, this.sync.id, spec.key);
+    const setStatus = (status: string, error = '') => {
+      if (!this.background) this.db.prepare('UPDATE sync_tree_nodes SET status = ?, error = ? WHERE sync_id = ? AND key = ?').run(status, error, this.sync.id, spec.key);
+    };
     const finish = (cached: boolean) => {
+      if (this.background) {
+        const row = this.db.prepare('SELECT output_json FROM summary_cache WHERE key=?').get(spec.key) as { output_json: string } | undefined;
+        if (!row) throw new Error('A validated summary cache entry disappeared');
+        this.cacheHashes.set(spec.key, digest(row.output_json));
+      }
       setStatus(cached ? 'cached' : 'done');
-      this.db.prepare('UPDATE sync_runs SET cache_hits = cache_hits + ?, processed_entries = processed_entries + ? WHERE id = ?')
+      this.db.prepare(`UPDATE ${this.runTable} SET cache_hits = cache_hits + ?, processed_entries = processed_entries + ? WHERE id = ?`)
         .run(Number(cached), spec.kind === 'chunk' ? spec.sources.length : 0, this.runId);
     };
-    this.stage(`${spec.kind}: ${spec.label}`);
+    this.stage(spec.kind, spec.label);
     for (const cacheKey of [spec.key, spec.legacyKey].filter((key): key is string => Boolean(key))) {
       const cache = this.db.prepare('SELECT output_json FROM summary_cache WHERE key = ?').get(cacheKey) as { output_json: string } | undefined;
       if (!cache) continue;
@@ -264,7 +312,7 @@ export class SummaryTree {
         let citationCandidate: NodeSummary | undefined;
         let parsed: T | undefined;
         for (let attempt = 0; attempt < 2; attempt++) {
-          if (attempt) this.stage(`Repairing ${spec.kind}: ${spec.label} (attempt 2 of 2)`);
+          if (attempt) this.stage(`Repairing ${spec.kind}`, `${spec.label} (attempt 2 of 2)`);
           const citationRepair = attempt > 0 && citationCandidate !== undefined;
           const response = await this.call({ task: citationRepair ? 'repair_summary_citations' : spec.kind === 'topics' ? 'group_topics' : 'summarize', stage: spec.kind,
             input: wire.input,
@@ -405,12 +453,26 @@ export class SummaryTree {
             : this.sync.context.filter(item => item.session_id === session).slice(-6).map(item => sourceData(item, true));
           const input = { session, workspace: batch[0].cwd, evidence: batch.map(item => sourceData(item)), background };
           const allowed = new Set([...input.evidence, ...background].map(item => item.id));
-          const wire = prepareModelInput('chunk', input, allowed);
-          const prompt = JSON.stringify({ task: 'summarize', stage: 'chunk', allowed_source_ids: [...wire.allowed], input: wire.input });
-          if (promptTokens(prompt, batchSummarySystem) > LUNA_BATCH.plannedRequestTokens ||
-            Buffer.byteLength(prompt) + Buffer.byteLength(batchSummarySystem) > LUNA_BATCH.inputBytes) {
-            if (batch.length === 1) throw new HttpError(400, 'One entry and its background exceed the summary budget; no evidence was dropped.');
-            const middle = Math.ceil(batch.length / 2); append(batch.slice(0, middle)); append(batch.slice(middle)); return;
+          const fits = (length: number) => {
+            const prefix = { ...input, evidence: input.evidence.slice(0, length) };
+            const refs = new Set([...prefix.evidence, ...background].map(item => item.id));
+            const wire = prepareModelInput('chunk', prefix, refs);
+            const prompt = JSON.stringify({ task: 'summarize', stage: 'chunk', allowed_source_ids: [...wire.allowed], input: wire.input });
+            return promptTokens(prompt, batchSummarySystem) <= LUNA_BATCH.plannedRequestTokens &&
+              Buffer.byteLength(prompt) + Buffer.byteLength(batchSummarySystem) <= LUNA_BATCH.inputBytes;
+          };
+          if (!fits(batch.length)) {
+            if (!fits(1)) throw new HttpError(400, 'One entry and its background exceed the summary budget; no evidence was dropped.');
+            // Never bisect by the current tail length: its midpoint moves when
+            // history is appended, invalidating completed large leaves. Fill a
+            // deterministic prefix instead, then plan the remainder with its
+            // own adjacent evidence. Existing unsplit keys remain unchanged.
+            let low = 1, high = batch.length;
+            while (low + 1 < high) {
+              const middle = Math.floor((low + high) / 2);
+              if (fits(middle)) low = middle; else high = middle;
+            }
+            append(batch.slice(0, low)); append(batch.slice(low)); return;
           }
           result.push(this.spec('chunk', `${batch[0].session_name || batch[0].cwd} · batch ${first + 1}–${first + batch.length}`,
             input, allowed, batch.map(sourceKey), [], true));
@@ -454,13 +516,13 @@ export class SummaryTree {
     const missing = specs.filter(spec => !this.cached(spec)).length;
     // A lower bound: reconciliation may add calls, or reuse a cached parent.
     // Do not reject an all-cached tree that only needs its reserved final slot.
-    const minimum = missing + 1;
+    const minimum = missing + (this.background ? 0 : 1);
     if (minimum > this.sync.models.max_invocations) throw new HttpError(409,
-      `At least ${minimum} invocations are needed for uncached batches and the verdict, before any uncached reconciliation. Raise the invocation limit; no model calls have been made.`);
+      `At least ${minimum} invocations are needed for uncached batches${this.background ? '' : ' and the verdict'}, before any uncached reconciliation. Raise the invocation limit; no model calls have been made.`);
     let nodes: SummaryNode[] = [];
     for (const spec of specs) nodes.push({ key: spec.key, kind: 'chunk', label: spec.label, sources: spec.sources,
       summary: await this.node(spec, (value, refs) => validateSummary(value, refs, spec.batch ? BATCH_OUTPUT : LEGACY_OUTPUT)) });
-    const processed = (this.db.prepare('SELECT processed_entries FROM sync_runs WHERE id=?').get(this.runId) as { processed_entries: number }).processed_entries;
+    const processed = (this.db.prepare(`SELECT processed_entries FROM ${this.runTable} WHERE id=?`).get(this.runId) as { processed_entries: number }).processed_entries;
     if (processed !== this.sync.items.length) throw new Error('Incomplete source coverage: refusing to generate a final verdict');
     for (let depth = 0; nodes.length > 1; depth++) {
       if (depth > 20) throw new Error('Summary tree depth exceeded');
@@ -475,7 +537,7 @@ export class SummaryTree {
     // not cached as final-ready, so an explicit retry can actually retry them.
     if (nodes.length && !this.compactRoots(nodes)) nodes = [await this.reconcileBatch(nodes, 'Compact final input', true)];
     if (!this.compactRoots(nodes)) throw new HttpError(400, 'The reconciled summary cannot fit the compact final budget. Cached results remain inspectable; no evidence was marked reviewed.');
-    this.stage('Final verdict');
+    this.stage(this.background ? 'Summaries prepared' : 'Final verdict');
     return nodes;
   }
 
@@ -483,9 +545,10 @@ export class SummaryTree {
     if (isBatchSummaryModel(this.sync.models.summary)) return this.buildBatched();
     // Unknown/operator-selected models retain their established conservative limits.
     const specs = this.chunkSpecs();
-    const missing = [...specs.values()].flat().filter(spec => !this.db.prepare('SELECT 1 FROM summary_cache WHERE key = ? OR key = ?').get(spec.key, spec.legacyKey || spec.key)).length;
-    if (missing + 1 > this.sync.models.max_invocations) throw new HttpError(409,
-      `At least ${missing + 1} invocations are needed just for uncached chunks and the verdict, before merges. Raise the invocation limit; no model calls have been made.`);
+    const missing = [...specs.values()].flat().filter(spec => !this.cached(spec)).length;
+    const minimum = missing + (this.background ? 0 : 1);
+    if (minimum > this.sync.models.max_invocations) throw new HttpError(409,
+      `At least ${minimum} invocations are needed just for uncached chunks${this.background ? '' : ' and the verdict'}, before merges. Raise the invocation limit; no model calls have been made.`);
     const sessionRoots: SummaryNode[] = [];
     // Deliberately serial for predictable quotas/cancellation. Cached nodes are instant.
     for (const [session, chunks] of specs) {
@@ -493,7 +556,7 @@ export class SummaryTree {
       for (const spec of chunks) nodes.push({ key: spec.key, kind: 'chunk', label: spec.label, sources: spec.sources, summary: await this.node(spec, validateSummary) });
       sessionRoots.push(await this.reduce(nodes, 'session', `Session ${session.slice(0, 8)}`));
     }
-    const processed = (this.db.prepare('SELECT processed_entries FROM sync_runs WHERE id = ?').get(this.runId) as { processed_entries: number }).processed_entries;
+    const processed = (this.db.prepare(`SELECT processed_entries FROM ${this.runTable} WHERE id = ?`).get(this.runId) as { processed_entries: number }).processed_entries;
     if (processed !== this.sync.items.length) throw new Error('Incomplete source coverage: refusing to generate a final verdict');
 
     const descriptors = sessionRoots.flatMap(node => node.summary.observations.map((observation, index) => ({
@@ -539,7 +602,7 @@ export class SummaryTree {
       if (depth > 20) throw new Error('Cross-topic tree depth exceeded');
       roots = await this.mergeLevel(roots, 'overview', `Cross-topic reconciliation ${depth + 1}`);
     }
-    this.stage('Final verdict');
+    this.stage(this.background ? 'Summaries prepared' : 'Final verdict');
     return roots;
   }
 

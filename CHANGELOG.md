@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.0
+
+### Optional paid summary preparation, without automatic syncs
+
+- Add **Settings → Prepare summaries ahead**, a NEW explicit paid opt-in (`auto_summary`), default **off** on fresh installs and upgrades—even when `auto_index=true` or the retired 0.5 paid setting was enabled. It requires **Automatically index history** to be enabled. Local indexing keeps its existing defaults/preferences and makes no provider calls by itself.
+- While idle, check once a minute and prepare at least 64 new/changed eligible accumulated records, independently of the local embedding checkpoint. Warm the same validated `summary_cache` leaves, reconciliation and compact final input used by explicit syncs. Background preparation does not own or create syncs, snapshots, coverage, messages or tree rows, and never runs the final model, briefings or recaps.
+- Reuse completed closed chunks across appends and make no further calls for unchanged prepared input while its validated cache remains intact. Lost or corrupt cache outputs trigger a bounded rebuild rather than postponing recovery until Start chat. Changed unfinished per-session tails and aggregate reconciliation may still need on-demand work at **Start chat**; the final briefing is always explicit. This reduces repeated preparation, not a promise of instant chat.
+- Bound paid work by the configured summary model and the same `max_invocations` allowance, without provider/model fallback. Foreground work cancels and awaits owned background provider work. Valid cache survives cancellation/restarts; spending is retained when resuming the same interrupted input. Paid failures pause retries until an explicit retry; local indexing failures retain their five-minute retry delay. Disabling either setting stops paid background work without deleting cache.
+
+### Durable accounting and preservation
+
+- Add metadata-only `background_runs` for durable input hashes, invocation counters and metrics, not source text. **Preparation usage** includes background spend, requests and failures. `completed_batches` remains the count of explicit snapshots' first successful briefings; a warm cache is neither a sync nor review.
+- Settings/progress GETs only read metadata. Existing histories, conversations, notes, coverage, frozen snapshots and compatible caches are preserved. No dependency changes.
+- Focused regressions: `tests/background-tree.test.cjs`, `tests/background-preparation.test.cjs` and `tests/automatic-index.test.cjs`; production-package and static-site checks protect default-off consent and release copy. Synthetic checks do not establish real-provider quality, latency, quota or physical-audio acceptance.
+
+### Upgrading
+
+Back up original agent logs and Draken state, finish active work, stop the server (including any tray-owned server), install 0.7.0 and restart with the same data directory and environment. Node.js 22.19+ remains required. To get preparation ahead, keep **Automatically index history** enabled and explicitly enable the NEW **Prepare summaries ahead** switch; upgrading never converts local indexing or retired paid consent into this permission. Leaving it off keeps provider use tied to explicit preparation/conversation actions. Do not use an older binary to undo the additive schema change. See [SETUP.md](SETUP.md#upgrade-to-070) and [MEMORY.md](MEMORY.md#optional-paid-summary-preparation).
+
+Previously oversized summary batches split at a moving midpoint may need one-time recomputation. The new stable-prefix planner preserves completed boundaries on future appends; ordinary batch keys and compatible historical leaf caches are retained.
+
 ## 0.6.0
 
 ### User-triggered syncs, automatic local indexing

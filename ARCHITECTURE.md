@@ -1,6 +1,6 @@
 # How Draken is built
 
-This guide describes the code in this branch, not the older Docker/task dashboard or planned features. The diagrams are plain text so they also work in a terminal. For a browser-friendly version, open the self-contained [visual architecture guide](docs/architecture.html). It needs no app login and contains no live data or executable controls.
+This guide describes Draken 0.7.0, not the older Docker/task dashboard or a claim of live deployment. The diagrams are plain text so they also work in a terminal. For a browser-friendly version, open the self-contained [visual architecture guide](docs/architecture.html). It needs no app login and contains no live data or executable controls.
 
 ## 1. What Draken does
 
@@ -59,6 +59,8 @@ site/   -- website deployment workflow --> draken.mehanig.com
 
 client/ -- Vite build --> public/ -- Express --> local or LAN Draken app
 ```
+
+The existing deployment gate (`scripts/site-release.cjs`) checks that website copy matches the root package version and withholds deployment until npm `latest` matches it. Copy describes the version after release; editing it does not merge, publish or deploy anything. npm publication is a separate authorized step.
 
 The landing page uses images in `site/img/`, including `scene1-web.jpg` and `logo.png`. The animated call dragon is built separately in `client/src/persona/`. Editing its 3D materials does not edit the website artwork.
 
@@ -163,7 +165,34 @@ Within a tree, model requests run one after another. Each run limits how many ti
 
 Successful summary results are cached: saved under a key made from the input, model, prompt and kind of summary. A retry can reuse them. The new planner preserves validated old leaf work and repacks only uncached ranges; unchanged closed large batches survive tail appends. A relevant input or prompt change produces a different key. It does not replace the canonical history with a rolling summary.
 
-`sync_runs.metrics_json` stores metadata-only call durations, sizes, locally estimated token counts and request status. Timings include process startup and provider work; they do not separate those stages or report billed usage. Preparation requests also capture pi's reported usage and catalog-calculated USD cost through a bounded LF-only JSON parser (`src/sync/pi-output.ts`); repeated terminal events are not counted twice. Only numeric accounting and returned model names are saved, not event streams, prompts, thinking or signatures. `src/sync/cost.ts` sums preparation runs (including retries/rebuilds) into the sync's **Est. cost**; later questions, calls and standalone recaps do not change it. Cached summaries add no new charge. Missing/legacy usage remains unavailable or partial, never zero or a retroactive guess. Prices are retained at call time. This is API-equivalent pricing, not subscription charges, quota usage or an invoice. Existing metrics remain readable; this addition needs no database migration, index change or model substitution.
+### Optional paid cache preparation, not an automatic sync
+
+**Settings → Prepare summaries ahead** stores the NEW `auto_summary` paid opt-in. It defaults **off** on fresh installs and upgrades, including `auto_index=true` and retired 0.5 paid consent. It requires local indexing enabled, but does not change `auto_index` defaults/preferences or authorize provider work from local indexing alone.
+
+```text
+Enabled local indexing → accumulated eligible entries (no reservation)
+                                   |
+                    NEW paid opt-in + idle + >=64 changes
+                                   |
+                                   v
+             shared validated summary_cache leaves
+                   → reconciliation / compact final input
+                                   |
+                         explicit Sync / Start chat
+                                   |
+                                   v
+                   frozen snapshot + final briefing
+```
+
+Paid background preparation reads the same eligible accumulated evidence (selected sources, baseline, active branches, verified originals, not covered or held by another open sync). It **owns no sync, snapshot, coverage, message or tree rows**: no `syncs`, `sync_items`, `sync_runs`, `sync_messages`, `sync_tree_nodes` or `sync_coverage` writes. It warms the same validated leaf/reconciliation/compact-input cache used by the explicit tree, not a second summary format. It never runs the final model, briefing or recap, saves decisions, captures audio or reviews work.
+
+Once-minute idle checks require **at least 64 new/changed eligible records**, independently of the local embedding checkpoint; there is no small-tail timer. An unchanged prepared input makes no further provider calls. Completed closed chunks survive appends; changed unfinished per-session tails and aggregate reconciliation may need on-demand work at **Start chat**. The final briefing is always explicit, so warm cache is not a promise of instant chat or a completed batch.
+
+Only the configured summary model is allowed, using the same configured `max_invocations` allowance including repairs, with no provider/model fallback. Foreground work cancels **and awaits** owned background provider work; shutdown retains ownership until cleanup. Valid cache survives cancellation/restarts, and the same interrupted input retains spent invocations when resumed. **Paid failures pause until explicit retry**, unlike local indexing's five-minute retry delay. Disabling either switch stops paid work and preserves cache.
+
+The additive `background_runs` table stores durable input hashes, counters, state and metadata-only metrics, not source text or prompts. `preparationUsage` includes background spend, requests and failures. `completed_batches` remains explicit snapshots' first successful briefing count; warm cache is not a sync or review. Settings/progress GETs, including `/api/settings/auto-summary`, only read metadata and cannot authorize work. See [MEMORY.md](MEMORY.md#optional-paid-summary-preparation) for the durable scheduling and accounting contract.
+
+`sync_runs.metrics_json` stores metadata-only call durations, sizes, locally estimated token counts and request status. Timings include process startup and provider work; they do not separate those stages or report billed usage. Preparation requests also capture pi's reported usage and catalog-calculated USD cost through a bounded LF-only JSON parser (`src/sync/pi-output.ts`); repeated terminal events are not counted twice. Only numeric accounting and returned model names are saved, not event streams, prompts, thinking or signatures. `src/sync/cost.ts` sums preparation runs (including retries/rebuilds) into the sync's **Est. cost**; later questions, calls and standalone recaps do not change it. Cached summaries add no new charge. Missing/legacy usage remains unavailable or partial, never zero or a retroactive guess. Prices are retained at call time. This is API-equivalent pricing, not subscription charges, quota usage or an invoice. Existing metrics remain readable. The 0.7.0 background path adds `background_runs` for separate durable accounting; it does not rewrite old metrics, indexes or model selections.
 
 ### Source references
 
@@ -186,7 +215,7 @@ Retained evidence / discussion / saved notes
   → dated H references, separate from the frozen snapshot
 ```
 
-Browsing does not start downloads or embedding. Search/text requests prepare the model and index automatically. Sync preparation also prepares searchable history, before **Call Draken** can become enabled. Existing syncs can explicitly prepare history outside a call. Foreground call preparation first completes captured source imports in cancellable 32 MiB passes, without chasing later appends; the 8 MiB record limit remains. `agent_sessions.scanned_bytes` distinguishes a completed capture from a partial cursor. Snapshot routes block scan warnings. A read-only readiness check validates the saved preparation record against completed capture markers, source metadata, file identity and the pinned model; it never scans transcript bodies, downloads a model or starts inference. Call creation rechecks readiness and returns 409 rather than indexing during setup. Voice retrieval verifies prepared passages at the saved cutoff without building new corpus embeddings. The background owner (`src/sync/background.ts`) only scans and indexes locally: it must not reserve entries, create syncs or invoke provider summarization. An explicit user request owns snapshot creation and briefing generation; old automatic snapshots remain ordinary retained history. See [MEMORY.md](MEMORY.md#optional-background-indexing) for scheduling, preference migration, cancellation and regression coverage. Settings/progress GETs start no work. There are no manual model-setup, search-mode or scope switches. Voice project questions use original-source scopes, a conversation-local project/topic context, chronology-aware ranking and a separate agent-explanation candidate set. Shared passages are deduplicated before top-k truncation. Safe native refinements are honored within a three-lookup-per-turn limit. Text and voice share a historical evidence selection budget of 32,000 UTF-8 bytes; native voice transports larger packets losslessly through acknowledged context parts of at most 8,192 bytes. Explicit frozen-source lookups can accompany the history packet. Retrieval intent—not the transport byte budget—controls reconciliation. Source lists represent context supplied for the current turn, not verified claim support. Retrieved history is never new snapshot coverage or an automatic decision. See [MEMORY.md](MEMORY.md) for package/runtime costs, exclusions, date qualifications and failure behavior.
+Browsing does not start downloads or embedding. Search/text requests prepare the model and index automatically. Sync preparation also prepares searchable history, before **Call Draken** can become enabled. Existing syncs can explicitly prepare history outside a call. Foreground call preparation first completes captured source imports in cancellable 32 MiB passes, without chasing later appends; the 8 MiB record limit remains. `agent_sessions.scanned_bytes` distinguishes a completed capture from a partial cursor. Snapshot routes block scan warnings. A read-only readiness check validates the saved preparation record against completed capture markers, source metadata, file identity and the pinned model; it never scans transcript bodies, downloads a model or starts inference. Call creation rechecks readiness and returns 409 rather than indexing during setup. Voice retrieval verifies prepared passages at the saved cutoff without building new corpus embeddings. The scheduler (`src/sync/background.ts`) separates local indexing from the new explicit paid cache-preparation opt-in. Local indexing alone only scans/indexes and never invokes providers. Neither background path reserves entries or creates syncs; only paid opt-in permits summary-cache work under the boundaries above. An explicit user request owns snapshot creation and briefing generation; old automatic snapshots remain ordinary retained history. See [MEMORY.md](MEMORY.md#optional-background-indexing) for both schedules, consent, cancellation and regression coverage. Settings/progress GETs start no work. There are no manual model-setup, search-mode or scope switches. Voice project questions use original-source scopes, a conversation-local project/topic context, chronology-aware ranking and a separate agent-explanation candidate set. Shared passages are deduplicated before top-k truncation. Safe native refinements are honored within a three-lookup-per-turn limit. Text and voice share a historical evidence selection budget of 32,000 UTF-8 bytes; native voice transports larger packets losslessly through acknowledged context parts of at most 8,192 bytes. Explicit frozen-source lookups can accompany the history packet. Retrieval intent—not the transport byte budget—controls reconciliation. Source lists represent context supplied for the current turn, not verified claim support. Retrieved history is never new snapshot coverage or an automatic decision. See [MEMORY.md](MEMORY.md) for package/runtime costs, exclusions, date qualifications and failure behavior.
 
 
 Draken keeps three kinds of text separate:
@@ -199,7 +228,7 @@ Draken keeps three kinds of text separate:
 
 A new one-click sync freezes the inputs from the **three most recent non-discarded syncs**, including open ones. Recap generation processes their supplied briefings, messages and notes in parts, then combines the results. It does not just take the last few messages. The final recap is deliberately small: one to five lines, at most 600 characters.
 
-Changing a conversation marks its old recap as stale. Closing the call UI requests a new recap; a browser exit cannot guarantee that request completes or is sent. You can explicitly refresh it, and a later sync can rebuild changed memory. Recaps have no idle-refresh timer. Automatic indexing never generates recaps or other provider model work.
+Changing a conversation marks its old recap as stale. Closing the call UI requests a new recap; a browser exit cannot guarantee that request completes or is sent. You can explicitly refresh it, and a later sync can rebuild changed memory. Recaps have no idle-refresh timer. Automatic local indexing never generates provider model work. Paid background summary preparation also excludes recaps and final briefings.
 
 **Why:** short recaps make history easy to browse without sending every previous conversation into every call. Keeping notes separate prevents a model's suggestion, an interrupted answer or an old user request from becoming a saved decision.
 
@@ -255,7 +284,8 @@ By default, private state lives under `~/.draken/`, outside the source checkout.
 | `sync_messages` | Text discussion and qualified voice-history messages |
 | `sync_coverage` | Entries explicitly reviewed |
 | `sync_runs`, `sync_tree_nodes` | Briefing/question progress and links between summary steps |
-| `summary_cache` | Valid summary-tree results that can be reused |
+| `summary_cache` | Valid summary-tree results reused by explicit syncs and opted-in paid preparation |
+| `background_runs` | Paid preparation input hashes, durable invocation counters, state and content-free metrics; no source text or snapshot ownership |
 | `sync_presentations`, `sync_recap_cache` | Card recaps, frozen earlier-conversation inputs and reusable recap parts |
 | `voice_calls`, `voice_turns` | Preserved records from the retired local engine; no new calls are created here |
 | `live_calls`, `live_messages` | Native calls and separately recorded user/assistant messages |
@@ -264,16 +294,16 @@ SQLite transactions keep related changes together. Creating a snapshot freezes v
 
 The derived search database stores attribution metadata, passage hashes, unique vectors, occurrence links and contentless FTS5 postings—not original passage bodies. Its `chunks` and `embedding_cache` names are read views, not second content/vector stores. The one-way source-only migration preserves compatible embeddings without inference and stops if legacy evidence cannot be verified, rather than deleting or guessing it. See [MEMORY.md](MEMORY.md) for the format, failure behavior and separate offline compaction step.
 
-Closing a page does not cancel an ordinary server-side preparation job. Restarting the server interrupts work still in progress, and startup records unfinished runs and calls as stopped or interrupted. Calls and foreground preparation do not automatically restart; a microphone always requires fresh browser intent. Saved snapshot membership, conversations and successful summary parts remain available for retry, while snapshot text still requires the original agent files. Enabled automatic indexing continues accumulating local history under the [indexing policy above](#6-memory-is-not-the-same-as-a-decision); it never resumes snapshot or briefing work. Previously automatic snapshots remain accessible as ordinary history.
+Closing a page does not cancel an ordinary server-side preparation job. Restarting the server interrupts work still in progress, and startup records unfinished runs and calls as stopped or interrupted. Calls and foreground preparation do not automatically restart; a microphone always requires fresh browser intent. Saved snapshot membership, conversations and successful summary parts remain available for retry, while snapshot text still requires the original agent files. Enabled automatic indexing continues accumulating local history under the [indexing policy above](#6-memory-is-not-the-same-as-a-decision); it never resumes snapshot or briefing work. Previously automatic snapshots remain accessible as ordinary history. Separately opted-in paid cache preparation can resume interrupted input with its durable spending and valid cache, but a paid failure remains paused until explicit retry. The new opt-in defaults off; neither old local permission nor retired paid consent enables it.
 
-**Why:** the database preserves what happened. Restart recovery must respect the saved indexing preference without turning it into permission to create snapshots, run provider models or resume audio capture.
+**Why:** the database preserves what happened. Restart recovery must respect each saved permission separately: indexing is not paid consent; paid cache permission is not snapshot, final-briefing, recap or microphone permission.
 
 The `agents-v1` source migration renames legacy `pi_sessions`/`pi_entries` to generic `agent_sessions`/`agent_entries`, retaining IDs, event keys, sequences, frozen references and compatible embeddings. New Codex/Claude readers and their opt-in boundaries are described in [SOURCES.md](SOURCES.md); the tool-free pi summarization runner is unchanged. Schema updates preserve historical evidence, including old project/task tables that the current app no longer uses. Pointer migration changes its physical representation; older binaries cannot read the new schema. Keep a current database backup before deployment. Do not restore an old database to update voice code, or run the old single-open-sync schema against newer multiple-snapshot data.
 
 ## 9. Trust and privacy boundaries
 
 - **Source text is data, not a command.** Logs and old conversations may contain instructions. They must not acquire authority just because a model reads them. The pi calls have tools disabled; the native helper also rejects execution and approval requests.
-- **Local browsing is not a model request.** Scanning and viewing evidence stay local. Preparation, questions and recap actions can send selected text to providers. Native calls also send audio.
+- **Local browsing is not a model request.** Scanning and viewing evidence stay local. Explicit preparation, questions and recap actions, plus separately opted-in paid background summaries, can send selected text to providers. Settings GETs grant no consent. Native calls also send audio.
 - **Secret removal is best-effort.** It reduces obvious exposure; it cannot guarantee that a source excerpt is safe to send. Frozen records are not silently rewritten when outbound cleaning rules improve.
 - **Dashboard login and provider sign-in are separate.** Normal loopback use needs no dashboard login unless configured. LAN access requires authentication, and microphone use needs localhost or trusted HTTPS. Requests from other origins are rejected.
 - **Private files stay outside the repository.** Credentials, certificates, databases, installed helper files and private reports are not application assets or package contents.
@@ -305,7 +335,7 @@ Live speech supplies received audio energy, not exact word or mouth timing. The 
 | Reading agent histories and cleaning excerpts | [`src/sources/adapters.ts`](src/sources/adapters.ts), [`src/sources/registry.ts`](src/sources/registry.ts), [`src/sync/collector.ts`](src/sync/collector.ts), [`normalize.ts`](src/sync/normalize.ts) |
 | Snapshot selection, review and saved notes | [`src/sync/store.ts`](src/sync/store.ts) |
 | Summary steps, caching and source-label validation | [`src/sync/tree.ts`](src/sync/tree.ts), [`references.ts`](src/sync/references.ts) |
-| Final answers and local background indexing | [`src/sync/manager.ts`](src/sync/manager.ts), [`pi.ts`](src/sync/pi.ts), [`background.ts`](src/sync/background.ts) |
+| Final answers and separate local/paid background orchestration | [`src/sync/manager.ts`](src/sync/manager.ts), [`pi.ts`](src/sync/pi.ts), [`background.ts`](src/sync/background.ts) |
 | Active job/call ownership and shared history preparation | [`src/sync/activity.ts`](src/sync/activity.ts), [`preparation.ts`](src/sync/preparation.ts) |
 | Short conversation memory | [`src/sync/recap.ts`](src/sync/recap.ts) |
 | Hybrid historical retrieval | [`src/memory/index.ts`](src/memory/index.ts), [`src/memory/service.ts`](src/memory/service.ts), [`MEMORY.md`](MEMORY.md) |
@@ -324,6 +354,7 @@ Keep checks that control writes on the server, not only in buttons. Keep model p
 ### Boundaries to preserve
 
 - Keep configuration/errors independent of database initialization, asset management separate from inference, and shared retrieval/passage policy outside voice or model orchestration.
+- Local indexing permission never becomes paid consent. Paid preparation writes shared validated cache and metadata-only `background_runs`, not snapshot/tree/message/review rows. Failures pause paid retries; the same interrupted input retains invocation spending.
 - Cancellation requests are not completion. Resource owners retain their leases until confirmed cleanup; HTTP disconnect cancellation is opt-in, not a blanket rule for durable preparation.
 - Live evidence requires verified originals. Historical normalization/cache recipes belong to migrations and independent frozen fixtures, not aliases of the current recipe.
 - Browser credentials can be shared without sharing failure policy: dashboard authentication failures and call cleanup have different owners. Source viewers own their abortable requests and pagination identity.
@@ -335,6 +366,8 @@ npm run check    # TypeScript checks and unused-code analysis
 npm test         # Server and unit tests with temporary data and fake model replies
 npm run test:ui  # Build, then browser workflow tests
 ```
+
+Focused 0.7.0 regressions are `tests/background-tree.test.cjs` (shared cache, compact input and append/tail reuse), `tests/background-preparation.test.cjs` (consent, independent threshold, durable spending, failure pause, accounting and no snapshot/review writes), and `tests/automatic-index.test.cjs` (local-only behavior). `tests/package-smoke.cjs` asserts fresh paid opt-out and metadata-only GET defaults; `tests/site-browser.cjs` checks release/consent copy without running the app.
 
 There are separate tests for browser audio, native-helper behavior and real-provider calls. Real-provider checks require an explicit opt-in; ordinary tests must not read your real session store or use it as scratch data. A synthetic audio test is not proof that a physical microphone, Bluetooth headset or different browser behaves correctly.
 

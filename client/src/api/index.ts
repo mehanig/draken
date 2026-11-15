@@ -1,4 +1,4 @@
-import type { PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
+import type { PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, SummaryPreparationSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
 import { authorizationHeaders, clearSession } from '../auth/session';
@@ -24,6 +24,8 @@ export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir:
 export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);
 export const autoIndexSettings = () => request<AutoIndexSettings>('/settings/auto-index');
 export const setAutoIndex = (enabled: boolean) => request<AutoIndexSettings>('/settings/auto-index', 'PATCH', { enabled });
+export const summaryPreparationSettings = () => request<SummaryPreparationSettings>('/settings/auto-summary');
+export const setAutoSummary = (enabled: boolean) => request<SummaryPreparationSettings>('/settings/auto-summary', 'PATCH', { enabled });
 export const home = (before?: number) => request<HomeOverview>(`/home${before ? `?before=${before}` : ''}`);
 export const startCall = (request_id: string) => request<{ sync: SyncDetail; scan: ScanResult }>('/syncs/start-call', 'POST', { request_id });
 export const startChat = (request_id: string) => request<{ sync: SyncDetail; scan: ScanResult }>('/syncs/start-chat', 'POST', { request_id });

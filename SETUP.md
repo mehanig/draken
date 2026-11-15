@@ -2,7 +2,7 @@
 
 Draken uses **pi for summaries, preparation recaps and text discussion**, regardless of which coding agent produced the imported history. It does not implement provider OAuth, translate another agent's credentials, or run Claude/Codex to summarize.
 
-> This guide is for **Draken 0.6.0**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#060).
+> This guide is for **Draken 0.7.0**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#070).
 
 ## Install and start
 
@@ -21,9 +21,29 @@ Installation does not launch a server or register a background service. `draken`
 - `draken doctor`: checks the selected pi executable, version and configured model credentials. It does not create the application database, generate text or verify provider access/billing. A non-ready result exits nonzero.
 - A duplicate launch on an occupied HTTP/HTTPS port exits **before opening the database or recovering interrupted runs**.
 
-**Automatic local indexing is on by default for new installations.** While the server runs, it checks enabled sources once a minute and indexes batches at 64 source changes. Smaller tails wait for explicit foreground preparation, with no timed flush. It accumulates searchable history without creating syncs, summaries or briefings and makes no provider model calls. Local embeddings use CPU, memory and disk; first use may download about 136 MB of pinned search model files. Change this in **Settings → Automatically index history**. Existing installations keep their saved indexing choice, including off. Calls and foreground work take priority; disabling cancels automatic indexing and retains completed embeddings. Local failures back off for at least five minutes, with **Retry automatic indexing** available in Settings. Source/session exclusions still apply, and Codex and Claude remain separately opt-in. Only your explicit **Sync with Draken** or **Chat instead** action starts a new snapshot and briefing using configured models and their quota or API billing. Existing snapshots and notes remain untouched; no call, microphone or review starts automatically. **Settings → Preparation usage** retains preparation-only cost estimates, including past automatic work, not total spending or quota.
+**Automatic local indexing is on by default for new installations.** While the server runs, it checks enabled sources once a minute and indexes batches at 64 source changes. Smaller tails wait for explicit foreground preparation, with no timed flush. It accumulates searchable history without creating syncs, summaries or briefings and makes no provider model calls. Local embeddings use CPU, memory and disk; first use may download about 136 MB of pinned search model files. Change this in **Settings → Automatically index history**. Existing installations keep their saved indexing choice, including off. Calls and foreground work take priority; disabling cancels automatic indexing and retains completed embeddings. Local failures back off for at least five minutes, with **Retry automatic indexing** available in Settings. Source/session exclusions still apply, and Codex and Claude remain separately opt-in. Only your explicit **Sync with Draken** or **Chat instead** action starts a new snapshot and briefing using configured models and their quota or API billing. Existing snapshots and notes remain untouched; no call, microphone or review starts automatically. **Settings → Preparation usage** retains preparation-only cost estimates, including paid background summaries and past automatic work, not total spending or quota. Completed batches count explicit snapshots' first successful briefings, not cached preparation.
+
+**Paid summaries are a separate, default-off choice.** To prepare ahead, explicitly enable the NEW **Settings → Prepare summaries ahead** switch while **Automatically index history** is enabled. Old `auto_index=true` and retired 0.5 paid consent do not enable it. This sends eligible accumulated entries to the configured summary model within the same `max_invocations` allowance, with no provider/model fallback. Once-minute idle checks require at least 64 new/changed eligible records, independently of the embedding checkpoint. It warms validated summary leaves, reconciliation and compact final input, not a snapshot, final briefing, recap or review. Unchanged prepared input makes no further calls; closed chunks are reusable across appends. Changed unfinished per-session tails and aggregate reconciliation may still need work at **Start chat**, and the final briefing is always explicit—not a zero-wait promise.
+
+Foreground work cancels and awaits owned background provider work. Valid cache survives cancellation/restarts, with invocation spending retained for the same interrupted input. Paid failures pause until explicit retry, unlike local indexing's five-minute retry delay. Disabling either switch stops paid background work without deleting cache. See [the durable preparation policy](MEMORY.md#optional-paid-summary-preparation).
 
 Loopback (`http://127.0.0.1:40333`) needs no dashboard login by default. LAN exposure still requires configured dashboard authentication and trusted HTTPS for microphone access. There is no automatic firewall change or certificate trust installation.
+
+## Upgrade to 0.7.0
+
+1. Back up original agent logs and the private Draken data directory. Preserve existing histories, conversations, notes, review coverage and frozen snapshots; do not replace them with an old database.
+2. Finish active calls/preparation, stop the server, and quit any tray that owns it. Install the released version with `npm install -g draken@0.7.0`, then restart using the same user, environment and `DRAKEN_DATA_DIR`.
+3. Check **Settings → Runtime & sign-in**. Existing pi/voice accounts and selected runtimes are unchanged; upgrading does not silently install or sign into a replacement runtime.
+4. Keep or change **Automatically index history** as desired. Its existing preference is preserved. To get paid preparation ahead, explicitly enable the NEW **Prepare summaries ahead** switch. It defaults off on upgrades as well as fresh installations; no local-to-paid or retired-consent migration occurs.
+5. Start a sync/chat explicitly for the final briefing. Warm cache is not a completed sync or review. If paid preparation fails, resolve the error and retry explicitly; disabling either setting stops paid work but preserves valid cache.
+
+The additive `background_runs` table stores input hashes, counters and accounting metrics, not source text. No dependencies change in this release. Do not run an older binary to undo schema changes.
+
+### Release qualification and website ordering
+
+For a source release, build and test sequentially once the backend/client changes are ready. Run `tests/background-tree.test.cjs`, `tests/background-preparation.test.cjs` and `tests/automatic-index.test.cjs` against the new server build, then `node --test tests/site-browser.cjs` and `node tests/package-smoke.cjs` with the complete package build. The site check serves static files and needs Playwright/Chromium, not an application build or provider. The package smoke requires built `dist/` and `public/` and installs an isolated production-only tarball; it must observe `auto_summary=false`, a metadata-only disabled auto-summary GET, and no background runs/provider activity by default. Synthetic tests do not establish provider latency, quality or account billing.
+
+Publish npm only through the separately authorized release process. The existing website workflow checks `scripts/site-release.cjs`: copy must match the package version and npm `latest` must be 0.7.0 before the site is deployed. Do not bypass this gate to publish release copy early. Updating docs/version/site files is not a merge, npm publication or live deployment.
 
 ## When pi is not installed
 
@@ -101,7 +121,7 @@ Home shows first-run guidance when no syncs exist, and a setup notice whenever s
 
 Choose **Settings → Agents & sessions**. Enable the history sources you want and use **Scan enabled agents**, or let the next explicit sync scan them. Source roots and permissions are independent of the private summarization runtime: installing pi does not enable Codex/Claude histories or change the original pi archive. See [SOURCES.md](SOURCES.md).
 
-Opening these instructions checks local metadata only. It does not install packages, refresh OAuth tokens, download embeddings, generate a summary, create a snapshot, acquire a microphone, or mark work reviewed. Enabled automatic local indexing runs independently of these instructions; it is on by default for new installations and can be turned off in Settings. It never creates snapshots or runs summary/briefing models.
+Opening these instructions checks local metadata only. It does not install packages, refresh OAuth tokens, download embeddings, generate a summary, create a snapshot, acquire a microphone, or mark work reviewed. Enabled automatic local indexing runs independently of these instructions; it is on by default for new installations and can be turned off in Settings. Local indexing alone never creates snapshots or runs summary/briefing models. If separately enabled, paid summary preparation also runs independently of browsing, but never creates snapshots or final briefings. Opening these instructions or settings GETs cannot grant that consent.
 
 ## Recovery and maintenance
 

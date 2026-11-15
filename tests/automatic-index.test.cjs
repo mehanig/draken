@@ -52,6 +52,21 @@ test('cancellation preserves the last successful baseline; retry is bounded and 
  f.now=120000;f.worker.pause();f.now=180000;await f.worker.tick();assert.equal(calls,1,'foreground activity cannot shorten failure backoff');f.now=360000;f.ops.prepare=async()=>{calls++;};await f.worker.tick();assert.equal(calls,2);assert.equal(f.worker.state.pending_records,0);
  for(let n=0;n<64;n++)f.rows.set(String(n),'v2');f.now=960000;f.ops.prepare=async()=>{throw new HttpError(409,'cancelled by foreground');};await f.worker.tick();assert.equal(f.worker.state.phase,'paused');assert.equal(f.worker.state.error,'');
 });
+test('summary backlog is independent of local embedding changes and paid failures do not erase local progress',async()=>{
+ const f=fixture(1);let summaries=0;f.ops.prepareSummaries=async()=>{summaries++;throw Error('PRIVATE_PROVIDER_FAILURE');};
+ await f.worker.tick();assert.equal(summaries,1);assert.equal(f.prepares,0);assert.equal(f.worker.state.phase,'waiting');assert.equal(f.worker.state.error,'');
+ for(let n=1;n<64;n++)f.rows.set(String(n),'v1');await f.worker.tick();assert.equal(f.prepares,1);assert.equal(summaries,2);assert.equal(f.worker.state.pending_records,0);assert.ok(f.worker.state.last_completed_at);
+ f.idle=false;await f.worker.tick();assert.equal(summaries,2);f.idle=true;
+ f.ops.prepare=async()=>{f.idle=false;};for(let n=0;n<64;n++)f.rows.set(String(n),'v2');await f.worker.tick();assert.equal(summaries,2,'idle admission rechecked after indexing');
+});
+test('a single owner drains summary work and cancellation cannot be undone by rapid enable',async()=>{
+ const f=fixture(0);let signal,release,done=false,calls=0;
+ f.ops.prepareSummaries=s=>{signal=s;calls++;return new Promise(r=>release=r);};
+ const running=f.worker.tick();while(!signal)await Promise.resolve();
+ const stopping=f.worker.stop().then(()=>done=true);f.worker.retry();const duplicate=f.worker.tick();
+ assert.equal(signal.aborted,true);await Promise.resolve();assert.equal(done,false);assert.equal(calls,1);
+ release();await Promise.all([running,duplicate,stopping]);assert.equal(done,true);
+});
 test('settings are persistent, validated, read-only on GET, and protected from cross-origin changes',async()=>{
  const {createApp}=require('../dist/server');server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const url=`http://127.0.0.1:${server.address().port}/api/settings/auto-index`;
  const before=getDb().prepare('SELECT total_changes() n').get().n;
@@ -63,6 +78,14 @@ test('settings are persistent, validated, read-only on GET, and protected from c
  assert.equal(autoIndexSettings().enabled,false,'invalid or cross-origin requests cannot change the setting');
  const enabled=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true}'});assert.equal(enabled.status,200);assert.equal((await enabled.json()).enabled,true);
  assert.equal(getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_index'").get().value,'true');
+ const summaryUrl=url.replace('auto-index','auto-summary');
+ assert.equal((await(await fetch(summaryUrl)).json()).enabled,false);
+ for(const body of [{enabled:'true'},{enabled:true,extra:true},[],{}])assert.equal((await fetch(summaryUrl,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).status,400);
+ assert.equal((await fetch(summaryUrl,{method:'PATCH',headers:{'Content-Type':'application/json',Origin:'https://elsewhere.invalid'},body:'{"enabled":true}'})).status,403);
+ setAutoIndex(false);assert.equal((await fetch(summaryUrl,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true}'})).status,409);setAutoIndex(true);
+ assert.equal((await(await fetch(summaryUrl,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":true}'})).json()).enabled,true);
+ assert.equal(autoIndexSettings().summary_enabled,true);
+ assert.equal((await(await fetch(summaryUrl,{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"enabled":false}'})).json()).enabled,false);
  for(const key of ['auto_prepare_conversations','auto_preparing_sync','auto_briefing_failed'])assert.equal(getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key),undefined);
  const after=getDb().prepare('SELECT total_changes() n').get().n;await fetch(url);assert.equal(getDb().prepare('SELECT total_changes() n').get().n,after);
  await stopBackgroundIndexing();closeDb();assert.equal(autoIndexSettings().enabled,true);startBackgroundIndexing();assert.equal(autoIndexSettings().phase,'waiting');setAutoIndex(false);assert.equal(autoIndexSettings().enabled,false);

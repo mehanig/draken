@@ -12,6 +12,7 @@ import { HttpError } from '../errors';
 
 import { activity } from './activity';
 import { defaultModels } from './models';
+import type { SummaryInput } from './tree';
 const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.briefing, s.decisions, s.carry_forward,
   s.remaining_count, s.snapshot_version, s.snapshot_at,
   COALESCE((SELECT recap FROM sync_presentations WHERE sync_id=s.id), '') AS recap,
@@ -114,7 +115,7 @@ export function getSync(id: number): SyncDetail {
   } finally { reader.close(); }
 }
 
-export function assertEvidenceAvailable(sync: SyncDetail): void {
+export function assertEvidenceAvailable(sync: Pick<SyncDetail, 'items' | 'context'>): void {
   if ([...sync.items, ...sync.context].some(item => item.unavailable)) throw new HttpError(409, 'Original session evidence is unavailable or changed. Restore the session files before summarizing, calling or marking this snapshot reviewed. Conversation and notes remain accessible.');
 }
 
@@ -171,6 +172,11 @@ function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence
   }
   return { items, context };
   } finally { reader.close(); }
+}
+
+/** Read verified originals without scanning, reserving entries or persisting a snapshot. */
+export function previewSummaryInput(): SummaryInput {
+  return { ...snapshot(), models: defaultModels() };
 }
 
 function frozenContext(db: ReturnType<typeof getDb>, items: Evidence[]): string {
@@ -274,6 +280,10 @@ export function getTreeNode(id: number, key: string) {
 }
 
 export function recoverInterruptedRuns(): void {
+  const interruptedAt = new Date().toISOString();
+  getDb().prepare(`UPDATE background_runs SET status='interrupted', error='Server restarted. Cached summaries and the remaining invocation allowance are retained.',
+    completed_at=?,failure_events_json=json_insert(failure_events_json,'$[#]',json_object('status','interrupted','at',?)) WHERE status='running'`)
+    .run(interruptedAt, interruptedAt);
   getDb().prepare("UPDATE sync_presentations SET recap_state='failed',recap_error='Recap interrupted by restart. Retry to reuse cached fragments.' WHERE recap_state='running'").run();
   getDb().prepare("UPDATE sync_runs SET status = 'interrupted', error = 'Server restarted. Retry to reuse completed summaries.', completed_at = ? WHERE status = 'running'")
     .run(new Date().toISOString());

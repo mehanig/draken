@@ -4,6 +4,7 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), os = requ
 const Database = require('better-sqlite3');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { autoIndexSettings } = require('../dist/sync/background');
+const { summaryPreparationSettings } = require('../dist/sync/summary-preparation');
 let root;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-default-auto-')); process.env.DRAKEN_DATA_DIR = root; process.env.DRAKEN_PI_SESSIONS_DIR = root + '/sessions'; });
 afterEach(() => { closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
@@ -15,11 +16,15 @@ function legacy(settings = []) {
   db.close();
 }
 function noActivity(db) {
-  for (const table of ['agent_sessions', 'agent_entries', 'syncs', 'sync_items', 'sync_runs', 'sync_messages', 'sync_coverage', 'live_calls']) assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, table);
+  for (const table of ['agent_sessions', 'agent_entries', 'syncs', 'sync_items', 'sync_runs', 'background_runs', 'sync_messages', 'sync_coverage', 'live_calls']) assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, table);
 }
 function readOnlySettings(expected) {
   const db = getDb(), changes = db.prepare('SELECT total_changes() n').get().n;
-  for (let n = 0; n < 3; n++) assert.equal(autoIndexSettings().enabled, expected);
+  for (let n = 0; n < 3; n++) {
+    assert.equal(autoIndexSettings().enabled, expected);
+    assert.equal(autoIndexSettings().summary_enabled, false, 'local indexing consent never authorizes paid cache work');
+    assert.equal(summaryPreparationSettings().enabled, false, 'retired paid consent is not revived on upgrade');
+  }
   assert.equal(db.prepare('SELECT total_changes() n').get().n, changes, 'settings reads do not migrate, seed or start work');
   for (const key of obsolete) assert.equal(db.prepare('SELECT value FROM sync_settings WHERE key=?').get(key), undefined);
   noActivity(db);

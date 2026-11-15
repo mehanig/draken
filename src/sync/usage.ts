@@ -13,7 +13,9 @@ function finish({ priced, ...value }: Counters): PreparationUsageTotals {
 }
 
 /** Read-only accounting metadata, never source discovery, model pricing lookup,
- * inference, index preparation or mutation. Includes failed/discarded work. */
+ * inference, index preparation or mutation. Includes failed/discarded work.
+ * Background requests/costs/failures are accounted from their separate ledger;
+ * entries and completed_batches retain successful explicit-sync semantics. */
 export function preparationUsage(db: Database.Database, query: Record<string, unknown>, now = Date.now()): PreparationUsage {
   const range = query.range ?? '7d', bucket = query.bucket ?? '1h';
   if (Object.keys(query).some(key => !['range', 'bucket'].includes(key)) || typeof range !== 'string' || !Object.hasOwn(ranges, range) || typeof bucket !== 'string' || !Object.hasOwn(widths, bucket)) {
@@ -28,9 +30,11 @@ export function preparationUsage(db: Database.Database, query: Record<string, un
     const time = date ? Date.parse(date) : NaN;
     return time >= from && time < now ? bins[Math.floor((time - aligned) / width)] : undefined;
   };
-  type Run = { id: number; invocations: number; status: string; started_at: string; completed_at: string | null; metrics_json: string };
+  type Run = { id: number; invocations: number; status: string; started_at: string; completed_at: string | null; metrics_json: string; background?: number; failure_events_json?: string };
   const runs = db.prepare(`SELECT id,invocations,status,started_at,completed_at,metrics_json FROM sync_runs
     WHERE question IS NULL AND (started_at>=? OR completed_at>=? OR status='running')`).all(new Date(from).toISOString(), new Date(from).toISOString()) as Run[];
+  runs.push(...db.prepare(`SELECT id,invocations,status,started_at,completed_at,metrics_json,failure_events_json,1 AS background FROM background_runs
+    WHERE started_at>=? OR completed_at>=? OR status='running'`).all(new Date(from).toISOString(), new Date(from).toISOString()) as Run[]);
   let active = 0;
   for (const run of runs) {
     if (run.status === 'running') active++;
@@ -54,9 +58,17 @@ export function preparationUsage(db: Database.Database, query: Record<string, un
     // Older/crashed runs may have reserved invocations without a metric. Never
     // turn those requests into zero-cost work or fabricate per-call timestamps.
     add(run.started_at, Math.max(0, run.invocations - metrics.length), undefined, true);
-    if (['failed', 'cancelled', 'interrupted'].includes(run.status)) {
-      const bin = at(run.completed_at); if (bin) { bin.failed_attempts++; totals.failed_attempts++; }
-    }
+    const failed = (date: string | null) => { const bin = at(date); if (bin) { bin.failed_attempts++; totals.failed_attempts++; } };
+    if (run.background) {
+      // A resumed run keeps its allowance and request metrics. Attempt failures
+      // need their own events: cancellation can happen between successful calls.
+      let events: { status: string; at: string }[];
+      try {
+        events = JSON.parse(run.failure_events_json!);
+        if (!Array.isArray(events) || events.some(event => !event || !['failed', 'cancelled', 'interrupted'].includes(event.status) || typeof event.at !== 'string' || !Number.isFinite(Date.parse(event.at)))) throw Error();
+      } catch { throw new HttpError(503, 'Preparation usage metadata could not be read. No totals were estimated from missing records.'); }
+      for (const event of events) failed(event.at);
+    } else if (['failed', 'cancelled', 'interrupted'].includes(run.status)) failed(run.completed_at);
   }
   const completed = db.prepare(`SELECT r.completed_at,r.total_entries FROM sync_runs r
     WHERE r.question IS NULL AND r.status='completed' AND r.completed_at>=? AND r.completed_at<?

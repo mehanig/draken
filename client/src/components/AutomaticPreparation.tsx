@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { autoIndexSettings } from '../api';
 import type { AutoIndexSettings } from '../types';
 import { HistoryProgress } from './HistoryProgress';
+import { SummaryPreparation } from './SummaryPreparation';
 
 export function AutomaticProgress({ settings }: { settings: AutoIndexSettings }) {
   const phase = {
     off: 'Automatic indexing is off.',
     waiting: 'Waiting for the next indexing batch.',
     scanning: 'Checking history for changes…', indexing: 'Indexing searchable history…',
+    summarizing: 'Preparing reusable summary cache…',
     paused: 'Paused for your conversation or foreground work.',
     stopping: 'Stopping automatic indexing…', error: 'Automatic indexing needs attention.',
   }[settings.phase];
@@ -32,5 +34,6 @@ export function AutomaticPreparation() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
   if (error) return <p role="status" className="small muted">Automatic indexing status is temporarily unavailable.</p>;
-  return settings?.enabled ? <AutomaticProgress settings={settings} /> : null;
+  return settings?.enabled ? <><AutomaticProgress settings={settings} />
+    {settings.summary_enabled && <SummaryPreparation active indexing={settings.enabled} />}</> : null;
 }
