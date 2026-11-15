@@ -75,6 +75,50 @@ test('shutdown cancels owners, refuses new work and waits for the final lease re
   }
 });
 
+test('connected idle is background-safe, but setup, turns, cleanup and foreground work are not', () => {
+  assert.equal(activity.backgroundIdle, true);
+  const call = own(activity.beginCall(1));
+  assert.equal(activity.backgroundIdle, false, 'reservation defaults to connecting/busy');
+  assert.equal(activity.voiceTurnActive(1), false, 'setup is not a real reply');
+  call.connected();
+  assert.equal(activity.backgroundIdle, true);
+  const first = call.beginTurn(), second = call.beginTurn();
+  assert.equal(activity.voiceTurnActive(1), true);
+  assert.equal(activity.voiceTurnActive(2), false);
+  first(); first();
+  assert.equal(activity.backgroundIdle, false, 'stale completion cannot release the newer turn');
+  second();
+  assert.equal(activity.voiceTurnActive(1), false);
+  assert.equal(activity.backgroundIdle, true);
+  const cleanup = call.hold();
+  assert.equal(activity.backgroundIdle, false);
+  cleanup();
+  const job = own(activity.beginJob(2, new AbortController()));
+  assert.equal(activity.backgroundIdle, false);
+  job(); call();
+  const start = own(activity.beginStart());
+  assert.equal(activity.backgroundIdle, false);
+  start();
+  assert.equal(activity.backgroundIdle, true);
+});
+
+test('old call and turn callbacks cannot connect, busy or idle a replacement reservation', () => {
+  const old = own(activity.beginCall(1)), oldTurn = old.beginTurn();
+  old();
+  const next = own(activity.beginCall(1));
+  old.connected(); oldTurn(); old(); old.beginTurn(); old.hold();
+  assert.equal(activity.backgroundIdle, false);
+  assert.equal(activity.voiceTurnActive(1), false);
+  next.connected();
+  assert.equal(activity.backgroundIdle, true);
+  const turn = next.beginTurn();
+  oldTurn(); old.connected();
+  assert.equal(activity.voiceTurnActive(1), true);
+  assert.equal(activity.backgroundIdle, false);
+  turn();
+  assert.equal(activity.backgroundIdle, true);
+});
+
 test('voice ownership is globally exclusive and protects its sync until released', () => {
   const release = own(activity.beginCall(1));
   assert.equal(activity.callActive, true);

@@ -35,8 +35,10 @@ test('start-chat scans/prepares without a native account, call, review or microp
 
 test('chat requires prepared history, deduplicates delivery, retains the user immediately and reuses the briefing tree',async()=>{
  const {id}=await ready(),before=calls().length,coverage=store.homeOverview().covered;
- memory.historyReadiness=()=>({ready:false,before:null});assert.throws(()=>launchChat(id,'What remains?',randomUUID()),/Prepare/);assert.equal(calls().length,before);
- memory.historyReadiness=originals.historyReadiness;assert.throws(()=>launchChat(id,'What remains?','bad'),/request ID/);
+ const prepared=store.getSync(id).conversation.history_before;getDb().prepare('UPDATE syncs SET conversation_before=NULL WHERE id=?').run(id);
+ assert.throws(()=>launchChat(id,'What remains?',randomUUID()),/Prepare/);assert.equal(calls().length,before);
+ getDb().prepare('UPDATE syncs SET conversation_before=? WHERE id=?').run(prepared,id);
+ memory.historyReadiness=()=>({ready:false,before:null});assert.throws(()=>launchChat(id,'What remains?','bad'),/request ID/);
  memory.prepareHistory=async()=>{throw Error('Chat must not prepare the corpus');};memory.searchHistory=async()=>{throw Error('Chat must not use unprepared search');};
  memory.searchPreparedHistory=async query=>{assert.equal(query.kind,'sources');return{mode:'hybrid',results:[],limitations:'Synthetic no match; not proof of absence.'};};
  fs.writeFileSync(control,JSON.stringify({delay:300}));const key=randomUUID();const active=launchChat(id,'What remains?',key);
@@ -45,6 +47,120 @@ test('chat requires prepared history, deduplicates delivery, retains the user im
  await idle();const done=store.getSync(id);assert.equal(done.messages.length,2);assert.equal(done.tree.run.status,'completed');assert.equal(calls().length-before,1);
  closeDb();assert.equal(launchChat(id,'What remains?',key).messages.length,2);assert.equal(calls().length-before,1,'Reloaded delivery cannot pay twice');
  assert.equal(store.homeOverview().covered,coverage);assert.equal(store.getSync(id).status,'open');assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
+});
+
+test('actual chat route survives appended/scanned originals and adopts newly indexed H evidence only on the next turn',async()=>{
+ require('./fixtures/fake-memory.cjs').useIndexedHistory();const {id,trail}=await ready(),api=await http();
+ const initial=store.getSync(id),originalItems=JSON.stringify(initial.items),before=initial.conversation.history_before;
+ assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'What remains in Trailboard?',request_id:randomUUID()})).status,202);await idle();
+ await new Promise(r=>setTimeout(r,5));const timestamp=new Date().toISOString();
+ fs.appendFileSync(path.join(root,'sessions',trail+'.jsonl'),JSON.stringify({type:'message',id:'later',parentId:'agent',timestamp,message:{role:'assistant',content:'Trailboard delivery service enabled and validated with synthetic acceptance checks. Fresh original update.'}})+'\n');
+ await scanSessions();assert.equal(memory.historyReadiness().ready,false);
+ assert.equal(require('../dist/sync/preparation').callReadiness(id,true).ready,true);
+ assert.equal(require('../dist/sync/preparation').callReadiness(id,false).ready,true,'New source evidence cannot block prepared voice readiness either');
+ assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'What remains in Trailboard?',request_id:randomUUID()})).status,202);await idle();
+ assert.equal(store.getSync(id).tree.run.status,'completed');assert.equal(store.getSync(id).conversation.history_before,before);
+ await memory.prepareHistory(new Date().toISOString(),new AbortController().signal);
+ const next=memory.historyReadiness(true).before;assert.ok(next>before);
+ assert.equal(store.getSync(id).conversation.history_before,before,'Polling never adopts new history');
+ assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'What remains in Trailboard?',request_id:randomUUID()})).status,202);await idle();
+ const done=store.getSync(id);assert.equal(done.conversation.history_before,next);assert.equal(done.tree.run.status,'completed');
+ assert.equal(JSON.stringify(done.items),originalItems);assert.equal(done.briefing,initial.briefing);assert.equal(store.homeOverview().covered,0);
+ assert.ok(calls().at(-1).historical_evidence.sources.some(item=>item.text.includes('Fresh original update')),'New original is supplied separately as H history');
+ assert.ok(done.messages.some(item=>/\[H[a-f0-9]{24}\]/.test(item.content))||calls().at(-1).historical_evidence.sources.length>0);
+ // A damaged original frozen source remains fail-closed, despite retained readiness.
+ fs.writeFileSync(path.join(root,'sessions',trail+'.jsonl'),'damaged original\n');const paid=calls().length;
+ const rejected=await api(`/syncs/${id}/chat/messages`,{message:'Continue',request_id:randomUUID()});assert.equal(rejected.status,409);assert.equal(calls().length,paid);
+});
+
+test('history cutoff stays pinned for the whole answer; unavailable updates are qualified, not a different search mode',async()=>{
+ const {id}=await ready(),first=store.getSync(id).conversation.history_before;
+ const next=new Date(Date.parse(first)+1).toISOString();let entered,finish;
+ const searching=new Promise(resolve=>entered=resolve),blocked=new Promise(resolve=>finish=resolve),seen=[];
+ memory.historyReadiness=()=>({ready:true,before:first});
+ memory.searchPreparedHistory=async query=>{seen.push(query.before);entered();await blocked;return {mode:'hybrid',results:[],limitations:'Captured synthetic search.'};};
+ launchChat(id,'What remains in Trailboard?',randomUUID());await searching;
+ memory.historyReadiness=()=>({ready:true,before:next});assert.equal(store.getSync(id).conversation.history_before,first);finish();await idle();
+ assert.deepEqual(seen,[first]);assert.equal(store.getSync(id).conversation.history_before,first);
+ memory.searchPreparedHistory=async query=>{seen.push(query.before);throw Error('Background update unavailable');};
+ memory.searchHistory=async()=>{throw Error('Never substitute unprepared search');};
+ launchChat(id,'What remains in Trailboard?',randomUUID());await idle();
+ assert.deepEqual(seen,[first,next]);assert.equal(store.getSync(id).tree.run.status,'completed');
+ const packet=calls().at(-1).historical_evidence;assert.deepEqual(packet.sources,[]);assert.match(packet.limitations,/temporarily unavailable or updating/);
+});
+
+for (const boundary of ['tree', 'history', 'history-error', 'final', 'repair']) {
+ for (const ref of ['E', 'C']) {
+  for (const damage of ['delete', 'rewrite']) {
+   test(`${ref} original ${damage} during ${boundary} fails closed and releases the accepted chat`,async t=>{
+    const {id,trail}=await ready(),db=getDb(),file=path.join(root,'sessions',trail+'.jsonl');
+    if(ref==='C'){
+     // Make this file context-only, so validation must cover C as well as E.
+     const items=db.prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(id);
+     const context=JSON.parse(db.prepare('SELECT context_json FROM syncs WHERE id=?').get(id).context_json);
+     for(const item of items){const frozen=JSON.parse(item.evidence_json);if(frozen.session_id!==trail)continue;
+      frozen.ref='C'+(context.length+1);context.push(frozen);
+      db.prepare('DELETE FROM sync_items WHERE sync_id=? AND event_key=?').run(id,item.event_key);
+     }
+     db.prepare('UPDATE syncs SET context_json=? WHERE id=?').run(JSON.stringify(context),id);
+    }
+    const initial=store.getSync(id),before=calls().length,key=randomUUID();let entered,finish;
+    const arrived=new Promise(resolve=>entered=resolve),blocked=new Promise(resolve=>finish=resolve);
+    const pause=async()=>{entered();await blocked;};
+    const {SummaryTree}=require('../dist/sync/tree');
+    if(boundary==='tree'){
+     const build=SummaryTree.prototype.build;
+     t.mock.method(SummaryTree.prototype,'build',async function(...args){const result=await build.apply(this,args);await pause();return result;});
+    }else if(boundary==='final'||boundary==='repair'){
+     if(boundary==='repair')fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true}));
+     const call=SummaryTree.prototype.call;
+     t.mock.method(SummaryTree.prototype,'call',async function(...args){const result=await call.apply(this,args);if(args[2]&&(boundary==='final'||args[0].repair))await pause();return result;});
+    }else{
+     memory.searchPreparedHistory=async()=>{await pause();if(boundary==='history-error')throw Error('Historical retrieval failed');return {mode:'hybrid',results:[],limitations:'Synthetic no match.'};};
+    }
+    launchChat(id,'What remains in Trailboard?',key);
+    try{
+     await arrived;
+     if(damage==='delete')fs.unlinkSync(file);
+     else {const original=fs.readFileSync(file,'utf8');fs.writeFileSync(file,original.replace('Check Trailboard','Break Trailboard'));}
+    }finally{finish();}
+    await idle();const done=store.getSync(id);
+    assert.equal(done.tree.run.status,'failed');assert.match(done.tree.run.error,/Original session evidence is unavailable or changed/);
+    assert.deepEqual(done.messages.map(row=>[row.role,row.content]),[['user','What remains in Trailboard?']]);
+    assert.equal(done.briefing,initial.briefing);assert.equal(done.conversation.history_before,initial.conversation.history_before);
+    assert.equal(done.busy,false);assert.equal(activity.jobActive(id),false);assert.equal(activity.callActive,false);
+    const release=activity.beginJob(id,new AbortController());release();
+    assert.equal(calls().slice(before).filter(call=>call.task==='final_verdict').length,boundary==='repair'?2:boundary==='final'?1:0);
+    assert.equal(launchChat(id,'What remains in Trailboard?',key).tree.run.status,'failed','Delivery retry retains the failed run without a new provider call');
+    assert.equal(store.homeOverview().covered,0);
+   });
+  }
+ }
+}
+
+test('a history implementation that returns after cancellation cannot reach the final model',async()=>{
+ const {id}=await ready(),before=calls().length;let entered,finish;
+ const arrived=new Promise(resolve=>entered=resolve),blocked=new Promise(resolve=>finish=resolve);
+ memory.searchPreparedHistory=async()=>{entered();await blocked;return {mode:'hybrid',results:[],limitations:'Synthetic result after cancellation.'};};
+ launchChat(id,'What remains?',randomUUID());await arrived;cancelReply(id);finish();await idle();
+ const done=store.getSync(id);assert.equal(done.tree.run.status,'cancelled');assert.equal(done.messages.length,1);
+ assert.equal(done.messages[0].role,'user');assert.equal(calls().length,before);assert.equal(done.busy,false);
+});
+
+test('accepted user time survives retries/restart; an in-flight answer finishes before ending and reservations are released',async()=>{
+ const {id}=await ready(),clock=Date.now,started=clock(),key=randomUUID();let now=started;
+ Date.now=()=>now;
+ try {
+  fs.writeFileSync(control,JSON.stringify({delay:300}));launchChat(id,'What remains?',key);
+  const accepted=store.getSync(id).conversation.last_user_at;assert.equal(accepted,new Date(started).toISOString());
+  now+=30*60_000;require('../dist/sync/conversation').expireConversations();assert.equal(store.getSync(id).conversation.ended_at,null);
+  assert.equal(launchChat(id,'What remains?',key).conversation.last_user_at,accepted);await idle();
+  const done=store.getSync(id);assert.equal(done.tree.run.status,'completed');assert.equal(done.messages.length,2);assert.ok(done.conversation.ended_at);
+  const paid=calls().length;closeDb();assert.equal(launchChat(id,'What remains?',key).messages.length,2);assert.equal(calls().length,paid);
+  assert.throws(()=>launchChat(id,'Continue',randomUUID()),error=>error.status===410);assert.equal(store.homeOverview().covered,0);
+  const next=store.startConversationSync(randomUUID());assert.notEqual(next.id,id);assert.deepEqual(next.items.map(item=>item.event_key),done.items.map(item=>item.event_key));
+  assert.equal(store.getSync(id).briefing,done.briefing);assert.equal(store.getSync(id).messages.length,2);assert.equal(store.homeOverview().covered,0);
+ } finally {Date.now=clock;}
 });
 
 test('chat gets a short-answer policy instead of briefing headings, with explicit detail and format requests preserved',async()=>{
@@ -81,11 +197,12 @@ test('chat shares project focus across native/user turns and reload, never from 
  assert.ok(calls().at(-1).recent_call_transcripts.every(row=>row.qualification.includes('not proof')));
 });
 
-test('a prepared chat cutoff survives new chat messages without weakening fresh-call readiness',async()=>{
+test('a prepared conversation cutoff survives new chat messages for both text and voice readiness',async()=>{
  require('./fixtures/fake-memory.cjs').useIndexedHistory();const {id}=await ready();const before=memory.historyReadiness(true);assert.equal(before.ready,true);
  launchChat(id,'What remains in Trailboard?',randomUUID());await idle();
  assert.deepEqual(memory.historyReadiness(true),before);assert.equal(memory.historyReadiness().ready,false);
  assert.equal(require('../dist/sync/preparation').callReadiness(id,true).ready,true);
+ assert.equal(require('../dist/sync/preparation').callReadiness(id,false).ready,true);
  launchChat(id,'What is it working on now?',randomUUID());await idle();assert.equal(store.getSync(id).messages.length,4);
  const old = getDb().prepare("INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,'user','Older newly admitted text',?)").run(id,before.before).lastInsertRowid;
  assert.equal(memory.historyReadiness(true).ready,false,'Captured readiness cannot skip a missing old record');

@@ -27,7 +27,7 @@ NativeVoice.prototype.open = function(sdp, options) {
 NativeVoice.prototype.continueAnswer = function(question) { cues++; return originalContinue.call(this, question); };
 (async () => {
   const db = schema.getDb(), now = new Date().toISOString();
-  const syncId = Number(db.prepare('INSERT INTO syncs(created_at,snapshot_at,snapshot_version,briefing,compression_complete) VALUES (?,?,2,?,1)').run(now, now, 'The export-test result is not included in this briefing. Read-only retrieval is available.').lastInsertRowid);
+  const syncId = Number(db.prepare('INSERT INTO syncs(created_at,snapshot_at,snapshot_version,briefing,compression_complete,conversation_before) VALUES (?,?,2,?,1,?)').run(now, now, 'The export-test result is not included in this briefing. Read-only retrieval is available.', now).lastInsertRowid);
   server = require('../dist/server').createApp({ staticDir: process.env.DRAKEN_TEST_STATIC_DIR || path.join(__dirname, '../public') }).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   browser = await chromium.launch(); page = await browser.newPage(); page.on('pageerror', error => errors.push(error.name));

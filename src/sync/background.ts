@@ -5,7 +5,9 @@ import { scanSessions } from './collector';
 import { availableCount } from './store';
 import { activity } from './activity';
 import { HttpError } from '../errors';
-import { historyProgress, prepareHistory } from '../memory/service';
+import { historyProgress, historyReadiness, prepareHistory } from '../memory/service';
+import { expireConversations, hasActiveConversations } from './conversation';
+import { registerUpdateStatus } from './update-status';
 import type { AutoIndexSettings } from '../types';
 import { cancelSummaryPreparation, configureAutoSummary, summaryPreparationEnabled, summaryPreparationSettings, warmSummaryCache } from './summary-preparation';
 
@@ -13,6 +15,9 @@ const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 64;
 type State = Pick<AutoIndexSettings, 'phase' | 'pending_records' | 'last_completed_at' | 'error'>;
 interface Operations {
   enabled(): boolean; idle(): boolean; now(): number;
+  expire?(now: number): void;
+  activeConversations?(): boolean;
+  needsPreparation?(): boolean;
   scan(signal: AbortSignal): Promise<{ warnings: string[] }>;
   stamp(before: string): Map<string, string>;
   baseline(): Map<string, string> | undefined;
@@ -31,6 +36,10 @@ class AutoIndexer {
   private job?: Promise<void>;
   constructor(private ops: Operations) {}
   async tick(): Promise<void> {
+    // Expiry is server lifecycle work, not indexing consent or browser activity.
+    // It also runs while an owned job is in flight; foreground turns are protected
+    // by the conversation module's activity admission checks.
+    this.ops.expire?.(this.ops.now());
     if (this.job) return this.job;
     if (!this.ops.enabled()) { this.state.phase = 'off'; return; }
     if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
@@ -59,7 +68,12 @@ class AutoIndexer {
       if (baseline) for (const key of baseline.keys()) if (!current.has(key)) changed++;
       this.state.pending_records = changed;
       if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
-      if (changed >= BATCH) {
+      // With no active conversation, retain the strict64/no-timed-tail policy.
+      // Live conversations get the first positive delta at the minute check.
+      // Metadata/link/receipt upgrades can need a local pass with zero counter
+      // delta; this path shares the same bounded cancellation and error backoff.
+      const live = this.ops.activeConversations?.() === true;
+      if (changed >= BATCH || (live && (changed > 0 || this.ops.needsPreparation?.()))) {
         this.state.phase = 'indexing';
         await this.ops.prepare(before, signal);
         if (signal.aborted || !this.ops.enabled()) return;
@@ -93,20 +107,26 @@ export function createAutoIndexer(ops: Operations) { return new AutoIndexer(ops)
 
 const enabled = () => (getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_index'").get() as { value: string } | undefined)?.value === 'true';
 let worker: AutoIndexer | undefined, timer: NodeJS.Timeout | undefined;
+let unregisterStatus: (() => void) | undefined;
 export function startBackgroundIndexing() {
   if (timer) return;
-  worker ||= createAutoIndexer({ enabled, idle: () => !activity.busy && !activity.callActive && !historyProgress().active && !historyProgress().queued,
-    now: Date.now, scan: scanSessions, stamp: before => sourceStamps(getDb(), before), baseline: () => loadSourceCheckpoint(getDataDir()), prepare: (before, signal) => prepareHistory(before, signal, true),
+  worker ||= createAutoIndexer({ enabled, idle: () => activity.backgroundIdle && !historyProgress().active && !historyProgress().queued,
+    now: Date.now, expire: expireConversations, activeConversations: hasActiveConversations, needsPreparation: () => !historyReadiness().ready,
+    scan: scanSessions, stamp: before => sourceStamps(getDb(), before), baseline: () => loadSourceCheckpoint(getDataDir()), prepare: (before, signal) => prepareHistory(before, signal, true),
     prepareSummaries: signal => warmSummaryCache(signal, () => { if (worker) worker.state.phase = 'summarizing'; }),
     completed: at => { getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_last_completed',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at); } });
+  const owner = worker;
+  unregisterStatus = registerUpdateStatus(() => owner.state);
   timer = setInterval(() => { void worker?.tick().catch(() => {
     if (worker) { worker.state.phase = 'error'; worker.state.error = 'Background indexing is unavailable. Check server storage and settings.'; }
   }); }, CHECK_MS); timer.unref();
 }
 export async function stopBackgroundIndexing() {
   clearInterval(timer); timer = undefined;
-  const prior = worker;
+  const prior = worker, unregister = unregisterStatus;
   await Promise.all([prior?.stop(), cancelSummaryPreparation()]);
+  unregister?.();
+  if (unregisterStatus === unregister) unregisterStatus = undefined;
   if (!timer && worker === prior) worker = undefined;
 }
 export async function yieldBackgroundIndexing() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }

@@ -22,14 +22,14 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(progress).toContainText('128 unchanged passages reused');
   await expect(progress).toContainText('64 source changes waiting for local indexing');
   await expect(progress).toContainText('64 entries available for your next sync');
-  await expect(page.getByText('not yet in a sync', { exact: false })).toBeVisible();
+  await expect(page.getByText('available for a new sync', { exact: false })).toBeVisible();
   for (const width of [390, 1440]) { await page.setViewportSize({ width, height: 900 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
   for (const entries of [64, 128, 131]) {
     state = { ...state, phase: 'waiting', pending_records: entries === 131 ? 3 : 0, pending_entries: entries, last_completed_at: new Date().toISOString() };
     await expect(progress).toContainText(`${entries} entries available for your next sync`, { timeout: 8000 });
     await expect(progress).toContainText('Waiting for the next indexing batch', { timeout: 8000 });
     await expect(progress).toContainText('Last completed indexing batch:');
-    await expect(page.getByLabel('Sync tracking')).toContainText(`${entries} not yet in a sync`, { timeout: 8000 });
+    await expect(page.getByLabel('Sync tracking')).toContainText(`${entries} available for a new sync`, { timeout: 8000 });
     await expect(progress.getByRole('link')).toHaveCount(0);
     await expect(progress.getByRole('progressbar')).toHaveCount(0);
     await expect(progress).not.toContainText('model calls');
@@ -49,7 +49,7 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(dialog.getByRole('button', { name: 'Retry automatic indexing' })).toBeVisible();
   await expect(dialog).toContainText('Indexing makes no provider model calls');
   await expect(dialog).toContainText('Local embeddings use CPU, memory and disk');
-  await expect(dialog).toContainText('Calls and foreground work take priority');
+  await expect(dialog).toContainText('Replies, voice turns and foreground work take priority');
   await page.keyboard.press('Escape');
   unavailable = true; await expect(page.getByRole('status').filter({ hasText: 'Automatic indexing status is temporarily unavailable' })).toBeVisible({ timeout: 8000 });
   expect(mutations).toBe(0); expect(await page.evaluate(() => (window as any).__captures)).toBe(0);

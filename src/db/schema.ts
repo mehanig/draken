@@ -220,6 +220,9 @@ export function initSchema(database: Database.Database): void {
     snapshot_at: 'TEXT',
     model_config_json: "TEXT NOT NULL DEFAULT '{}'",
     compression_complete: 'INTEGER NOT NULL DEFAULT 0',
+    conversation_last_user_at: 'TEXT',
+    conversation_ended_at: 'TEXT',
+    conversation_before: 'TEXT',
   })) {
     if (!columns.has(name)) database.exec(`ALTER TABLE syncs ADD COLUMN ${name} ${definition}`);
   }
@@ -228,6 +231,41 @@ export function initSchema(database: Database.Database): void {
   if (!runColumns.has('request_id')) database.exec('ALTER TABLE sync_runs ADD COLUMN request_id TEXT');
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS sync_run_request ON sync_runs(request_id) WHERE request_id IS NOT NULL');
   database.prepare('UPDATE syncs SET snapshot_at = created_at WHERE snapshot_at IS NULL').run();
+  if (!columns.has('conversation_last_user_at')) {
+    // Only real user activity seeds the idle clock. Generated replies, polls,
+    // receipts and background runs are deliberately absent from this migration.
+    database.exec(`UPDATE syncs SET conversation_last_user_at=MAX(created_at,
+      COALESCE((SELECT MAX(created_at) FROM sync_messages WHERE sync_id=syncs.id AND role='user'),created_at),
+      COALESCE((SELECT MAX(m.started_at) FROM live_messages m JOIN live_calls c ON c.id=m.call_id
+        WHERE c.sync_id=syncs.id AND m.role='user' AND TRIM(m.text)!=''),created_at)) WHERE status='open'`);
+    // An already used v0.7 chat/call passed explicit history preparation. Retain
+    // a conservative cutoff even when a newer receipt format needs refreshing.
+    database.exec(`UPDATE syncs SET conversation_before=snapshot_at WHERE status='open'
+      AND briefing!='' AND compression_complete=1 AND (
+        EXISTS(SELECT 1 FROM sync_runs WHERE sync_id=syncs.id AND request_id IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM live_calls WHERE sync_id=syncs.id))`);
+    // Also preserve prepared-but-not-yet-used chats from the old read-only
+    // receipt. This is historical preparation, NOT validation of current inputs.
+    const file = path.join(getDataDir(), 'memory', 'index.sqlite');
+    let memory: Database.Database | undefined;
+    try {
+      if (fs.existsSync(file)) {
+        memory = new Database(file, { readonly: true, fileMustExist: true });
+        const raw = memory.prepare("SELECT value FROM meta WHERE key='call-history-ready-v1'").get() as { value: string } | undefined;
+        const marker = raw && raw.value.length <= 1024 ? JSON.parse(raw.value) : null;
+        if (marker && typeof marker.before === 'string' && Number.isFinite(Date.parse(marker.before))
+          && new Date(marker.before).toISOString() === marker.before && marker.before <= new Date().toISOString()
+          && typeof marker.stamp === 'string' && /^[a-f0-9]{64}$/.test(marker.stamp)
+          && typeof marker.model === 'string' && marker.model.length > 0
+          && marker.model === (memory.prepare("SELECT value FROM meta WHERE key='model'").get() as { value: string } | undefined)?.value
+          && (memory.prepare("SELECT value FROM meta WHERE key='schema'").get() as { value: string } | undefined)?.value === 'history-index-v3-contentless') {
+          database.prepare(`UPDATE syncs SET conversation_before=? WHERE status='open' AND conversation_before IS NULL
+            AND briefing!='' AND compression_complete=1 AND snapshot_at<=?`).run(marker.before, marker.before);
+        }
+      }
+    } catch { /* Missing/old caches do not prevent opening the original database. */ }
+    finally { memory?.close(); }
+  }
   migratePointers(database); migrateSnapshotPointers(database); migrateAgents(database);
   const sessionColumns = new Set((database.prepare('PRAGMA table_info(agent_sessions)').all() as { name: string }[]).map(column => column.name));
   if (!sessionColumns.has('scanned_bytes')) database.exec('ALTER TABLE agent_sessions ADD COLUMN scanned_bytes INTEGER NOT NULL DEFAULT -1');

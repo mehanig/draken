@@ -15,7 +15,7 @@ function save(key: string, value: string) {
 }
 export const summaryPreparationEnabled = () => setting('auto_summary') === 'true';
 const indexingEnabled = () => setting('auto_index') === 'true';
-const idle = () => !activity.busy && !activity.callActive && !historyProgress().active && !historyProgress().queued;
+const idle = () => activity.backgroundIdle && !historyProgress().active && !historyProgress().queued;
 interface Receipt { id: number; input_key: string; source_keys_json: string; cache_receipt_json: string; total_entries: number; completed_at: string | null }
 interface Checkpoint { keys: [string, string][]; recipe: string }
 interface Run { id: number; invocations: number; max_invocations: number }

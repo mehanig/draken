@@ -16,7 +16,7 @@ const schema = require('../dist/db/schema'), live = require('../dist/voice/live'
 let server, browser, page, timer; const errors = [];
 (async () => {
   const db = schema.getDb(), now = new Date().toISOString();
-  const syncId = Number(db.prepare('INSERT INTO syncs(created_at, snapshot_at, snapshot_version, briefing, compression_complete) VALUES (?, ?, 2, ?, 1)').run(now, now, 'The targeted export tests passed [E1]. Deployment is unverified.').lastInsertRowid);
+  const syncId = Number(db.prepare('INSERT INTO syncs(created_at, snapshot_at, snapshot_version, briefing, compression_complete, conversation_before) VALUES (?, ?, 2, ?, 1, ?)').run(now, now, 'The targeted export tests passed [E1]. Deployment is unverified.', now).lastInsertRowid);
   db.prepare('UPDATE syncs SET memory_json=? WHERE id=?').run(JSON.stringify([{sync_id:42,status:'open',snapshot_at:now,recap:'The previous call discussed a copper desk lamp; choosing a supplier remained unresolved.',decisions:'',carry_forward:''}]),syncId);
   const { frozenEvidence } = require('./fixtures/source-entry.cjs');
   const sources = [

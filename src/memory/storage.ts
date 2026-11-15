@@ -24,6 +24,7 @@ export function initHistoryStorage(db: Database.Database, fingerprint: string): 
       CREATE TABLE IF NOT EXISTS chunk_links(id INTEGER PRIMARY KEY AUTOINCREMENT,ref TEXT NOT NULL REFERENCES records(ref) ON DELETE CASCADE,offset INTEGER NOT NULL,passage_id INTEGER NOT NULL REFERENCES passages(id));
       CREATE INDEX IF NOT EXISTS links_ref ON chunk_links(ref);
       CREATE INDEX IF NOT EXISTS links_passage ON chunk_links(passage_id);
+      CREATE INDEX IF NOT EXISTS passages_incomplete ON passages(id) WHERE embedded=0;
       CREATE VIRTUAL TABLE IF NOT EXISTS passage_vectors USING vec0(embedding float[${EMBEDDING_DIMENSIONS}] distance_metric=cosine);
     `);
     if (prior === 'history-index-v1') {

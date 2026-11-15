@@ -41,6 +41,9 @@ for (const location of ['items', 'context']) {
     assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='storage_schema'").get().value, 'pointer-v2');
     assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE name='retained_text'").get().n, 0);
     const syncId = snapshot(), text = 'Synthetic original result; deployment remains unverified.';
+    // Keep admission active so these assertions exercise original verification,
+    // not the independent inactivity guard on this deliberately old snapshot.
+    db.prepare('UPDATE syncs SET conversation_last_user_at=? WHERE id=?').run(new Date().toISOString(), syncId);
     const frozen = frozenEvidence(db, directory, text, { ref: location === 'items' ? 'E1' : 'C1', timestamp: at });
     const { source_pointer, ...metadata } = frozen;
     assert.ok(source_pointer);
