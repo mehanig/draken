@@ -7,6 +7,7 @@ import { activity } from './activity';
 import { HttpError } from '../errors';
 import { historyProgress, prepareHistory } from '../memory/service';
 import type { AutoIndexSettings } from '../types';
+import { cancelSummaryPreparation, configureAutoSummary, summaryPreparationEnabled, summaryPreparationSettings, warmSummaryCache } from './summary-preparation';
 
 const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 64;
 type State = Pick<AutoIndexSettings, 'phase' | 'pending_records' | 'last_completed_at' | 'error'>;
@@ -16,12 +17,13 @@ interface Operations {
   stamp(before: string): Map<string, string>;
   baseline(): Map<string, string> | undefined;
   prepare(before: string, signal: AbortSignal): Promise<void>;
+  prepareSummaries?(signal: AbortSignal): Promise<void>;
   completed(at: string): void;
 }
 const initial = (): State => ({ phase: 'off', pending_records: 0, last_completed_at: null, error: '' });
 
-/** Automatic work only discovers and indexes history. Snapshot creation and
- * provider summarization require a user action, regardless of backlog size. */
+/** One cancellable owner for discovery, local indexing and separately opted-in
+ * paid cache preparation. It never creates snapshots or final briefings. */
 class AutoIndexer {
   state = initial();
   private retryAt = 0;
@@ -56,14 +58,23 @@ class AutoIndexer {
       for (const [key, value] of current) if (baseline?.get(key) !== value) changed++;
       if (baseline) for (const key of baseline.keys()) if (!current.has(key)) changed++;
       this.state.pending_records = changed;
-      if (changed < BATCH) { this.state.phase = 'waiting'; return; }
       if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
-      this.state.phase = 'indexing';
-      await this.ops.prepare(before, signal);
+      if (changed >= BATCH) {
+        this.state.phase = 'indexing';
+        await this.ops.prepare(before, signal);
+        if (signal.aborted || !this.ops.enabled()) return;
+        const completed = new Date(this.ops.now()).toISOString();
+        this.ops.completed(completed);
+        this.state = { phase: 'waiting', pending_records: 0, last_completed_at: completed, error: '' };
+      }
       if (signal.aborted || !this.ops.enabled()) return;
-      const completed = new Date(this.ops.now()).toISOString();
-      this.ops.completed(completed);
-      this.state = { phase: 'waiting', pending_records: 0, last_completed_at: completed, error: '' };
+      if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
+      this.state.phase = 'waiting';
+      // Summary backlog is independent of the embedding checkpoint. Its helper
+      // owns durable failure/retry state; provider failures never roll back or
+      // misreport successful local indexing.
+      try { await this.ops.prepareSummaries?.(signal); } catch { /* separate paid-work failure domain */ }
+      if (!signal.aborted) this.state.phase = 'waiting';
     } catch (error) {
       if (!signal.aborted && error instanceof HttpError && error.status === 409) {
         this.state.phase = 'paused'; this.retryAt = this.ops.now() + CHECK_MS;
@@ -84,8 +95,9 @@ const enabled = () => (getDb().prepare("SELECT value FROM sync_settings WHERE ke
 let worker: AutoIndexer | undefined, timer: NodeJS.Timeout | undefined;
 export function startBackgroundIndexing() {
   if (timer) return;
-  worker = createAutoIndexer({ enabled, idle: () => !activity.busy && !activity.callActive && !historyProgress().active && !historyProgress().queued,
+  worker ||= createAutoIndexer({ enabled, idle: () => !activity.busy && !activity.callActive && !historyProgress().active && !historyProgress().queued,
     now: Date.now, scan: scanSessions, stamp: before => sourceStamps(getDb(), before), baseline: () => loadSourceCheckpoint(getDataDir()), prepare: (before, signal) => prepareHistory(before, signal, true),
+    prepareSummaries: signal => warmSummaryCache(signal, () => { if (worker) worker.state.phase = 'summarizing'; }),
     completed: at => { getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_last_completed',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at); } });
   timer = setInterval(() => { void worker?.tick().catch(() => {
     if (worker) { worker.state.phase = 'error'; worker.state.error = 'Background indexing is unavailable. Check server storage and settings.'; }
@@ -93,13 +105,15 @@ export function startBackgroundIndexing() {
 }
 export async function stopBackgroundIndexing() {
   clearInterval(timer); timer = undefined;
-  const prior = worker; worker = undefined; await prior?.stop();
+  const prior = worker;
+  await Promise.all([prior?.stop(), cancelSummaryPreparation()]);
+  if (!timer && worker === prior) worker = undefined;
 }
-export async function yieldBackgroundIndexing() { await worker?.stop(); }
+export async function yieldBackgroundIndexing() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }
 export function autoIndexSettings(): AutoIndexSettings {
   const on = enabled();
   const last = getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_last_completed'").get() as { value: string } | undefined;
-  return { enabled: on, check_seconds: CHECK_MS / 1000, batch_records: BATCH, pending_entries: availableCount(),
+  return { enabled: on, summary_enabled: summaryPreparationEnabled(), check_seconds: CHECK_MS / 1000, batch_records: BATCH, pending_entries: availableCount(),
     ...(worker?.state || initial()), last_completed_at: worker?.state.last_completed_at || last?.value || null, ...(!on && worker?.state.phase !== 'stopping' ? { phase: 'off' as const }
       : on && (!worker || worker.state.phase === 'off') ? { phase: 'waiting' as const } : {}) };
 }
@@ -107,6 +121,14 @@ export function setAutoIndex(value: unknown): AutoIndexSettings {
   if (typeof value !== 'boolean') throw new HttpError(400, 'enabled must be a boolean');
   getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_index',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(value));
   startBackgroundIndexing();
-  if (!value) worker!.pause(); else worker!.retry();
+  if (!value) { worker!.pause(); void cancelSummaryPreparation(); } else worker!.retry();
   return autoIndexSettings();
+}
+
+export function setAutoSummary(value: unknown) {
+  configureAutoSummary(value);
+  startBackgroundIndexing();
+  worker!.pause();
+  if (value) worker!.retry();
+  return summaryPreparationSettings();
 }

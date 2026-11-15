@@ -15,11 +15,14 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  const [packed]=JSON.parse(run(['pack','--json','--ignore-scripts','--pack-destination',root]));
  const files=packed.files.map(file=>file.path);
  for(const file of files)assert.doesNotMatch(file,/(^|\/)(?:auth\.json|server-state\.json|\.env|node_modules|\.git)(?:\/|$)|\.(?:sqlite|db|jsonl|pem|key|log)$/i);
- for(const file of ['dist/cli.js','dist/npm-cli.js','runtime/pi/package-lock.json','tray/windows.ps1','tray/macos.js','voice/realtime/native.mjs','public/persona/call-poster.webp','public/persona/chat-avatar.webp','dist/memory/reconcile.js','dist/sync/reconciliation.js','dist/sync/background.js','dist/sync/answer-references.js','dist/sync/usage.js','dist/voice/history-delivery.js'])assert.ok(files.includes(file),file);
+ for(const file of ['dist/cli.js','dist/npm-cli.js','runtime/pi/package-lock.json','tray/windows.ps1','tray/macos.js','voice/realtime/native.mjs','public/persona/call-poster.webp','public/persona/chat-avatar.webp','dist/memory/reconcile.js','dist/sync/reconciliation.js','dist/sync/background.js','dist/sync/summary-preparation.js','dist/sync/answer-references.js','dist/sync/usage.js','dist/voice/history-delivery.js'])assert.ok(files.includes(file),file);
  assert.equal(files.some(file=>/^dist\/sync\/automatic\.(?:js(?:\.map)?|d\.ts(?:\.map)?)$/.test(file)),false,'Retired automatic briefing code must not ship');
  run(['install','--omit=dev','--no-audit','--no-fund',path.join(root,packed.filename)],install);
  const audit=JSON.parse(run(['audit','--omit=dev','--json'],install));assert.equal(audit.metadata.vulnerabilities.total,0);
  const app=path.join(install,'node_modules','draken'),cli=path.join(app,'dist','cli.js');
+ assert.equal(require('../package.json').version,'0.7.0');
+ assert.equal(require('../package-lock.json').version,'0.7.0');
+ assert.equal(require('../package-lock.json').packages[''].version,'0.7.0');
  assert.equal(require(path.join(app,'package.json')).version,require('../package.json').version,'Installed tarball must match the release manifest');
  const command=args=>execFileSync(process.execPath,[cli,...args],{env,encoding:'utf8',timeout:15000});
  assert.equal(JSON.parse(command(['voice','status'])).readyForProbe,false);
@@ -39,11 +42,16 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  const automatic=await(await fetch(url+'/api/settings/auto-index')).json();assert.equal(automatic.enabled,true,'Fresh production installs enable local indexing only');
  assert.equal(automatic.phase,'waiting');assert.equal(automatic.batch_records,64);
  for(const key of ['sync_id','ready_sync_id','progress'])assert.equal(Object.hasOwn(automatic,key),false,'Indexing must not expose automatic briefing ownership');
+ for(let i=0;i<2;i++){
+  const response=await fetch(url+'/api/settings/auto-summary');assert.equal(response.status,200);
+  const summaries=await response.json();assert.equal(summaries.enabled,false,'Metadata GETs must leave the NEW paid opt-in disabled despite auto_index=true');
+ }
  child.kill('SIGTERM');await Promise.race([exited,pause(10000).then(()=>{throw Error('Packed server did not stop');})]);child=undefined;
  const Database=require(path.join(install,'node_modules','better-sqlite3')),db=new Database(path.join(state,'draken.db'),{readonly:true});
  try{
-  for(const table of ['agent_sessions','syncs','sync_items','sync_runs','sync_messages','sync_coverage','live_calls'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
+  for(const table of ['agent_sessions','syncs','sync_items','sync_runs','sync_messages','sync_coverage','live_calls','background_runs','summary_cache','sync_tree_nodes'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
   assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_index'").get().value,'true');
+  assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary'").get()?.value??'false','false','Fresh paid consent stays off after settings GETs; no provider preparation rows are created');
   for(const key of ['auto_prepare_conversations','auto_preparing_sync','auto_briefing_failed'])assert.equal(db.prepare('SELECT value FROM sync_settings WHERE key=?').get(key),undefined);
  }finally{db.close();}
  assert.equal(fs.existsSync(path.join(state,'memory','model')),false);

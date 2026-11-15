@@ -133,6 +133,28 @@ export function initSchema(database: Database.Database): void {
       completed_at TEXT
     );
     CREATE INDEX IF NOT EXISTS sync_runs_sync ON sync_runs(sync_id, id);
+    -- Paid cache preparation has no snapshot, reservation or coverage identity.
+    CREATE TABLE IF NOT EXISTS background_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      status TEXT NOT NULL DEFAULT 'running',
+      stage TEXT NOT NULL DEFAULT 'Planning',
+      summary_model TEXT NOT NULL,
+      final_model TEXT NOT NULL,
+      invocations INTEGER NOT NULL DEFAULT 0,
+      max_invocations INTEGER NOT NULL,
+      processed_entries INTEGER NOT NULL DEFAULT 0,
+      total_entries INTEGER NOT NULL,
+      cache_hits INTEGER NOT NULL DEFAULT 0,
+      error TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      metrics_json TEXT NOT NULL DEFAULT '[]',
+      input_key TEXT NOT NULL,
+      source_keys_json TEXT NOT NULL DEFAULT '{}',
+      cache_receipt_json TEXT NOT NULL DEFAULT '[]',
+      failure_events_json TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE INDEX IF NOT EXISTS background_runs_input ON background_runs(input_key, id);
     CREATE TABLE IF NOT EXISTS voice_calls (
       id TEXT PRIMARY KEY,
       sync_id INTEGER NOT NULL REFERENCES syncs(id),
@@ -213,6 +235,8 @@ export function initSchema(database: Database.Database): void {
     const seed = database.prepare('INSERT INTO sync_settings(key,value) VALUES (?,?)');
     seed.run('auto_index', 'true');
   }
+  // An absent auto_summary preference means false. Never seed paid consent from
+  // auto_index or the retired automatic-conversation preference on upgrades.
   // Preserve the saved indexing choice while withdrawing the retired permission
   // to create snapshots and spend provider quota in the background.
   database.exec(`INSERT OR IGNORE INTO sync_settings(key,value)

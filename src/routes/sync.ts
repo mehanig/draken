@@ -7,9 +7,10 @@ import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
 import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
-import { autoIndexSettings, setAutoIndex, yieldBackgroundIndexing } from '../sync/background';
+import { autoIndexSettings, setAutoIndex, setAutoSummary, yieldBackgroundIndexing } from '../sync/background';
 import { callReadiness, prepareCall } from '../sync/preparation';
 import { preparationUsage } from '../sync/usage';
+import { summaryPreparationSettings } from '../sync/summary-preparation';
 import { activity } from '../sync/activity';
 
 const router = Router();
@@ -32,6 +33,11 @@ router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettin
 router.patch('/settings/auto-index', route((req, res) => {
   if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => key !== 'enabled')) throw new HttpError(400, 'Only boolean enabled is accepted');
   res.json(setAutoIndex(req.body.enabled));
+}));
+router.get('/settings/auto-summary', route((_req, res) => res.json(summaryPreparationSettings())));
+router.patch('/settings/auto-summary', route(async (req, res) => {
+  if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || Object.keys(req.body).some(key => key !== 'enabled')) throw new HttpError(400, 'Only boolean enabled is accepted');
+  res.json(await setAutoSummary(req.body.enabled));
 }));
 router.use((req, _res, next) => {
   if (['POST', 'PATCH', 'DELETE'].includes(req.method)) void yieldBackgroundIndexing().then(() => next(), next);

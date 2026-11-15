@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),DB=require('better-sqlite3');
 const {preparationUsage}=require('../dist/sync/usage');
 const now=Date.parse('2026-01-15T12:30:00.000Z');
-function fixture(){const d=new DB(':memory:');d.exec('CREATE TABLE sync_runs(id INTEGER PRIMARY KEY,sync_id INTEGER,question TEXT,status TEXT,started_at TEXT,completed_at TEXT,invocations INTEGER,metrics_json TEXT,total_entries INTEGER)');return d;}
+function fixture(){const d=new DB(':memory:');d.exec('CREATE TABLE sync_runs(id INTEGER PRIMARY KEY,sync_id INTEGER,question TEXT,status TEXT,started_at TEXT,completed_at TEXT,invocations INTEGER,metrics_json TEXT,total_entries INTEGER); CREATE TABLE background_runs(id INTEGER PRIMARY KEY,status TEXT,started_at TEXT,completed_at TEXT,invocations INTEGER,metrics_json TEXT,failure_events_json TEXT)');return d;}
 function metric(at,cost,complete=true){return{started_at:at,status:'completed',accounting:{source:'pi-usage/catalog-pricing',cost_usd:cost,complete}};}
 function run(d,id,sync,start,end,metrics,extra={}){const r={question:null,status:'completed',invocations:metrics.length,entries:64,...extra};d.prepare('INSERT INTO sync_runs VALUES (?,?,?,?,?,?,?,?,?)').run(id,sync,r.question,r.status,start,end,r.invocations,JSON.stringify(metrics),r.entries);}
 test('usage bins count first successful snapshots once and include retry costs, unknown usage and legacy timing',()=>{
