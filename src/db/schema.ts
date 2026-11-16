@@ -104,6 +104,33 @@ export function initSchema(database: Database.Database): void {
       output_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    -- Complete verified leaf boundaries, independent of snapshot/transport labels.
+    -- input_json contains frozen original pointers, not transcript text.
+    CREATE TABLE IF NOT EXISTS summary_leaf_inputs (
+      key TEXT PRIMARY KEY,
+      model TEXT NOT NULL,
+      recipe TEXT NOT NULL,
+      batch INTEGER NOT NULL,
+      input_json TEXT NOT NULL,
+      output_hash TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS summary_leaf_inputs_model ON summary_leaf_inputs(model);
+    -- Planning context is immutable; extra citation dependencies are not planner inputs.
+    CREATE TABLE IF NOT EXISTS summary_planning_context (
+      sync_id INTEGER PRIMARY KEY REFERENCES syncs(id), refs_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS summary_leaf_plans (
+      identity TEXT PRIMARY KEY, keys_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS summary_replay_attempts (
+      identity TEXT PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS summary_pending_plans (
+      identity TEXT PRIMARY KEY, inputs_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS summary_parent_inputs (
+      key TEXT PRIMARY KEY, children_json TEXT NOT NULL, compact INTEGER NOT NULL, label TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS sync_tree_nodes (
       sync_id INTEGER NOT NULL REFERENCES syncs(id),
       key TEXT NOT NULL,
@@ -225,6 +252,11 @@ export function initSchema(database: Database.Database): void {
     conversation_before: 'TEXT',
   })) {
     if (!columns.has(name)) database.exec(`ALTER TABLE syncs ADD COLUMN ${name} ${definition}`);
+  }
+  const nodeColumns = new Set((database.prepare('PRAGMA table_info(sync_tree_nodes)').all() as { name: string }[]).map(column => column.name));
+  if (!nodeColumns.has('last_run_id')) {
+    database.exec(`ALTER TABLE sync_tree_nodes ADD COLUMN last_run_id INTEGER;
+      UPDATE sync_tree_nodes SET last_run_id=(SELECT MAX(id) FROM sync_runs WHERE sync_id=sync_tree_nodes.sync_id)`);
   }
   const runColumns = new Set((database.prepare('PRAGMA table_info(sync_runs)').all() as { name: string }[]).map(column => column.name));
   if (!runColumns.has('metrics_json')) database.exec("ALTER TABLE sync_runs ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '[]'");

@@ -5,7 +5,7 @@ async function fixture(page: Page, delayFull = false) {
   const state = { last_user_at: new Date().toISOString(), expires_at: new Date(Date.now() + 1800000).toISOString(),
     ended_at: null as string | null, history_before: before, available_before: before, update_state: 'up_to_date', error: '' };
   const sync = { id: 90001, status: 'open', busy: false, briefing: 'The initial briefing stays unchanged.',
-    created_at: before, completed_at: null, decisions: '', carry_forward: '', item_count: 0, remaining_count: 0,
+    created_at: before, completed_at: null, decisions: '', carry_forward: '', item_count: 0, remaining_count: 0, previously_included_count: 0,
     snapshot_version: 2, snapshot_at: before, recap: '', recap_state: 'empty', recap_error: '', aggregation_cost: null,
     items: [], context: [], memory: [], history_since: null, models: { summary: 'openai/gpt-5-mini', final: 'openai/gpt-5', max_invocations: 30 },
     tree: { complete: true, busy: false, run: null, nodes: [] }, conversation: state,
@@ -62,6 +62,16 @@ test('live status is small and read-only; pending updates do not block chat, ove
   page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Start a new sync', exact: true }).click();
   await expect(page).toHaveURL('/');
   const reads = observed.reads; await page.clock.runFor(9000); expect(observed.reads).toBe(reads);
+  expect(observed.mutations).toEqual([]);
+});
+
+test('snapshot totals distinguish carried unreviewed entries from newly included work without starting preparation', async ({ page }) => {
+  const { sync, observed } = await fixture(page);
+  sync.item_count = 12; sync.previously_included_count = 8;
+  await page.reload();
+  await expect(page.getByLabel('Snapshot carry-forward')).toContainText('4 newly included · 8 carried forward (unreviewed at capture)');
+  await expect(page.getByLabel('Snapshot carry-forward')).toContainText('Valid cached summaries and embeddings are reused');
+  await expect(page.getByLabel('Snapshot carry-forward')).toContainText('missing or changed work still needs preparation');
   expect(observed.mutations).toEqual([]);
 });
 

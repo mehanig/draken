@@ -11,6 +11,17 @@ export function sourceKey(item: Evidence): string {
   return `K${digest(JSON.stringify([item.event_key, item.text])).slice(0, 20)}`;
 }
 
+/** Canonical citations use E first, then the first known C. Extra physical
+ * dependencies remain separately stored/verified; they never replace a ref. */
+export function sourceRepresentatives(items: readonly Evidence[], context: readonly Evidence[] = []): Map<string, Evidence> {
+  const sources = new Map<string, Evidence>();
+  for (const item of [...items, ...context]) {
+    const key = sourceKey(item);
+    if (!sources.has(key)) sources.set(key, item);
+  }
+  return sources;
+}
+
 export type NormalizationVersion = 1 | 2;
 /** Version 1 is read-only compatibility for existing evidence, never new imports.
  * Keep these recipes stable: pointers must reconstruct exactly their old view.

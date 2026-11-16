@@ -1,6 +1,6 @@
 import { getDb } from '../db/schema';
 import { Evidence, SyncDetail } from '../types';
-import { cleanText, sourceKey } from './normalize';
+import { cleanText, sourceKey, sourceRepresentatives } from './normalize';
 import { assertEvidenceAvailable, configureModels, getSync, requireOpen } from './store';
 import { activity } from './activity';
 import { HttpError } from '../errors';
@@ -46,7 +46,7 @@ function excerpt(text: string, max: number): string {
 }
 
 function finalInput(sync: SyncDetail, tree: SummaryTree, roots: SummaryNode[], question?: string) {
-  const sources = new Map([...sync.context, ...sync.items].map(item => [sourceKey(item), item]));
+  const sources = sourceRepresentatives(sync.items, sync.context);
   const primary = new Set(sync.items.map(sourceKey));
   const canonical = tree.finalSummaries(roots);
   const cited = [...new Set(roots.flatMap(node => node.summary.observations.flatMap(item => item.evidence)))];
@@ -139,8 +139,10 @@ export async function generateReply(id: number, question?: string, requestId?: s
       }
       return result;
     })();
-    db.prepare('DELETE FROM sync_tree_nodes WHERE sync_id = ?').run(id);
+    // Retain old node/input associations for output-only cache recovery. Node
+    // registration tags the current run for display without erasing provenance.
     const tree = new SummaryTree(sync, runId, controller.signal);
+    await tree.beforePreparation();
     if (!question) {
       const view = db.prepare('SELECT memory_inputs_json FROM sync_presentations WHERE sync_id=? AND request_id IS NOT NULL').get(id) as { memory_inputs_json: string } | undefined;
       if (view) {
@@ -192,7 +194,10 @@ export async function generateReply(id: number, question?: string, requestId?: s
     const payload = { ...references.encode({ ...input.payload, ...(archive ? { historical_evidence: JSON.parse(archive.text), recent_call_transcripts: calls } : {}) }) as Record<string, unknown>,
       reference_labels: references.labels };
     const prompt = `${systemPrompt}\n${question ? chatStyle : briefingStyle}`;
+    await tree.beforeFinal();
+    verifiedSnapshot();
     let draft = cleanText(await tree.call(payload, prompt, true), 60000);
+    tree.verifyFinal();
     verifiedSnapshot();
     let answer = references.decode(draft);
     const aliases = [...input.payload.verification_evidence, ...input.payload.retrieved_evidence];
@@ -203,16 +208,21 @@ export async function generateReply(id: number, question?: string, requestId?: s
       // One correction total for citation membership AND later-evidence gaps.
       // Keep the same wire labels across both calls. Raw rejected drafts are
       // never persisted; unknown labels are not guessed, dropped or admitted.
+      await tree.beforeFinal();
+      verifiedSnapshot();
       draft = cleanText(await tree.call({ ...payload, repair: true, reconciliation_repair: {
         instruction: 'Correct reference membership and later-evidence gaps together. Cite only labels in reference_labels, exactly as supplied. Reconcile the sub-tasks with the supplied later reports, or remove unsupported status claims. Do not merely append citations, invent labels or assume candidates prove completion. Keep the same response style and user-requested level of detail; correct the wording concisely rather than expanding into a report. Return only the corrected answer.',
         citation_issue: issue, gaps: references.encode(gaps), draft,
       } }, prompt, true), 60000);
+      tree.verifyFinal();
+      verifiedSnapshot();
       answer = references.decode(draft);
     }
     validateVerdict(answer, input.allowedRefs);
     if (reconciliationGaps(answer, archive, aliases).length) throw new HttpError(502, 'The answer did not reconcile its cited checkpoint with the supplied later reports. No answer was saved. Retry with a specific project or feature question.');
     if (controller.signal.aborted) throw new HttpError(409, 'Generation cancelled');
     db.transaction(() => {
+      tree.verifyFinal();
       verifiedSnapshot();
       invalidateRecap(id);
       if (question) {
