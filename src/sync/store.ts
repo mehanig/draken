@@ -3,7 +3,7 @@ import { Evidence, HomeOverview, ObservedSession, Overview, SyncDetail, SyncMode
 import { EntryReader } from './source-files';
 import { getSessionRoot } from './jsonl';
 import { EvidenceReader } from '../db/evidence';
-import { cleanText, sourceKey } from './normalize';
+import { cleanText, sourceKey, sourceRepresentatives } from './normalize';
 import { aggregationCost } from './cost';
 import { recapInput, invalidateRecap, type RecapInput } from './recap';
 import { admittedAgent, agentSources, AGENTS } from '../sources/registry';
@@ -94,7 +94,7 @@ export function getProgress(id: number): TreeProgress {
   const run = db.prepare(`SELECT id, status, stage, summary_model, final_model, invocations, max_invocations,
     processed_entries, total_entries, cache_hits, error, question, request_id, started_at, completed_at, metrics_json
     FROM sync_runs WHERE sync_id = ? ORDER BY id DESC LIMIT 1`).get(id) as (Omit<TreeRun, 'metrics'> & { metrics_json: string }) | undefined;
-  const nodes = (db.prepare('SELECT key, kind, label, status, children_json, source_count, error FROM sync_tree_nodes WHERE sync_id = ? ORDER BY rowid').all(id) as any[])
+  const nodes = (db.prepare('SELECT key, kind, label, status, children_json, source_count, error FROM sync_tree_nodes WHERE sync_id = ? AND last_run_id IS ? ORDER BY rowid').all(id, run?.id ?? null) as any[])
     .map(({ children_json, ...node }) => ({ ...node, children: JSON.parse(children_json) })) as TreeNode[];
   const { metrics_json, ...fields } = run || { metrics_json: '[]' };
   return { busy: activity.jobActive(id), complete: Boolean(sync.compression_complete),
@@ -110,7 +110,10 @@ export function getSync(id: number): SyncDetail {
   try {
     const items = (db.prepare('SELECT evidence_json FROM sync_items WHERE sync_id = ? ORDER BY rowid').all(id) as any[]).map(item => reader.read(item.evidence_json, true));
     return {
-      ...row, conversation: conversationStatus(id), aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
+      ...row, previously_included_count: (db.prepare(`SELECT COUNT(*) AS n FROM sync_items current
+        WHERE current.sync_id=? AND EXISTS (SELECT 1 FROM sync_items previous
+          WHERE previous.event_key=current.event_key AND previous.sync_id<current.sync_id)`).get(id) as { n: number }).n,
+      conversation: conversationStatus(id), aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
       messages: db.prepare('SELECT id, role, content, created_at FROM sync_messages WHERE sync_id = ? ORDER BY id').all(id) as SyncDetail['messages'],
       busy: activity.jobActive(id), history_since: historySince(),
       models: { ...defaultModels(), ...JSON.parse(extra.model_config_json) }, tree: getProgress(id),
@@ -283,7 +286,7 @@ export function getTreeNode(id: number, key: string) {
   if (!node) throw new HttpError(404, 'Completed summary node not found');
   const sync = getSync(id);
   return { kind: node.kind, label: node.label, output: JSON.parse(node.output_json),
-    refs: Object.fromEntries([...sync.items, ...sync.context].map(item => [sourceKey(item), item.ref])) };
+    refs: Object.fromEntries([...sourceRepresentatives(sync.items, sync.context)].map(([key, item]) => [key, item.ref])) };
 }
 
 export function recoverInterruptedRuns(): void {

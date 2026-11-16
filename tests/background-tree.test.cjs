@@ -111,17 +111,17 @@ test('oversized recursively split batches retain every closed prefix, in backgro
   LUNA_BATCH.plannedRequestTokens = 14000;
   try {
     const data = session(170, { width: 1200 }), first = await input(), job = preparation(first);
-    const firstSpecs = job.tree.batchSpecs(); assert.ok(firstSpecs.length >= 3, 'force repeated wire-budget splitting');
+    const firstSpecs = await job.tree.batchSpecs(); assert.ok(firstSpecs.length >= 3, 'force repeated wire-budget splitting');
     await job.tree.build(); const before = calls().length;
-    append(data, 17); const next = await input(), second = preparation(next), nextSpecs = second.tree.batchSpecs();
-    assert.deepEqual(nextSpecs.slice(0, firstSpecs.length - 1).map(spec => spec.key), firstSpecs.slice(0, -1).map(spec => spec.key));
+    append(data, 17); const next = await input(), second = preparation(next), nextSpecs = await second.tree.batchSpecs();
+    assert.deepEqual(nextSpecs.slice(0, firstSpecs.length).map(spec => spec.key), firstSpecs.map(spec => spec.key));
     await second.tree.build();
     const newLeaves = calls().slice(before).filter(call => call.stage === 'chunk');
-    const oldClosedSources = firstSpecs.slice(0, -1).reduce((n, spec) => n + spec.sources.length, 0);
+    const oldClosedSources = firstSpecs.reduce((n, spec) => n + spec.sources.length, 0);
     assert.equal(newLeaves.reduce((n, call) => n + call.input.evidence.length, 0), next.items.length - oldClosedSources);
     untouched(187);
     const sync = store.startSync(), foreground = new SummaryTree(sync, 0, new AbortController().signal);
-    assert.deepEqual(foreground.batchSpecs().map(spec => spec.key), nextSpecs.map(spec => spec.key));
+    assert.deepEqual((await foreground.batchSpecs()).map(spec => spec.key), nextSpecs.map(spec => spec.key));
     store.configureModels(sync.id, { ...sync.models, max_invocations: 1 });
     const finalBefore = calls().length; await generateReply(sync.id);
     assert.equal(calls().length - finalBefore, 1); assert.equal(calls().at(-1).task, 'final_verdict');
@@ -145,14 +145,18 @@ test('receipt keys cover content, provenance, context, every model setting and r
   untouched(3); assert.equal(getDb().prepare('SELECT count(*) n FROM background_runs').get().n, 0);
 });
 
-test('content/context/summary-model edits recompute leaves; changing only final model invalidates receipt but reuses summaries', async () => {
-  session(3); const value = await input(); value.context = [{ ...value.items[0], ref: 'C1', text: 'Earlier context' }];
+test('unverified content/context edits fail closed; summary-model changes recompute and final-only changes reuse', async () => {
+  session(3); const value = await input(); value.context = [{ ...value.items.shift(), ref: 'C1' }];
   await preparation(value).tree.build();
-  for (const mutate of [v => v.items[0].text += ' changed', v => v.context[0].text += ' changed', v => v.models.summary = 'test/other']) {
+  for (const mutate of [v => v.items[0].text += ' changed', v => v.context[0].text += ' changed']) {
     const changed = structuredClone(value); mutate(changed); const before = calls().length;
-    const job = preparation(changed); await job.tree.build();
-    assert.ok(calls().slice(before).some(call => call.stage === 'chunk')); assert.equal(job.row().processed_entries, 3);
+    const job = preparation(changed);
+    await assert.rejects(job.tree.build(), /unavailable|changed/);
+    assert.equal(calls().length, before); assert.equal(job.row().processed_entries, 0);
   }
+  const other = structuredClone(value); other.models.summary = 'test/other';
+  const modelBefore = calls().length; await preparation(other).tree.build();
+  assert.ok(calls().slice(modelBefore).some(call => call.stage === 'chunk'));
   const changed = structuredClone(value); changed.models.final = 'test/other';
   const before = calls().length; const job = preparation(changed); await job.tree.build();
   assert.equal(calls().length, before); assert.ok(job.row().cache_hits); untouched(3);

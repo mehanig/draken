@@ -117,6 +117,8 @@ interface SyncMessage {
 }
 
 export interface SyncDetail extends SyncSummary {
+  /** Included in earlier snapshots, not a claim of completed preparation or review. */
+  previously_included_count?: number;
   conversation: ConversationState;
   items: Evidence[];
   context: Evidence[];

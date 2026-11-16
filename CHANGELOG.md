@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.1
+
+### Carry unreviewed entries forward without repeating completed work
+
+- Preserve validated completed summary batches across snapshot rollover, append-only tails, cancellation and restart instead of rebuilding their input boundaries. Legacy output-only caches require exact reconstruction from verified originals; citations alone are never evidence of complete batch coverage.
+- Keep unreviewed entries in subsequent snapshots. Neither conversation expiry nor cached preparation marks them reviewed. Show newly included versus previously included entries separately from preparation status.
+- Add lifecycle regressions proving unchanged corpus embeddings and existing history references survive combined snapshots and restart. Original verification and new alias metadata remain required; they do not recompute existing vectors.
+- A new combined reconciliation or final briefing can still require explicit provider work. This does not resume cancelled runs or enable paid background preparation.
+
 ## 0.8.0
 
 ### Live history without rewriting the sync

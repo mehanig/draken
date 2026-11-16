@@ -6,7 +6,7 @@ const root=path.join(__dirname,'../site');
 const version=require('../package.json').version,anchor=version.replaceAll('.','');
 test('public release copy and documentation match the npm version',()=>{
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
- assert.equal(version,'0.8.0');
+ assert.equal(version,'0.8.1');
  const lock=require('../package-lock.json');assert.equal(lock.version,version);assert.equal(lock.packages[''].version,version);
  require('../scripts/site-release.cjs').validateCopy(version,html);
  assert.ok(html.includes(`Version ${version} / Available on npm`));
@@ -93,8 +93,8 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.match(preparation,/bounded invocation allowance and no provider\/model fallback/);
   assert.match(preparation,/Once-minute idle checks.*at least 64 new or changed eligible records, independently of the embedding checkpoint/);
   assert.match(preparation,/Unchanged prepared input makes no further calls/);
-  assert.match(preparation,/Closed chunks are reused across appends/);
-  assert.match(preparation,/unfinished session tails and reconciliation can still need work at Start chat/);
+  assert.match(preparation,/Completed batches, including completed partial tails, are reused across appends and combined snapshots/);
+  assert.match(preparation,/Uncovered or changed input and reconciliation for a different combined input can still need work at Start chat/);
   assert.match(preparation,/final briefing is always explicit.*not an instant-chat promise/);
   assert.match(preparation,/Foreground work cancels and waits for owned background provider work to stop/);
   assert.match(preparation,/Disabling either switch stops paid background work and preserves valid cache/);

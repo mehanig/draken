@@ -131,7 +131,7 @@ test('new caches survive reference renumbering and allow a final-only one-call b
   assert.match(result.briefing, /\[E10\d+\]/); unchanged(second, 600);
 });
 
-test('appending source history reuses closed large batches and changes only the tail', async () => {
+test('appending source history retains every completed batch and summarizes only the new tail entries', async () => {
   const data = session(1305); const first = await start(); await generateReply(first.id);
   const firstLeaves = calls().filter(call => call.stage === 'chunk').length; assert.ok(firstLeaves > 1);
   store.discardSync(first.id); const count = calls().length;
@@ -139,7 +139,9 @@ test('appending source history reuses closed large batches and changes only the 
   fs.appendFileSync(data.file, JSON.stringify({ type: 'message', id: `${data.id}-${n}`, parentId: `${data.id}-${n - 1}`, timestamp: '2026-01-02T00:00:00.000Z',
     message: { role: 'assistant', content: [{ type: 'text', text: 'NEW TAIL: deployment still NOT checked.' }] } }) + '\n');
   const second = await start(), result = await generateReply(second.id);
-  assert.equal(calls().slice(count).filter(call => call.stage === 'chunk').length, 1); assert.ok(result.tree.run.cache_hits >= firstLeaves - 1);
+  const newLeaves = calls().slice(count).filter(call => call.stage === 'chunk');
+  assert.equal(newLeaves.length, 1); assert.ok(result.tree.run.cache_hits > 0);
+  assert.deepEqual(newLeaves[0].input.evidence.map(item => item.text), ['NEW TAIL: deployment still NOT checked.'], 'a completed partial tail is not sent for leaf summarization again');
   assert.match(result.briefing, /NEW TAIL/); unchanged(second, 1306);
 });
 
