@@ -1,4 +1,4 @@
-import type { ConversationState, PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, SummaryPreparationSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
+import type { Evidence, ConversationState, PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, SummaryPreparationSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
 import { authorizationHeaders, clearSession } from '../auth/session';
@@ -36,6 +36,7 @@ export const scan = () => request<ScanResult>('/scan', 'POST');
 export const enableAgent = (agent: string, enabled: boolean) => request<Overview>(`/agents/${encodeURIComponent(agent)}`, 'PATCH', { enabled });
 export const include = (id: string, included: boolean) => request<Overview>(`/sessions/${encodeURIComponent(id)}`, 'PATCH', { included });
 export const sync = (id: number) => request<SyncDetail>(`/syncs/${id}`);
+export const evidenceExcerpt = (id: number, ref: string, offset: number, signal?: AbortSignal) => request<{ item: Evidence; total: number; offset: number }>(`/syncs/${id}/evidence?${new URLSearchParams({ ref, offset: String(offset) })}`, 'GET', undefined, signal);
 export const conversationStatus = (id: number, signal?: AbortSignal) => request<ConversationState>(`/syncs/${id}/conversation`, 'GET', undefined, signal);
 export const progress = (id: number) => request<TreeProgress>(`/syncs/${id}/progress`);
 export const callReadiness = (id: number, signal?: AbortSignal) => request<CallReadiness>(`/syncs/${id}/call-readiness`, 'GET', undefined, signal);

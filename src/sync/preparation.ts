@@ -49,7 +49,7 @@ export function prepareCall(id: number) {
     if (failed.size >= 128) failed.delete(failed.keys().next().value!);
     failed.set(id, controller.signal.aborted ? 'History preparation stopped. Completed work is kept.' : 'History could not be prepared. Check the original session files, then retry. Completed work is kept.');
   }).finally(() => { if (jobs.get(id) === job) jobs.delete(id); release(); expireConversations(); });
-  return getSync(id);
+  return getSync(id, false);
 }
 
 export async function prepareCallAndWait(id: number) {

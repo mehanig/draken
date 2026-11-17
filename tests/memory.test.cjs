@@ -81,10 +81,32 @@ test('prepared-only voice searches never embed missing passages and still verify
   const page=index.read(found.results[0].ref,0,before);assert.ok(page.neighbors.every(row=>row.at<=before));
   assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes,'prepared source reads do not add corpus records');
   entry('Another older passage needing preparation.');const count=model.calls;
-  await assert.rejects(index.search({question:'speech',before},undefined,true),/preparation/);assert.equal(model.calls,count);
+  const retained=await index.search({question:'speech',before},undefined,true);
+  assert.ok(retained.results.length);assert.ok(retained.results.every(row=>!row.text.includes('Another older passage')));assert.equal(model.calls,count+1);
   await index.prepare();const file=db.prepare("SELECT path FROM agent_sessions WHERE id='session-a'").get().path;
   fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace('Whisper','Changed'));
-  const preparedCalls=model.calls;await assert.rejects(index.search({question:'speech',before},undefined,true));assert.equal(model.calls,preparedCalls);
+  const preparedCalls=model.calls;await assert.rejects(index.search({question:'speech',before},undefined,true));assert.equal(model.calls,preparedCalls+1,'only query inference precedes selected-original validation');
+});
+
+test('prepared frozen references do not depend on mutable current entry row IDs',async()=>{
+  entry('Frozen original: deployment unverified.');
+  const snapshot=require('../dist/sync/store').startSync();await index.prepare();
+  const {ref}=cache.prepare("SELECT ref FROM records WHERE sync_id=? AND json_extract(json,'$.kind')='snapshot'").get(snapshot.id);
+  db.prepare('DELETE FROM agent_entries').run();
+  assert.match(index.read(ref,0,new Date().toISOString()).record.text,/Frozen original: deployment unverified/);
+});
+
+test('prepared search and source reads resolve selected records only, without corpus scans or writes',async t=>{
+  for(let i=0;i<240;i++)entry(`Whisper report ${i}: deployment unverified.`);
+  await index.prepare();const before=new Date().toISOString(),embedded=model.calls;
+  const changes=[db,cache].map(handle=>handle.prepare('SELECT total_changes() n').get().n);
+  const sources=require('../dist/memory/sources'),original=sources.historySources;let reads=0;
+  t.mock.method(index,'prepare',()=>{throw Error('Unexpected index preparation');});
+  t.mock.method(sources,'historySources',function(...args){assert.ok(args[4]?.ref,'Unbounded original enumeration');reads++;return original(...args);});
+  const found=await index.search({question:'Whisper',kind:'sources',before},undefined,true);
+  assert.equal(found.results.length,8);assert.equal(reads,8);assert.equal(model.calls,embedded+1);
+  reads=0;assert.equal(index.read(found.results[0].ref,0,before).record.ref,found.results[0].ref);assert.ok(reads<=3);
+  assert.deepEqual([db,cache].map(handle=>handle.prepare('SELECT total_changes() n').get().n),changes);
 });
 
 test('missing model files are restored before calling, while prepared-only lookup forbids downloads',async()=>{

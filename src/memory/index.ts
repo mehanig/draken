@@ -148,25 +148,22 @@ export class HistoryIndex {
     commit(); notify('indexing'); this.refresh(false);
     finish();
   }
-  /** Voice can verify and query prepared passages, never build a missing corpus.
-   * Fresh original-byte/projection checks remain mandatory; the ready receipt
-   * only controls scheduling, not source authority. No derived writes here. */
-  private assertPrepared(scope: Partial<HistoryQuery>, report?: ReportHistory) {
-    report?.(historyUpdate('scanning'));
-    const current = new Map<string, SourceRecord>();
-    const chunks = this.db.prepare('SELECT c.offset,p.hash,p.embedded FROM chunk_links c JOIN passages p ON p.id=c.passage_id WHERE c.ref=? ORDER BY c.offset');
-    for (const record of historySources(this.source, this.root, this.normalized, scope)) {
-      if (!this.admitted(record, scope)) continue;
-      const rows = chunks.all(record.ref) as { offset: number; hash: string; embedded: number }[];
-      let count = 0;
-      for (const { offset, hash } of passages(record, this.model.fingerprint)) {
-        const row = rows[count++];
-        if (!row || row.offset !== offset || row.hash !== hash || row.embedded !== 1) throw new Error('History needs preparation before calling.');
-      }
-      if (rows.length !== count) throw new Error('Prepared history changed.');
-      current.set(record.ref, record);
+  /** Resolve only selected prepared records. No corpus scan or index writes. */
+  private loadPrepared(ref: string, scope: Partial<HistoryQuery>) {
+    if (this.current.has(ref)) return true;
+    const cached = this.db.prepare('SELECT json FROM records WHERE ref=?').get(ref) as { json: string } | undefined;
+    if (!cached) return false;
+    const metadata: SourceRecord = JSON.parse(cached.json);
+    if (!this.admitted(metadata, scope)) return false;
+    for (const record of historySources(this.source, this.root, this.normalized, scope, metadata)) {
+      if (record.ref !== ref) continue;
+      const rows = this.db.prepare('SELECT c.offset,p.hash,p.embedded FROM chunk_links c JOIN passages p ON p.id=c.passage_id WHERE c.ref=? ORDER BY c.offset').all(ref) as { offset: number; hash: string; embedded: number }[];
+      const expected = [...passages(record, this.model.fingerprint)];
+      if (rows.length !== expected.length || rows.some((row, i) => row.offset !== expected[i].offset || row.hash !== expected[i].hash || row.embedded !== 1)) return false;
+      this.current.set(ref, record);
+      return true;
     }
-    this.current = current;
+    return false;
   }
   private async ensureModel(report?: ReportHistory, allowDownload = true) {
     if (!this.modelPrepared || !this.model.ready()) { await this.model.setup(report, allowDownload); this.modelPrepared = true; }
@@ -197,8 +194,7 @@ export class HistoryIndex {
     return { sql: conditions.length ? ' AND ' + conditions.join(' AND ') : '', args };
   }
   async search(query: HistoryQuery, report?: ReportHistory, preparedOnly = false): Promise<HistoryResults> {
-    if (preparedOnly) this.assertPrepared(query, report);
-    else await this.prepare(query, report);
+    if (!preparedOnly) await this.prepare(query, report);
     report?.(historyUpdate('searching'));
     const filter = this.filter(query);
     const any = this.db.prepare(`SELECT 1 FROM chunks c JOIN records r ON r.ref=c.ref WHERE 1=1 ${filter.sql} LIMIT 1`).get(...filter.args);
@@ -210,16 +206,31 @@ export class HistoryIndex {
     for (const question of searches) embeddings.push(await this.model.embed(cleanText(question, 2000), true));
     // Prune exclusions/edits again after inference without admitting unembedded
     // arrivals. All returned candidates have both lexical and semantic coverage.
-    if (preparedOnly) this.assertPrepared(query, report);
+    if (preparedOnly) this.current.clear();
     else this.refresh(false);
+    const metadata = new Map<string, SourceRecord>();
+    const record = (ref: string): SourceRecord | undefined => {
+      if (!preparedOnly) return this.current.get(ref);
+      if (!metadata.has(ref)) {
+        const row = this.db.prepare('SELECT json FROM records WHERE ref=?').get(ref) as { json: string } | undefined;
+        if (row) metadata.set(ref, { ...JSON.parse(row.json), text: '' });
+      }
+      return metadata.get(ref);
+    };
+    const narratives = preparedOnly ? (this.db.prepare(`SELECT r.ref FROM records r WHERE json_extract(r.json,'$.kind')='session'
+      AND json_extract(r.json,'$.role')='assistant' ${filter.sql} ORDER BY r.at DESC LIMIT 1024`).all(...filter.args) as { ref: string }[]).map(row => row.ref)
+      : [...this.current.values()].filter(record => this.admitted(record, query) && record.kind === 'session'
+        && record.role === 'assistant' && record.text.length >= 40 && !/^Tool requested:/.test(record.text))
+        .sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 1024).map(record => record.ref);
     const scoresByQuery: Map<string, { score: number; chunk: Chunk }>[] = [], termSets: string[][] = [];
     for (const [search, embedding] of searches.map((text, i) => [text, embeddings[i]] as const)) {
     const scores = new Map<string, { score: number; chunk: Chunk }>(); scoresByQuery.push(scores);
     const add = (rows: Chunk[], weight = 1) => {
       const distinct = new Set<string>();
       for (const row of rows) {
-        if (!this.current.has(row.ref)) continue; // Excluded/removed records cannot be served from stale vectors.
-        const identity = this.record(row.ref).identity;
+        const item = record(row.ref);
+        if (!item || !this.admitted(item, query)) continue;
+        const identity = item.identity;
         if (distinct.has(identity)) continue; distinct.add(identity);
         const old = scores.get(identity), score = weight / (60 + distinct.size);
         scores.set(identity, { score: (old?.score || 0) + score, chunk: weight > 1 ? row : old?.chunk || row });
@@ -238,9 +249,6 @@ export class HistoryIndex {
       // Agent explanations are a separate retrieval lane, not buried under the
       // many near-identical tool reads/edits in a coding session. Existing vectors
       // and original record identities are reused; no new corpus work in calls.
-      const narratives = [...this.current.values()].filter(record => this.admitted(record, query) && record.kind === 'session'
-        && record.role === 'assistant' && record.text.length >= 40 && !/^Tool requested:/.test(record.text))
-        .sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 1024).map(record => record.ref);
       if (narratives.length) {
         const selected = narratives.map(() => '?').join(',');
         if (terms.length) add(this.keywords(lexical.join(' OR '), `AND c.offset=0 AND c.ref IN (${selected})`, narratives), 2);
@@ -254,19 +262,20 @@ export class HistoryIndex {
     }
     const rank = (value: { score: number; chunk: Chunk }, terms: string[]) => {
       if (query.kind !== 'sources') return value.score;
-      const record = this.record(value.chunk.ref);
-      const age = Math.max(0, (Date.parse(query.before || new Date().toISOString()) - Date.parse(record.at || '')) / 86400000);
-      const role = record.role === 'user' ? 0.25 : /^Tool requested:/.test(record.text) ? 0.5 : 1;
-      const detail = record.role === 'assistant' && /\n(?:[-*] |### |\|)/.test(record.text) ? 1.5 : 1;
+      const item = record(value.chunk.ref)!;
+      const age = Math.max(0, (Date.parse(query.before || new Date().toISOString()) - Date.parse(item.at || '')) / 86400000);
+      const role = item.role === 'user' ? 0.25 : /^Tool requested:/.test(item.text) ? 0.5 : 1;
+      const detail = item.role === 'assistant' && /\n(?:[-*] |### |\|)/.test(item.text) ? 1.5 : 1;
       return value.score * role * detail * (query.recent ? 1 + 2 * Math.exp(-age / 0.5) : 1 + 0.4 * Math.exp(-age / 3))
-        * proximity(record.text.slice(value.chunk.offset, value.chunk.offset + PASSAGE_CHARACTERS), terms);
+        * (preparedOnly ? 1 : proximity(item.text.slice(value.chunk.offset, value.chunk.offset + PASSAGE_CHARACTERS), terms));
     };
     const rankings = scoresByQuery.map((scores, i) => [...scores.values()].sort((a, b) => rank(b, termSets[i]) - rank(a, termSets[i]) || a.chunk.id - b.chunk.id));
     const ranked = rankings.flat(), topicLeaders = [0, 1].flatMap(i => rankings.slice(1).flatMap(rows => rows[i] ? [rows[i]] : []));
     const recent: { score: number; chunk: Chunk }[] = [];
     if (query.recent && (query.session_id || query.session_ids)) {
-      const latest = [...this.current.values()].filter(record => this.admitted(record, query) && record.kind === 'session'
-        && record.role === 'assistant' && record.text.length >= 40 && !/^Tool requested:/.test(record.text))
+      if (preparedOnly && narratives[0]) record(narratives[0]);
+      const latest = [...(preparedOnly ? metadata : this.current).values()].filter(record => this.admitted(record, query) && record.kind === 'session'
+        && record.role === 'assistant' && (preparedOnly || record.text.length >= 40) && !/^Tool requested:/.test(record.text))
         .sort((a, b) => (b.at || '').localeCompare(a.at || '') || b.position - a.position).slice(0, 1);
       for (const record of latest) {
         const chunk = this.db.prepare('SELECT id,ref,offset FROM chunks WHERE ref=? AND embedded=1 ORDER BY offset LIMIT 1').get(record.ref) as Chunk | undefined;
@@ -274,18 +283,21 @@ export class HistoryIndex {
       }
     }
     const explicit = query.kind === 'sources' ? [...new Set(query.question.match(/\bH[a-f0-9]{24}\b/g) || [])].slice(0, 3).map(ref => {
-      const record = this.record(ref);
-      if (!this.admitted(record, query)) throw new Error('Historical reference is outside this lookup scope or cutoff.');
+      const item = record(ref);
+      if (!item || !this.admitted(item, query)) throw new Error('Historical reference is outside this lookup scope or cutoff.');
       const chunk = this.db.prepare('SELECT id,ref,offset FROM chunks WHERE ref=? AND embedded=1 ORDER BY offset LIMIT 1').get(ref) as Chunk | undefined;
       if (!chunk) throw new Error('Historical reference has not been prepared.');
       return { score: 1, chunk };
     }) : [];
-    const selected = [...explicit, ...recent, ...topicLeaders, ...ranked].filter((value, i, all) => all.findIndex(other => this.record(other.chunk.ref).identity === this.record(value.chunk.ref).identity) === i);
-    const results = selected.slice(0, 8).map(({ chunk, score }) => {
-      const record = this.record(chunk.ref);
-      return { ...record, sequence: record.position, text: record.text.slice(chunk.offset, chunk.offset + (query.kind === 'sources' ? 1600 : 800)), offset: chunk.offset, score, ...(query.kind === 'sources' && chunk.offset > 0 ? { lead: record.text.slice(0, 400) } : {}) };
-    });
-    return { mode: 'hybrid', ...reconcileHistory([...this.current.values()].filter(record => this.admitted(record, query)), results, query), limitations: LIMITATIONS + ' Records arriving or changing during this lookup are considered by the next lookup.' };
+    const selected = [...explicit, ...recent, ...topicLeaders, ...ranked].filter((value, i, all) => all.findIndex(other => record(other.chunk.ref)!.identity === record(value.chunk.ref)!.identity) === i);
+    const results = [];
+    for (const { chunk, score } of selected) {
+      if (preparedOnly && !this.loadPrepared(chunk.ref, query)) continue;
+      const original = this.record(chunk.ref);
+      results.push({ ...original, sequence: original.position, text: original.text.slice(chunk.offset, chunk.offset + (query.kind === 'sources' ? 1600 : 800)), offset: chunk.offset, score, ...(query.kind === 'sources' && chunk.offset > 0 ? { lead: original.text.slice(0, 400) } : {}) });
+      if (results.length === 8) break;
+    }
+    return { mode: 'hybrid', ...reconcileHistory([...this.current.values()].filter(record => this.admitted(record, query)), results, query), limitations: LIMITATIONS + (preparedOnly ? ' Only selected ranked records were read; other originals were not checked.' : '') + ' Records arriving or changing during this lookup are considered by the next lookup.' };
   }
   private record(ref: string): SourceRecord {
     const record = this.current.get(ref);
@@ -294,9 +306,14 @@ export class HistoryIndex {
   }
   read(ref: string, offset = 0, preparedBefore?: string): HistoryPage {
     if (preparedBefore) {
-      const cached = this.db.prepare('SELECT session_id FROM records WHERE ref=?').get(ref) as { session_id: string | null } | undefined;
-      if (!cached) throw new Error('Historical source is unavailable.');
-      this.assertPrepared({ before: preparedBefore, ...(cached.session_id ? { session_id: cached.session_id } : { kind: 'conversation' as const }) });
+      this.current.clear();
+      if (!this.loadPrepared(ref, { before: preparedBefore })) throw new Error('Historical source is unavailable or no longer prepared.');
+      const item = this.record(ref);
+      for (const direction of ['<', '>']) {
+        const neighbor = this.db.prepare(`SELECT ref FROM records WHERE group_id=? AND position${direction}? AND json_extract(json,'$.identity')!=?
+          ORDER BY position ${direction === '<' ? 'DESC' : 'ASC'} LIMIT 1`).get(item.group, item.position, item.identity) as { ref: string } | undefined;
+        if (neighbor) this.loadPrepared(neighbor.ref, { before: preparedBefore });
+      }
     }
     else this.refresh();
     const item = this.record(ref);

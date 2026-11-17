@@ -9,7 +9,7 @@ const { conversationStatus, captureConversationHistory } = require('../dist/sync
 const { callReadiness } = require('../dist/sync/preparation');
 const { activity } = require('../dist/sync/activity');
 
-test('status polls never validate history; actual turn admission still does, and initial preparation is not New info ready', () => {
+test('status polls and prepared turn admission never scan history; initial preparation is not New info ready', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-polling-'));
   process.env.DRAKEN_DATA_DIR = root;
   const ready = memory.historyReadiness, status = memory.historyPreparationStatus;
@@ -22,7 +22,7 @@ test('status polls never validate history; actual turn admission still does, and
     const changes = db.prepare('SELECT total_changes() n').get().n;
     for (let n=0;n<100;n++) { assert.equal(conversationStatus(id).update_state,'up_to_date'); assert.equal(callReadiness(id).ready,true); }
     assert.equal(db.prepare('SELECT total_changes() n').get().n,changes);
-    assert.throws(() => captureConversationHistory(id), /Full history verification boundary/);
+    assert.equal(captureConversationHistory(id),before);
     db.prepare("UPDATE syncs SET briefing='',compression_complete=0,conversation_before=NULL WHERE id=?").run(id);
     release = activity.beginJob(id,new AbortController());
     assert.equal(conversationStatus(id).update_state,'preparing'); assert.equal(callReadiness(id).ready,false);

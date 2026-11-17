@@ -5,7 +5,7 @@ let preparedBefore = new Date().toISOString();
 service.prepareHistory = async before => { preparedBefore = before || new Date().toISOString(); };
 // Readiness reads do not advance a preparation receipt or adopt new evidence.
 service.historyReadiness = () => ({ ready: true, before: preparedBefore });
-service.historyPreparationStatus = () => service.historyReadiness(true);
+service.historyPreparationStatus = () => service.historyReadiness(true, true);
 service.searchHistory = async () => ({ mode: 'hybrid', results: [], limitations: 'Synthetic empty historical lookup.' });
 service.searchPreparedHistory = (...args) => service.searchHistory(...args);
 
@@ -40,7 +40,7 @@ exports.useIndexedHistory = () => {
     if (signal?.aborted) throw new Error('Cancelled');
     await current().prepare({ before }, undefined, true);
   };
-  service.historyReadiness = (capturedOnly = false) => cache ? indexReadiness(cache, getDb(), capturedOnly) : { ready: false, before: null };
+  service.historyReadiness = (capturedOnly = false, checkpointOnly = false) => cache ? indexReadiness(cache, checkpointOnly ? null : getDb(), capturedOnly) : { ready: false, before: null };
   service.searchHistory = async query => current().search(service.validateHistoryQuery(query));
   service.searchPreparedHistory = async query => current().search(service.validateHistoryQuery(query), undefined, true);
   service.readHistory = async (ref, offset = 0, _signal, before) => current().read(ref, offset, before);

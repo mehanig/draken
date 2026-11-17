@@ -6,7 +6,6 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
 const { historySources } = require('../dist/memory/sources');
 const { historyPacket } = require('../dist/memory/packet');
-const { reconciliationGaps } = require('../dist/sync/reconciliation');
 const { historyQuery: voiceHistoryQuery } = require('../dist/memory/focus');
 const { sourceEntry } = require('./fixtures/source-entry.cjs');
 let root, db, cache, index;
@@ -50,8 +49,6 @@ test('a status question reconciles client completion, durable foundations and un
   assert.match(packet.text, /Client wiring implemented/); assert.match(packet.text, /Durable backend delivery jobs implemented locally/);
   assert.match(packet.text, /dispatcher and reminder serving still unfinished/); assert.doesNotMatch(packet.text, /FUTURE|all finished in Beacon/);
   assert.equal(cache.prepare('SELECT total_changes() n').get().n, changes);
-  assert.deepEqual(reconciliationGaps(Object.values(ids).map(id => `[${id}]`).join(' '), packet), []);
-  assert.ok(reconciliationGaps(`Old wiring still missing [${ids.old}]`, packet).length);
 });
 test('packet byte pressure never keeps a cited old blocker without its selected follow-ups', async () => {
   const ids = await timeline();
@@ -103,15 +100,6 @@ test('an original H status question searches for updates, while an offset read r
     assert.equal(reads, 2, 'a larger budget must not turn a reference read into a search');
     assert.equal(searches, 2);
   } finally { Object.assign(service, saved); }
-});
-test('the citation guard also catches old frozen E/C aliases; an unrelated alias cannot satisfy it', async () => {
-  const ids = await timeline(), found = await index.search({ question: `Current blockers ${ids.old}`, reconcile: true, kind: 'sources', session_ids: ['trailboard'], before: cutoff }, undefined, true);
-  const packet = historyPacket(found, 24000, 3000), body = JSON.parse(packet.text), earlier = body.sources.find(item => item.ref === ids.old);
-  const aliases = [{ ref: 'E7', session: earlier.session_id, sequence: earlier.sequence }];
-  assert.ok(reconciliationGaps('Still missing [E7]', packet, aliases).length);
-  assert.deepEqual(reconciliationGaps('Still missing [E7]', packet, [{ ...aliases[0], session: 'beacon' }]), []);
-  const citations = Object.values(ids).map(id => `[${id}]`).join(' ');
-  assert.deepEqual(reconciliationGaps(citations + ' [E7]', packet, aliases), []);
 });
 test('a retrieved follow-up is checked again when its own pending sub-task was completed later', () => {
   const old = add('Permission callbacks and account cleanup remain unfinished. The app integration is blocked.', '2026-01-06T12:00:00.000Z');

@@ -3,6 +3,7 @@ import { Evidence, HomeOverview, ObservedSession, Overview, SyncDetail, SyncMode
 import { EntryReader } from './source-files';
 import { getSessionRoot } from './jsonl';
 import { EvidenceReader } from '../db/evidence';
+import { EvidenceScope } from './evidence-scope';
 import { cleanText, sourceKey, sourceRepresentatives } from './normalize';
 import { aggregationCost } from './cost';
 import { recapInput, invalidateRecap, type RecapInput } from './recap';
@@ -105,19 +106,20 @@ export function getProgress(id: number): TreeProgress {
     run: run ? { ...fields, metrics: JSON.parse(metrics_json) } as TreeRun : null, nodes };
 }
 
-export function getSync(id: number): SyncDetail {
+export function getSync(id: number, evidence: boolean | readonly string[] = true): SyncDetail {
   const db = getDb();
   const row = db.prepare(`${summaryQuery} WHERE s.id = ?`).get(id) as SyncSummary | undefined;
   if (!row) throw new HttpError(404, 'Sync not found');
   const extra = db.prepare('SELECT context_json, memory_json, model_config_json FROM syncs WHERE id = ?').get(id) as any;
   const reader = new EvidenceReader(db);
   try {
-    const items = (db.prepare('SELECT evidence_json FROM sync_items WHERE sync_id = ? ORDER BY rowid').all(id) as any[]).map(item => reader.read(item.evidence_json, true));
+    const refs = typeof evidence === 'boolean' ? null : evidence;
+    const items = evidence && (!refs || refs.length) ? (db.prepare(`SELECT evidence_json FROM sync_items WHERE sync_id = ? ${refs ? `AND json_extract(evidence_json,'$.ref') IN (${refs.map(() => '?').join(',')})` : ''} ORDER BY rowid`).all(id, ...(refs || [])) as any[]).map(item => reader.read(item.evidence_json, true)) : [];
     return {
       ...row, previously_included_count: (db.prepare(`SELECT COUNT(*) AS n FROM sync_items current
         WHERE current.sync_id=? AND EXISTS (SELECT 1 FROM sync_items previous
           WHERE previous.event_key=current.event_key AND previous.sync_id<current.sync_id)`).get(id) as { n: number }).n,
-      conversation: conversationStatus(id), aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
+      conversation: conversationStatus(id), aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: evidence ? JSON.parse(extra.context_json).filter((item: Record<string, any>) => !refs || refs.includes(item.ref)).map((item: Record<string, any>) => reader.read(item, true)) : [], memory: JSON.parse(extra.memory_json),
       messages: db.prepare('SELECT id, role, content, created_at FROM sync_messages WHERE sync_id = ? ORDER BY id').all(id) as SyncDetail['messages'],
       busy: activity.jobActive(id), history_since: historySince(),
       models: { ...defaultModels(), ...JSON.parse(extra.model_config_json) }, tree: getProgress(id),
@@ -125,12 +127,29 @@ export function getSync(id: number): SyncDetail {
   } finally { reader.close(); }
 }
 
+export function evidenceExcerpt(id: number, ref: string, offset: number) {
+  const db = getDb();
+  const row = db.prepare(`SELECT j FROM (SELECT evidence_json j FROM sync_items WHERE sync_id=?
+    UNION ALL SELECT value j FROM syncs,json_each(context_json) WHERE syncs.id=?) WHERE json_extract(j,'$.ref')=? LIMIT 1`).get(id, id, ref) as { j: string } | undefined;
+  if (!row) throw new HttpError(404, 'Snapshot reference not found');
+  const metadata = JSON.parse(row.j);
+  try { new EvidenceScope(db, [metadata]).assert(metadata); }
+  catch { throw new HttpError(403, 'Original source is excluded or unavailable.'); }
+  const reader = new EvidenceReader(db);
+  try {
+    const item = reader.read(metadata, true), total = item.text.length;
+    return { item: { ref: item.ref, agent: item.agent, event_key: item.event_key, role: cleanText(item.role || '', 40), session_name: cleanText(item.session_name || '', 200), cwd: cleanText(item.cwd || '', 500),
+      session_id: cleanText(item.session_id || '', 200), entry_id: cleanText(item.entry_id || '', 200), timestamp: cleanText(item.timestamp || '', 40), source_path: cleanText(item.source_path || '', 1000),
+      text: item.text.slice(offset, offset + 4000), unavailable: item.unavailable }, total, offset };
+  } finally { reader.close(); }
+}
+
 export function assertEvidenceAvailable(sync: Pick<SyncDetail, 'items' | 'context'>): void {
   if ([...sync.items, ...sync.context].some(item => item.unavailable)) throw new HttpError(409, 'Original session evidence is unavailable or changed. Restore the session files before summarizing, calling or marking this snapshot reviewed. Conversation and notes remain accessible.');
 }
 
-export function requireOpen(id: number, allowBusy = false): SyncDetail {
-  const sync = getSync(id);
+export function requireOpen(id: number, allowBusy = false, evidence = true): SyncDetail {
+  const sync = getSync(id, evidence);
   if (sync.status !== 'open') throw new HttpError(409, 'This sync is already closed');
   if (!allowBusy && sync.busy) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
   if (!allowBusy && activity.voiceActive(id)) throw new HttpError(409, 'End the voice call before changing this sync.');
@@ -226,15 +245,15 @@ export function startSync(since?: string | null): SyncDetail {
 
 /** New one-click workflow: reserve previously unassigned entries, never review them.
  * Repeated transport requests reuse the same immutable snapshot. */
-export function startConversationSync(requestId: string): SyncDetail {
+export function startConversationSync(requestId: string, evidence = true): SyncDetail {
   expireConversations();
   const db = getDb();
   return db.transaction(() => {
     const existing = db.prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
-    if (existing) return getSync(existing.sync_id);
+    if (existing) return getSync(existing.sync_id, evidence);
     if (activity.callActive || activity.busy) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
     db.prepare("INSERT OR IGNORE INTO sync_settings(key,value) VALUES ('history_since','')").run();
-    const prior = (db.prepare("SELECT id FROM syncs WHERE status != 'discarded' ORDER BY id DESC LIMIT 3").all() as { id: number }[]).map(row => getSync(row.id));
+    const prior = (db.prepare("SELECT id FROM syncs WHERE status != 'discarded' ORDER BY id DESC LIMIT 3").all() as { id: number }[]).map(row => getSync(row.id, false));
     const inputs: RecapInput[] = prior.map(recapInput);
     const memory = prior.map(item => ({ sync_id: item.id, status: item.status, snapshot_at: item.snapshot_at, decisions: item.decisions, carry_forward: item.carry_forward, recap: item.recap }));
     const { items, context } = snapshot(), now = new Date().toISOString();
@@ -242,7 +261,7 @@ export function startConversationSync(requestId: string): SyncDetail {
       VALUES (?,?,2,?,?,?,?)`).run(now, now, frozenContext(db, context), JSON.stringify(memory), memory[0]?.carry_forward || '', JSON.stringify(defaultModels()));
     const id = Number(result.lastInsertRowid); persistItems(id, items);
     db.prepare('INSERT INTO sync_presentations(sync_id,request_id,memory_inputs_json) VALUES (?,?,?)').run(id, requestId, JSON.stringify(inputs));
-    return getSync(id);
+    return getSync(id, evidence);
   })();
 }
 
@@ -271,7 +290,7 @@ export function expandSnapshot(id: number): SyncDetail {
 
 export function configureModels(id: number, models: SyncModels): SyncDetail {
   assertConversationActive(id);
-  const sync = requireOpen(id);
+  const sync = requireOpen(id, false, false);
   for (const model of [models.summary, models.final]) {
     if (typeof model !== 'string' || (model !== '' && !/^[a-zA-Z0-9][a-zA-Z0-9._/:+@-]{0,199}$/.test(model))) throw new HttpError(400, 'Use a pi provider/model selector, not a shell command');
   }
@@ -305,10 +324,10 @@ export function recoverInterruptedRuns(): void {
 }
 
 export function saveNotes(id: number, decisions: string, carryForward: string): SyncDetail {
-  requireOpen(id);
+  requireOpen(id, false, false);
   invalidateRecap(id);
   getDb().prepare('UPDATE syncs SET decisions = ?, carry_forward = ? WHERE id = ?').run(decisions, carryForward, id);
-  return getSync(id);
+  return getSync(id, false);
 }
 
 export function completeSync(id: number, decisions: string, carryForward: string, reviewed: boolean): SyncDetail {
@@ -327,7 +346,7 @@ export function completeSync(id: number, decisions: string, carryForward: string
 }
 
 export function discardSync(id: number): SyncDetail {
-  requireOpen(id);
+  requireOpen(id, false, false);
   getDb().prepare("UPDATE syncs SET status = 'discarded', completed_at = ? WHERE id = ?").run(new Date().toISOString(), id);
-  return getSync(id);
+  return getSync(id, false);
 }

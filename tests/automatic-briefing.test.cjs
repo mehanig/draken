@@ -62,7 +62,7 @@ test('only an explicit Home request creates and generates a complete snapshot; t
  session(70);await scheduler().tick();noSyncs();assert.equal(store.availableCount(),70);
  session(5);await scanSessions();assert.equal(store.availableCount(),75);noSyncs();
  const request_id=randomUUID(),first=await post('/syncs/start-chat',{request_id});
- assert.equal(first.sync.items.length,75);assert.equal((await post('/syncs/start-chat',{request_id})).sync.id,first.sync.id);
+ assert.equal(first.sync.item_count,75);assert.deepEqual(first.sync.items,[]);assert.equal((await post('/syncs/start-chat',{request_id})).sync.id,first.sync.id);
  await until(()=>!activity.busy);assert.ok(store.getSync(first.sync.id).briefing);
  assert.equal(count('syncs'),1);assert.equal(count('sync_items'),75);assert.equal(store.availableCount(),0);
  const paid=calls().length;assert.ok(paid>=2);assert.equal(calls().find(call=>call.task==='final_verdict').snapshot.processed_entries,75);

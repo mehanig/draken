@@ -74,8 +74,8 @@ for (const location of ['items', 'context']) {
     assert.equal(sync.messages[0].content, 'Retain this conversation.');
     assert.equal(sync.briefing, 'Historical briefing remains accessible.');
     assert.throws(() => store.assertEvidenceAvailable(sync), /Original session evidence/);
-    assert.throws(() => manager.launchReply(syncId, 'Explain'), /Original session evidence/);
-    await assert.rejects(manager.generateReply(syncId, 'Explain'), /Original session evidence/);
+    assert.throws(() => manager.launchReply(syncId), /Original session evidence/);
+    await assert.rejects(manager.generateReply(syncId), /Original session evidence/);
     await assert.rejects(live.createLiveCall(syncId, new AbortController().signal), /Original session evidence/);
     assert.throws(() => store.completeSync(syncId, 'Do not save this', '', true), /Original session evidence/);
     assert.equal(providerCalls, 0);

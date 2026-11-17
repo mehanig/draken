@@ -182,6 +182,7 @@ test('an active production conversation gets a two-record local tail on the next
  const originalPrepare=service.prepareHistory,originalReadiness=service.historyReadiness;
  service.prepareHistory=async(cutoff,signal,background)=>{assert.equal(signal.aborted,false);assert.equal(background,true);jobs++;await index.prepare({before:cutoff},undefined,true);};
  service.historyReadiness=captured=>indexReadiness(cache,db,captured);
+ t.mock.method(service,'historyPreparationStatus',()=>indexReadiness(cache,null));
  const saved=JSON.stringify(db.prepare('SELECT * FROM syncs WHERE id=?').get(id));
  t.mock.timers.enable({apis:['setInterval','Date'],now});
  try{

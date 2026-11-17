@@ -123,7 +123,7 @@ test('home API is compact, paginated, same-origin protected and one-click prepar
  session(4);server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const origin=`http://127.0.0.1:${server.address().port}`;
  const key=randomUUID(),post=()=>fetch(origin+'/api/syncs/start-call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:key})});
  assert.equal((await fetch(origin+'/api/syncs/start-call',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://other.invalid'},body:JSON.stringify({request_id:key})})).status,403);
- const response=await post();assert.equal(response.status,202);const created=await response.json();assert.equal(created.sync.items.length,4);assert.equal((await (await post()).json()).sync.id,created.sync.id);await waitIdle();
+ const response=await post();assert.equal(response.status,202);const created=await response.json();assert.equal(created.sync.item_count,4);assert.deepEqual(created.sync.items,[]);assert.equal((await (await post()).json()).sync.id,created.sync.id);await waitIdle();
  const home=await (await fetch(origin+'/api/home')).json();assert.equal(home.syncs.length,1);assert.equal(home.syncs[0].id,created.sync.id);assert.equal(home.syncs[0].briefing,undefined);assert.equal(home.syncs[0].items,undefined);assert.ok(home.syncs[0].preview.length<=600);assert.equal(home.covered,0);
  for(let i=0;i<23;i++)store.startConversationSync(randomUUID());const page=store.homeOverview();assert.equal(page.syncs.length,20);assert.ok(page.next_cursor);assert.equal(store.homeOverview(page.next_cursor).syncs.length,4);
 });

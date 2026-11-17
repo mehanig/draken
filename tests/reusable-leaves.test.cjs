@@ -655,6 +655,13 @@ test('node display migration tags existing topology with latest known run only o
   assert.equal(db.prepare("SELECT count(*) n FROM sync_tree_nodes WHERE key='root'").get().n, 1);
 });
 
+// Force preparation reuse explicitly; prepared chat must never run these gates.
+async function rebuildBriefing(id) {
+  const { briefing } = store.getSync(id);
+  getDb().prepare("UPDATE syncs SET briefing='' WHERE id=?").run(id);
+  try { return await generateReply(id, undefined, undefined, { deferHistory: true }); }
+  finally { getDb().prepare('UPDATE syncs SET briefing=? WHERE id=?').run(briefing, id); }
+}
 for (const boundary of ['before-final', 'queued-exclusion', 'queued-cancel', 'returned-final', 'before-repair', 'returned-repair', 'persistence', 'agent-disabled'])
   test(`generateReply final fresh gate outside call prevents ${boundary}`, async () => {
     const data = session(3), sync = await start(), seed = new SummaryTree(sync, 0, new AbortController().signal);
@@ -688,12 +695,12 @@ for (const boundary of ['before-final', 'queued-exclusion', 'queued-cancel', 're
       return 'Still unverified [R1].';
     };
     try {
-      await assert.rejects(generateReply(sync.id, 'What remains?'), /excluded|cancelled/);
+      await assert.rejects(generateReply(sync.id), /excluded|cancelled/);
       const expected = ['before-final', 'queued-exclusion', 'queued-cancel', 'agent-disabled'].includes(boundary) ? 0 : boundary === 'returned-repair' ? 2 : 1;
       assert.equal(invoked, expected);
       const result = store.getSync(sync.id);
       assert.equal(result.briefing, ''); assert.equal(result.messages.filter(message => message.role === 'assistant').length, 0);
-      assert.equal(result.messages.filter(message => message.role === 'user').length, 1);
+      assert.equal(result.messages.filter(message => message.role === 'user').length, 0);
       assert.equal(result.tree.run.invocations, expected); assert.equal(result.tree.complete, false);
       assert.equal(calls().length, 0);
     } finally {
@@ -762,7 +769,7 @@ for (const completed of [false, true]) for (const reopen of [false, true])
       assert.ok(prior.context.some(item => item.event_key === bg[0].event_key));
       assert.deepEqual(JSON.parse(getDb().prepare('SELECT refs_json FROM summary_planning_context WHERE sync_id=?').get(original.id).refs_json), []);
       if (reopen) closeDb();
-      await assert.rejects(generateReply(original.id, completed ? 'What remains?' : undefined), /unavailable|changed|excluded/);
+      await assert.rejects(rebuildBriefing(original.id), /unavailable|changed|excluded/);
       assert.equal(invoked, 1, 'retry must stop before any new provider call, not merely reject the final answer after spending');
       const result = store.getSync(original.id);
       assert.equal(result.briefing, prior.briefing);
@@ -811,7 +818,7 @@ for (const context of [false, true]) test(`deployed missing-sequence BG remains 
     fs.appendFileSync(data.file, JSON.stringify({ type: 'context_edit', id: 'reduced-view-later-edit', parentId: data.rows.at(-1).id,
       timestamp: '2026-01-03T00:00:00.000Z', targetId: data.rows[0].id, replacement: 'Later H, not replacement frozen input.' }) + '\n');
     await scanSessions(); closeDb();
-    await generateReply(sync.id, 'What remains?');
+    await rebuildBriefing(sync.id);
     assert.equal(invoked, 2);
   } finally { SummaryTree.prototype.call = call; }
 });
@@ -832,7 +839,7 @@ test('durably initial C remains frozen after later edits and reopen', async () =
     fs.appendFileSync(data.file, JSON.stringify({ type: 'context_edit', id: 'initial-c-later-edit', parentId: data.rows.at(-1).id,
       timestamp: '2026-01-03T00:00:00.000Z', targetId: data.rows[0].id, replacement: 'Later H, not replacement C.' }) + '\n');
     await scanSessions(); closeDb();
-    const result = await generateReply(sync.id, 'What remains?');
+    const result = await rebuildBriefing(sync.id);
     assert.equal(invoked, 2, 'initial C still allows only explicit final answers, never repeated leaf preparation');
     assert.equal(result.context.find(item => item.ref === 'C1').text, bg.text);
     assert.deepEqual(JSON.parse(getDb().prepare('SELECT refs_json FROM summary_planning_context WHERE sync_id=?').get(sync.id).refs_json), ['C1']);
@@ -855,7 +862,7 @@ test('prepared foreground keeps the selected frozen edit after newer context_edi
   assert.equal(frozen.items[0].text, old.text); assert.equal(frozen.items[0].unavailable, undefined);
   const before = calls().length, result = await generateReply(sync.id, 'What remains?', randomUUID());
   assert.equal(primaryCallsSince(before).length, 0, 'ordinary edit/index advance must not repay frozen leaves');
-  assert.equal(result.items[0].text, old.text); assert.ok(result.messages.some(message => message.role === 'assistant'));
+  assert.equal(store.getSync(sync.id).items[0].text, old.text); assert.ok(result.messages.some(message => message.role === 'assistant'));
   const final = calls().slice(before).find(call => call.task === 'final_verdict');
   assert.ok(final, 'explicit next question reaches final inference');
 });

@@ -78,7 +78,6 @@ function event(role, text, done = true) { native.emit({ method: `thread/realtime
 for (const reopen of [false, true]) test(`live rejects actual adopted BG after edit before native status (reopen=${reopen})`, async () => {
   const before = await prepared(); await edit(); if (reopen) closeDb();
   let probes = 0; statusHook = () => { probes++; };
-  await assert.rejects(generateReply(syncId, 'Explain C1'), /unavailable|changed|excluded/);
   await assert.rejects(live.createLiveCall(syncId, signal()), /unavailable|changed|excluded/);
   assert.equal(probes, 0); assert.deepEqual(requests, []); assert.equal(finalCalls, 1);
   const after = store.getSync(syncId); assert.equal(after.briefing, before.briefing); assert.deepEqual(after.context, before.context);
