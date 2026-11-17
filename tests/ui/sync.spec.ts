@@ -135,7 +135,7 @@ test('settings persist local-only indexing without sync creation, browser captur
   await toggle.check();await expect.poll(async()=>(await(await page.request.get('/api/settings/auto-index')).json()).enabled).toBe(true);
   await page.reload();await button.click();await expect(toggle).toBeChecked();
   await expect(dialog).toContainText('including small tails');
-  await expect(dialog).toContainText('Active conversations receive even small history updates');
+  await expect(dialog).toContainText('at the next idle minute check');
   await expect(dialog).not.toContainText('after five minutes');
   await expect(dialog).toContainText('Indexing makes no provider model calls');
   await expect(dialog).toContainText('Existing conversations, notes and frozen snapshots are not rewritten');
