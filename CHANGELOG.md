@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.5
+
+### Repair aggregate citation overflow within the existing final budget
+
+- Distinguish excess distinct citations from excess estimated tokens during final-input compaction, reporting the actual count and limit.
+- Route aggregate citation overflow through the existing bounded citation-only repair. Preserve every candidate observation's prose, topic, state and limitations; accept only nonempty supporting subsets of that observation's original references.
+- Keep the existing 16-reference-per-observation, 96-distinct-reference, 12,000-root-token and 64,000-final-token limits and two-attempt allowance. Unsupported or still-over-budget results stop visibly, without local truncation or an expensive-model fallback.
+- Preserve cache identities, evidence validation and cancellation. A successfully repaired compact parent remains reusable after a later final-provider interruption. This does not guarantee every provider result can be safely compressed.
+
 ## 0.8.4
 
 ### Keep UI status polling from blocking preparation

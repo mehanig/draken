@@ -2,7 +2,7 @@
 
 Draken uses **pi for summaries, preparation recaps and text discussion**, regardless of which coding agent produced the imported history. It does not implement provider OAuth, translate another agent's credentials, or run Claude/Codex to summarize.
 
-> This guide is for **Draken 0.8.4**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#084).
+> This guide is for **Draken 0.8.5**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#085).
 
 ## Install and start
 
@@ -29,13 +29,13 @@ Foreground work cancels and awaits owned background provider work. Valid cache s
 
 Loopback (`http://127.0.0.1:40333`) needs no dashboard login by default. LAN exposure still requires configured dashboard authentication and trusted HTTPS for microphone access. There is no automatic firewall change or certificate trust installation.
 
-## Upgrade to 0.8.4
+## Upgrade to 0.8.5
 
 <a id="upgrade-to-081"></a>
 <a id="upgrade-to-070"></a><!-- Preserve links from historical release notes. -->
 
 1. Back up original agent logs and the private Draken data directory. Preserve existing histories, conversations, notes, review coverage and frozen snapshots; do not replace them with an old database.
-2. Finish active calls/preparation, stop the server, and quit any tray that owns it. Install the released version with `npm install -g draken@0.8.4`, then restart using the same user, environment and `DRAKEN_DATA_DIR`.
+2. Finish active calls/preparation, stop the server, and quit any tray that owns it. Install the released version with `npm install -g draken@0.8.5`, then restart using the same user, environment and `DRAKEN_DATA_DIR`.
 3. Check **Settings → Runtime & sign-in**. Existing pi/voice accounts and selected runtimes are unchanged; upgrading does not silently install or sign into a replacement runtime.
 4. Keep or change **Automatically index history** as desired. Its existing preference is preserved. **Prepare summaries ahead** defaults on when no preference is saved; an explicit saved off remains off. Enabled background summaries consume configured provider quota/API billing. Live history updates need only local indexing, not paid summaries.
 5. Start a sync/chat explicitly for the initial briefing and history preparation. Active conversations then adopt newly prepared H history between turns. Their initial snapshot, E/C references, briefing, existing transcript and notes are not rewritten. Updates neither interrupt replies nor disable already-prepared chat; damaged captured originals still fail closed, and unavailable extra archive context must be disclosed.
@@ -47,7 +47,7 @@ The additive conversation lifecycle migration persists last user activity and th
 
 For a source release, build and test sequentially once the backend/client changes are ready. Run conversation lifecycle and append-safe readiness tests (`tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs`), voice live-update/activity coverage (`tests/voice-live-updates.test.cjs` and existing activity tests), and the existing local-indexing/paid-cache suites against the new server build. Run `tests/ui/live-conversation.spec.ts` after the complete build, then `node --test tests/site-browser.cjs` and `node tests/package-smoke.cjs` with the complete package build. The site check serves static files and needs Playwright/Chromium, not an application build or provider. The package smoke requires built `dist/` and `public/` and installs an isolated production-only tarball; it must observe `auto_summary=false`, a metadata-only disabled auto-summary GET, and no background runs/provider activity by default. Synthetic tests do not establish provider latency, quality or account billing.
 
-Publish npm only through the separately authorized release process. The existing website workflow checks `scripts/site-release.cjs`: copy must match the package version and npm `latest` must be 0.8.4 before the site is deployed. Do not bypass this gate to publish release copy early. Updating docs/version/site files is not a merge, npm publication or live deployment.
+Publish npm only through the separately authorized release process. The existing website workflow checks `scripts/site-release.cjs`: copy must match the package version and npm `latest` must be 0.8.5 before the site is deployed. Do not bypass this gate to publish release copy early. Updating docs/version/site files is not a merge, npm publication or live deployment.
 
 ## When pi is not installed
 

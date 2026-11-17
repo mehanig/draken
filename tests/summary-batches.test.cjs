@@ -47,6 +47,54 @@ function seedCache(spec) {
     .run(spec.key, 'chunk', LUNA, 'sync-tree-v2-short-labels', JSON.stringify(summary), new Date().toISOString());
 }
 
+test('aggregate citation compaction preserves all claims, uses one targeted repair and caches the result for retry', async t => {
+  session(151, { width: 20 }); const sync = await start(), requests = []; let failFinal = true;
+  const claims = Array.from({ length: 24 }, (_, i) => ({ topic: `Project ${i}`, state: 'reported_done', summary: `Implementation ${i} reported; acceptance and deployment NOT verified.` }));
+  t.mock.method(require('../dist/sync/pi'), 'invokePi', async prompt => {
+    const request = JSON.parse(prompt); requests.push(request);
+    if (request.task === 'final_verdict') {
+      if (failFinal) { failFinal = false; throw Error('Synthetic final-provider interruption after valid compaction'); }
+      return `Synthetic qualified briefing [${request.verification_evidence[0].ref}].`;
+    }
+    if (request.task === 'repair_summary_citations') {
+      assert.equal(request.max_distinct_sources, 96); assert.equal(request.citation_repairs.length, 24);
+      assert.match(request.repair.validation_error, /151 distinct source IDs; the maximum is 96/);
+      return JSON.stringify({ selections: request.citation_repairs.map(item => ({ observation: item.observation, evidence: item.candidate_source_ids.slice(0, 4) })) });
+    }
+    if (request.stage === 'chunk') {
+      let next = 0;
+      return JSON.stringify({ observations: claims.map((claim, i) => ({ ...claim, evidence: request.allowed_source_ids.slice(next, next += i < 7 ? 7 : 6) })), limitations: ['All deployment claims remain unverified.'] });
+    }
+    assert.equal(request.input.goal, 'compact_for_final');
+    return JSON.stringify(request.input.children[0].summary); // Reproduce an otherwise valid result still citing 151 sources.
+  });
+  await assert.rejects(generateReply(sync.id), /Synthetic final-provider interruption/);
+  const result = store.getSync(sync.id);
+  assert.equal(result.tree.run.status, 'failed'); assert.equal(result.tree.run.invocations, 4);
+  assert.deepEqual(requests.map(r => r.task), ['summarize', 'summarize', 'repair_summary_citations', 'final_verdict']);
+  const final = requests.at(-1); assert.equal(final.verification_evidence.length, 96);
+  assert.deepEqual(final.summary_tree[0].observations.map(({ topic, state, summary }) => ({ topic, state, summary })), claims);
+  assert.deepEqual(final.summary_tree[0].limitations, ['All deployment claims remain unverified.']);
+  const count = requests.length; assert.ok((await generateReply(sync.id)).briefing);
+  assert.deepEqual(requests.slice(count).map(r => r.task), ['final_verdict'], 'Completed leaf and repaired compact parent are reused');
+  unchanged(sync, 151);
+});
+
+test('aggregate citation repair cannot drop claims, use unsupported refs or exceed the unchanged total cap', () => {
+  const { validateSummary, repairSummaryCitations } = require('../dist/sync/tree');
+  const candidate = { observations: Array.from({ length: 7 }, (_, i) => ({ topic: `Topic ${i}`, state: 'blocked', summary: 'Not verified; do not remove this qualification.', evidence: Array.from({ length: 16 }, (_, j) => `S${i * 16 + j}`) })), limitations: ['Evidence remains incomplete.'] };
+  const allowed = new Set(candidate.observations.flatMap(o => o.evidence));
+  assert.throws(() => validateSummary(candidate, allowed, undefined, 96), /112 distinct source IDs; the maximum is 96/);
+  const selections = candidate.observations.map((o, i) => ({ observation: i + 1, evidence: o.evidence.slice(0, 12) }));
+  const fixed = repairSummaryCitations(candidate, { selections }, allowed, undefined, 96);
+  assert.deepEqual(fixed.observations.map(o => o.summary), candidate.observations.map(o => o.summary));
+  assert.deepEqual(fixed.limitations, candidate.limitations);
+  assert.throws(() => repairSummaryCitations(candidate, { selections: selections.slice(1) }, allowed, undefined, 96));
+  assert.throws(() => repairSummaryCitations(candidate, { selections: selections.map((s, i) => i ? s : { ...s, evidence: [] }) }, allowed, undefined, 96));
+  assert.throws(() => repairSummaryCitations(candidate, { selections: selections.map((s, i) => i ? s : { ...s, evidence: ['S17'] }) }, allowed, undefined, 96));
+  assert.throws(() => repairSummaryCitations(candidate, { selections: candidate.observations.map((o, i) => ({ observation: i + 1, evidence: o.evidence })) }, allowed, undefined, 96), /maximum is 96/);
+});
+
 test('Luna uses larger complete batches and one global reconciliation, not session/routing/topic passes', async t => {
   session(1305); const sync = await start();
   const conservativeLeaves = [...new SummaryTree(sync, 0, new AbortController().signal).chunkSpecs(false).values()].flat().length;

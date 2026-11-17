@@ -6,7 +6,7 @@ const root=path.join(__dirname,'../site');
 const version=require('../package.json').version,anchor=version.replaceAll('.','');
 test('public release copy and documentation match the npm version',()=>{
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
- assert.equal(version,'0.8.4');
+ assert.equal(version,'0.8.5');
  const lock=require('../package-lock.json');assert.equal(lock.version,version);assert.equal(lock.packages[''].version,version);
  require('../scripts/site-release.cjs').validateCopy(version,html);
  assert.ok(html.includes(`Version ${version} / Available on npm`));

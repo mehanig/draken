@@ -83,12 +83,15 @@ function boundedString(value: unknown, max: number, field: string): string {
 }
 const MAX_EVIDENCE = 16;
 class CitationLimitError extends Error {
-  constructor(readonly candidate: NodeSummary) {
+  constructor(readonly candidate: NodeSummary, readonly maxSources = Infinity) {
     const oversized = candidate.observations.flatMap((item, index) => item.evidence.length > MAX_EVIDENCE ? [`Observation ${index + 1} cites ${item.evidence.length} distinct source IDs`] : []);
-    super(`${oversized.join('; ')}; the maximum is 16. Keep the strongest supporting references`);
+    const total = new Set(candidate.observations.flatMap(item => item.evidence)).size;
+    super([...(oversized.length ? [`${oversized.join('; ')}; the maximum is 16`] : []),
+      ...(total > maxSources ? [`The complete summary cites ${total} distinct source IDs; the maximum is ${maxSources}. Reduce the total by at least ${total - maxSources}`] : []),
+      'Keep every claim and qualification unchanged; select sufficient specific supporting references'].join('. '));
   }
 }
-export function validateSummary(value: unknown, allowed: Set<string>, limits = LEGACY_OUTPUT): NodeSummary {
+export function validateSummary(value: unknown, allowed: Set<string>, limits = LEGACY_OUTPUT, maxSources = Infinity): NodeSummary {
   const data = value as NodeSummary;
   if (!data || !Array.isArray(data.observations) || data.observations.length > limits.observations || !Array.isArray(data.limitations) || data.limitations.length > limits.limitations) throw new Error('Expected observations and limitations arrays');
   const states = new Set(['requested', 'in_progress', 'reported_done', 'validated', 'blocked', 'superseded', 'unclear']);
@@ -105,16 +108,16 @@ export function validateSummary(value: unknown, allowed: Set<string>, limits = L
   if (!observations.length && !limitations.length) throw new Error('An empty summary must explain its limitations');
   const result = { observations, limitations };
   if (JSON.stringify(result).length > limits.characters) throw new Error('Summary is too large');
-  if (observations.some(item => item.evidence.length > MAX_EVIDENCE)) throw new CitationLimitError(result);
+  if (observations.some(item => item.evidence.length > MAX_EVIDENCE) || new Set(observations.flatMap(item => item.evidence)).size > maxSources) throw new CitationLimitError(result, maxSources);
   return result;
 }
 
-/** Patch only overfull citation arrays. Never truncate locally, change claims, or guess refs. */
-export function repairSummaryCitations(candidate: NodeSummary, value: unknown, allowed: Set<string>, limits = LEGACY_OUTPUT): NodeSummary {
+/** Repair per-observation or aggregate citation excess; never truncate locally or change claims. */
+export function repairSummaryCitations(candidate: NodeSummary, value: unknown, allowed: Set<string>, limits = LEGACY_OUTPUT, maxSources = Infinity): NodeSummary {
   let checked: NodeSummary;
-  try { return validateSummary(candidate, allowed, limits); }
+  try { return validateSummary(candidate, allowed, limits, maxSources); }
   catch (error) { if (!(error instanceof CitationLimitError)) throw error; checked = error.candidate; }
-  const targets = new Map(checked.observations.flatMap((item, index) => item.evidence.length > MAX_EVIDENCE ? [[index + 1, item] as const] : []));
+  const targets = new Map(checked.observations.flatMap((item, index) => Number.isFinite(maxSources) || item.evidence.length > MAX_EVIDENCE ? [[index + 1, item] as const] : []));
   const data = value as { selections?: { observation: number; evidence: string[] }[] } | null;
   if (!data || Object.keys(data).some(key => key !== 'selections') || !Array.isArray(data.selections) || data.selections.length !== targets.size) throw new Error('Citation repair must select references for every overfull observation exactly once');
   const selections = new Map<number, string[]>();
@@ -126,7 +129,7 @@ export function repairSummaryCitations(candidate: NodeSummary, value: unknown, a
     if (evidence.length > MAX_EVIDENCE) throw new Error('Citation repair still exceeds the maximum of 16 distinct references');
     selections.set(selection.observation, evidence);
   }
-  return validateSummary({ ...checked, observations: checked.observations.map((item, index) => selections.has(index + 1) ? { ...item, evidence: selections.get(index + 1)! } : item) }, allowed, limits);
+  return validateSummary({ ...checked, observations: checked.observations.map((item, index) => selections.has(index + 1) ? { ...item, evidence: selections.get(index + 1)! } : item) }, allowed, limits, maxSources);
 }
 
 export function validateGroups(value: unknown, allowed: Set<string>): TopicGroups {
@@ -443,6 +446,7 @@ export class SummaryTree {
         let validationError = '';
         let previousOutput = '';
         let citationCandidate: NodeSummary | undefined;
+        let maxSources = Infinity;
         let parsed: T | undefined;
         for (let attempt = 0; attempt < 2; attempt++) {
           if (attempt) this.stage(`Repairing ${spec.kind}`, `${spec.label} (attempt 2 of 2)`);
@@ -452,20 +456,21 @@ export class SummaryTree {
           verify();
           const response = await this.call({ task: citationRepair ? 'repair_summary_citations' : spec.kind === 'topics' ? 'group_topics' : 'summarize', stage: spec.kind,
             input: wire.input,
-            ...(citationRepair ? { citation_repairs: citationCandidate!.observations.flatMap((item, index) => item.evidence.length > MAX_EVIDENCE ? [{ observation: index + 1, topic: item.topic, state: item.state, summary: item.summary, candidate_source_ids: item.evidence, max_references: MAX_EVIDENCE }] : []) } : {}),
+            ...(citationRepair ? { ...(Number.isFinite(maxSources) ? { max_distinct_sources: maxSources } : {}), citation_repairs: citationCandidate!.observations.flatMap((item, index) => Number.isFinite(maxSources) || item.evidence.length > MAX_EVIDENCE ? [{ observation: index + 1, topic: item.topic, state: item.state, summary: item.summary, candidate_source_ids: item.evidence, max_references: MAX_EVIDENCE }] : []) } : {}),
             [spec.kind === 'topics' ? 'allowed_observation_ids' : 'allowed_source_ids']: [...wire.allowed],
             ...(validationError ? { repair: { validation_error: validationError, ...(spec.batch && citationRepair ? {} : { previous_output: previousOutput }),
-              instruction: citationRepair ? 'Return only selections for citation_repairs. Keep claims unchanged; select at most 16 references from each observation’s candidates.' : 'Correct the previous output against the original input and allowed IDs. Do not invent or guess source references.' } } : {}) },
+              instruction: citationRepair ? 'Return only selections for citation_repairs. Keep claims unchanged; select only sufficient supporting references from each observation’s candidates, at most 16 each. If max_distinct_sources is supplied, the UNION across all selections must also fit that total; repeated references count once. Never drop support for distinct claims or qualifications to meet the limit.' : 'Correct the previous output against the original input and allowed IDs. Do not invent or guess source references.' } } : {}) },
           citationRepair ? citationRepairSystem : spec.kind === 'topics' ? groupingSystem : spec.batch ? batchSummarySystem : summarySystem);
           // A provider may yield to inclusion, agent, effective-record or file
           // changes. Never persist its result (or attempt repair) on stale proof.
           verify();
           try {
-            const local = citationRepair ? repairSummaryCitations(citationCandidate!, parseJson(response, limits.characters), wire.allowed, limits) : validate(parseJson(response, limits.characters), wire.allowed);
+            const local = citationRepair ? repairSummaryCitations(citationCandidate!, parseJson(response, limits.characters), wire.allowed, limits, maxSources) : validate(parseJson(response, limits.characters), wire.allowed);
             parsed = validate(wire.decode(local), spec.allowed);
             break;
           } catch (error) {
             citationCandidate = error instanceof CitationLimitError ? error.candidate : undefined;
+            maxSources = error instanceof CitationLimitError ? error.maxSources : Infinity;
             validationError = error instanceof Error ? error.message : 'Invalid JSON';
             previousOutput = response.slice(0, spec.batch ? 8000 : OUTPUT_CHARS);
           }
@@ -1111,8 +1116,8 @@ export class SummaryTree {
     const sources = spec.sources;
     const result = (summary: NodeSummary): SummaryNode => ({ key: spec.key, kind: 'overview', label, sources, summary });
     const summary = await this.node(spec, (value, refs) => {
-      const checked = validateSummary(value, refs, BATCH_OUTPUT);
-      if (requireCompact && !this.compactRoots([result(checked)])) throw new Error('Compact final budget exceeded: shorten redundant prose and citations without dropping distinct work or qualifications');
+      const checked = validateSummary(value, refs, BATCH_OUTPUT, requireCompact ? LUNA_BATCH.rootReferences : Infinity);
+      if (requireCompact && !this.compactRoots([result(checked)])) throw new Error(`Compact final budget exceeded: ${summaryTokens(JSON.stringify(this.finalSummaries([result(checked)])))} estimated tokens including provenance; the maximum is ${LUNA_BATCH.rootTokens}. Shorten redundant prose without dropping distinct work or qualifications`);
       return checked;
     });
     this.db.prepare('INSERT OR REPLACE INTO summary_parent_inputs(key,children_json,compact,label) VALUES (?,?,?,?)')
