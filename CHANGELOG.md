@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.8
 
 - One automatic-preparation control runs local indexing followed by paid summary caching, with a shared failure status and explicit retry. Preserve existing opt-outs and old open tabs' local-only consent; never retry failed paid work merely because time passes.
 - Remove the separate summary settings component, duplicate status polling and unused background source-checkpoint calculation. Background completion verifies captured originals and permissions rather than rebuilding the live snapshot; later arrivals belong to the next batch.
