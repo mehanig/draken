@@ -6,17 +6,16 @@ import { availableCount } from './store';
 import { activity } from './activity';
 import { HttpError } from '../errors';
 import { historyProgress, historyReadiness, prepareHistory } from '../memory/service';
-import { expireConversations, hasActiveConversations } from './conversation';
+import { expireConversations } from './conversation';
 import { registerUpdateStatus } from './update-status';
 import type { AutoIndexSettings } from '../types';
 import { cancelSummaryPreparation, configureAutoSummary, summaryPreparationEnabled, summaryPreparationSettings, warmSummaryCache } from './summary-preparation';
 
-const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 64;
+const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 1;
 type State = Pick<AutoIndexSettings, 'phase' | 'pending_records' | 'last_completed_at' | 'error'>;
 interface Operations {
   enabled(): boolean; idle(): boolean; now(): number;
   expire?(now: number): void;
-  activeConversations?(): boolean;
   needsPreparation?(): boolean;
   scan(signal: AbortSignal): Promise<{ warnings: string[] }>;
   stamp(before: string): Map<string, string>;
@@ -27,8 +26,8 @@ interface Operations {
 }
 const initial = (): State => ({ phase: 'off', pending_records: 0, last_completed_at: null, error: '' });
 
-/** One cancellable owner for discovery, local indexing and separately opted-in
- * paid cache preparation. It never creates snapshots or final briefings. */
+/** One cancellable owner for discovery, local indexing and automatic
+ * summary cache preparation. It never creates snapshots or final briefings. */
 class AutoIndexer {
   state = initial();
   private retryAt = 0;
@@ -68,12 +67,7 @@ class AutoIndexer {
       if (baseline) for (const key of baseline.keys()) if (!current.has(key)) changed++;
       this.state.pending_records = changed;
       if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
-      // With no active conversation, retain the strict64/no-timed-tail policy.
-      // Live conversations get the first positive delta at the minute check.
-      // Metadata/link/receipt upgrades can need a local pass with zero counter
-      // delta; this path shares the same bounded cancellation and error backoff.
-      const live = this.ops.activeConversations?.() === true;
-      if (changed >= BATCH || (live && (changed > 0 || this.ops.needsPreparation?.()))) {
+      if (changed >= BATCH || this.ops.needsPreparation?.()) {
         this.state.phase = 'indexing';
         await this.ops.prepare(before, signal);
         if (signal.aborted || !this.ops.enabled()) return;
@@ -111,7 +105,7 @@ let unregisterStatus: (() => void) | undefined;
 export function startBackgroundIndexing() {
   if (timer) return;
   worker ||= createAutoIndexer({ enabled, idle: () => activity.backgroundIdle && !historyProgress().active && !historyProgress().queued,
-    now: Date.now, expire: expireConversations, activeConversations: hasActiveConversations, needsPreparation: () => !historyReadiness().ready,
+    now: Date.now, expire: expireConversations, needsPreparation: () => !historyReadiness().ready,
     scan: scanSessions, stamp: before => sourceStamps(getDb(), before), baseline: () => loadSourceCheckpoint(getDataDir()), prepare: (before, signal) => prepareHistory(before, signal, true),
     prepareSummaries: signal => warmSummaryCache(signal, () => { if (worker) worker.state.phase = 'summarizing'; }),
     completed: at => { getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_last_completed',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at); } });

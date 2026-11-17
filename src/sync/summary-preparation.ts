@@ -7,13 +7,12 @@ import { assertEvidenceAvailable, previewSummaryInput } from './store';
 import { SummaryTree, summaryPreparationKey, type SummaryInput } from './tree';
 import { digest, sourceKey } from './normalize';
 
-const BATCH = 64;
 const FAILURE = 'Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly enable summaries to retry. Cached work is retained.';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
 function save(key: string, value: string) {
   getDb().prepare('INSERT INTO sync_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
 }
-export const summaryPreparationEnabled = () => setting('auto_summary') === 'true';
+export const summaryPreparationEnabled = () => (setting('auto_summary') ?? 'true') === 'true';
 const indexingEnabled = () => setting('auto_index') === 'true';
 const idle = () => activity.backgroundIdle && !historyProgress().active && !historyProgress().queued;
 interface Receipt { id: number; input_key: string; source_keys_json: string; cache_receipt_json: string; total_entries: number; completed_at: string | null }
@@ -51,9 +50,6 @@ function checkpoint(input: SummaryInput): Checkpoint {
   return { keys: input.items.map(item => [digest(JSON.stringify([item.agent || 'pi', item.session_id, item.entry_id])),
     digest(JSON.stringify([sourceKey(item), item.agent, item.session_id, item.cwd, item.timestamp, item.role]))]),
     recipe: summaryPreparationKey({ ...input, items: [] }) };
-}
-function completed(): Receipt | undefined {
-  return getDb().prepare("SELECT id,input_key,source_keys_json,cache_receipt_json,total_entries,completed_at FROM background_runs WHERE status='completed' ORDER BY id DESC LIMIT 1").get() as Receipt | undefined;
 }
 function matching(key: string): Receipt | undefined {
   return getDb().prepare("SELECT id,input_key,source_keys_json,cache_receipt_json,total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key=? ORDER BY id DESC LIMIT 1").get(key) as Receipt | undefined;
@@ -107,16 +103,8 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
       const key = summaryPreparationKey(input);
       const receipt = matching(key);
       if (receipt && cacheIntact(receipt.cache_receipt_json)) return;
-      const sources = checkpoint(input), last = completed();
-      let prior: Checkpoint | undefined;
-      if (last) {
-        prior = JSON.parse(last.source_keys_json) as Checkpoint;
-        if (!Array.isArray(prior.keys) || prior.keys.some(pair => !Array.isArray(pair) || pair.length !== 2 || pair.some(value => typeof value !== 'string')) || typeof prior.recipe !== 'string') throw new Error('Invalid receipt metadata');
-      }
-      const old = new Map(prior?.keys), current = new Map(sources.keys);
-      const changed = sources.keys.filter(([id, hash]) => old.get(id) !== hash).length + [...old.keys()].filter(id => !current.has(id)).length;
-      // Model/recipe/context changes need a fresh full receipt even when no IDs arrived.
-      if (input.items.length < BATCH || (!receipt && changed < BATCH && (!prior || prior.recipe === sources.recipe))) return;
+      if (!input.items.length) return;
+      const sources = checkpoint(input);
       check();
       run = db.prepare(`SELECT id,invocations,max_invocations FROM background_runs WHERE input_key=?
         AND status IN ('cancelled','interrupted') ORDER BY id DESC LIMIT 1`).get(key) as Run | undefined;

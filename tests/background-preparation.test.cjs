@@ -48,14 +48,15 @@ async function waitFor(predicate) {
   assert.fail('Timed out waiting for synthetic work');
 }
 
-test('paid consent is separately default-off, validated and preserved across upgrades and indexing toggles', async () => {
+test('summaries default on; explicit opt-out is validated and preserved across upgrades and indexing toggles', async () => {
   await append(64);
-  assert.equal(background.autoIndexSettings().enabled, true); assert.equal(background.autoIndexSettings().summary_enabled, false);
+  assert.equal(background.autoIndexSettings().enabled, true); assert.equal(background.autoIndexSettings().summary_enabled, true);
+  background.setAutoSummary(false); initSchema(getDb()); assert.equal(prep.summaryPreparationSettings().enabled, false);
   await warm(); assert.equal(calls().length, 0); assert.equal(runs().length, 0);
   for (const value of ['true', 1, null, {}, []]) assert.throws(() => background.setAutoSummary(value), /boolean/);
   background.setAutoIndex(false); assert.throws(() => background.setAutoSummary(true), /automatic indexing/);
   getDb().prepare("DELETE FROM sync_settings WHERE key='auto_summary'").run();
-  initSchema(getDb()); assert.equal(prep.summaryPreparationSettings().enabled, false);
+  initSchema(getDb()); assert.equal(prep.summaryPreparationSettings().enabled, true);
   background.setAutoIndex(true); background.setAutoSummary(true); background.setAutoIndex(false);
   assert.equal(prep.summaryPreparationSettings().enabled, true); assert.equal(prep.summaryPreparationSettings().status, 'paused');
   await warm(); assert.equal(calls().length, 0);
@@ -63,18 +64,15 @@ test('paid consent is separately default-off, validated and preserved across upg
   background.setAutoIndex(true); background.setAutoSummary(false); await warm(); assert.equal(calls().length, 0); untouched();
 });
 
-test('a small initial tail stays manual; three accumulated batches survive restarts without snapshots and explicit preparation reuses the complete tree', async () => {
-  background.setAutoSummary(true); await append(63); await warm(); assert.equal(runs().length, 0);
-  await append(1); await warm(); assert.equal(prep.summaryPreparationSettings().prepared_entries, 64); untouched();
-  for (const total of [128, 192]) {
+test('default-on single-entry tails survive restarts without snapshots; explicit sync reuses the complete tree', async () => {
+  await append(1); await warm(); assert.equal(prep.summaryPreparationSettings().prepared_entries, 1); untouched();
+  for (const total of [2, 3]) {
     await background.stopBackgroundIndexing(); closeDb(); store.recoverInterruptedRuns();
-    await append(63); const count = calls().length; await warm(); assert.equal(calls().length, count, 'small tails do not flush');
-    assert.equal(prep.summaryPreparationSettings().prepared_entries, total - 64, 'status reports the last successful pass, not live readiness');
     await append(1); await warm(); assert.equal(prep.summaryPreparationSettings().prepared_entries, total); untouched();
     const after = calls().length; await warm(); await warm(); assert.equal(calls().length, after, 'same successful input is free on every tick');
   }
-  assert.deepEqual(runs().map(run => run.total_entries), [64, 128, 192]);
-  assert.equal(store.availableCount(), 192); assert.equal(store.pendingCount(), 192);
+  assert.deepEqual(runs().map(run => run.total_entries), [1, 2, 3]);
+  assert.equal(store.availableCount(), 3); assert.equal(store.pendingCount(), 3);
   const before = getDb().prepare('SELECT total_changes() n').get().n;
   const settings = prep.summaryPreparationSettings(); assert.equal(settings.status, 'waiting'); assert.ok(settings.last_completed_at);
   assert.equal(getDb().prepare('SELECT total_changes() n').get().n, before, 'settings are read-only');
@@ -82,7 +80,7 @@ test('a small initial tail stays manual; three accumulated batches survive resta
   assert.doesNotMatch(JSON.stringify(receipts), /PRIVATE_SOURCE_SENTINEL|private-workspace|deployment/);
   assert.ok(receipts.every(run => run.status === 'completed' && run.processed_entries === run.total_entries));
   const count = calls().length, sync = store.startConversationSync('synthetic-explicit-start');
-  assert.equal(sync.items.length, 192); await generateReply(sync.id);
+  assert.equal(sync.items.length, 3); await generateReply(sync.id);
   const explicit = calls().slice(count); assert.equal(explicit.length, 1, 'foreground only needs its final verdict'); assert.equal(explicit[0].task, 'final_verdict');
   assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
 });
@@ -90,13 +88,12 @@ test('a small initial tail stays manual; three accumulated batches survive resta
 test('equal-count source edits accumulate canonically, while model and recipe changes reprepare without new IDs', async () => {
   background.setAutoSummary(true); await append(128); await warm();
   rows[1].message.content += ' changed'; writeRows(); await scanSessions();
-  assert.equal(prep.summaryPreparationSettings().prepared_entries, 128); let before = calls().length; await warm(); assert.equal(calls().length, before);
+  assert.equal(prep.summaryPreparationSettings().prepared_entries, 128); let before = calls().length; await warm(); assert.ok(calls().length > before);
   let edited = 1;
   for (const count of [32, 63, 64]) {
     for (let n = edited + 1; n <= count; n++) rows[n].message.content += ' changed';
     edited = count; writeRows(); await scanSessions(); await warm();
-    if (count < 64) assert.equal(calls().length, before, `${count} edits count once each and cannot trigger a 64-record batch`);
-    else assert.ok(calls().length > before);
+    assert.ok(calls().length > before); before = calls().length;
   }
   assert.equal(prep.summaryPreparationSettings().prepared_entries, 128);
   process.env.DRAKEN_PI_SUMMARY_MODEL = 'synthetic/new-summary';
@@ -105,27 +102,27 @@ test('equal-count source edits accumulate canonically, while model and recipe ch
   try {
     tree.summaryPreparationKey = input => 'new-recipe-' + original(input);
     await warm();
-    assert.equal(prep.summaryPreparationSettings().prepared_entries, 128); assert.equal(runs().length, 4);
+    assert.equal(prep.summaryPreparationSettings().prepared_entries, 128); assert.equal(runs().length, 7);
   } finally { tree.summaryPreparationKey = original; }
   untouched();
 });
 
-test('editing an untitled session’s first user message does not charge for a changed label on every record', async () => {
+test('a single edited message is prepared and subsequent unchanged checks reuse it', async () => {
   background.setAutoSummary(true); await append(128); await warm();
   const before = calls().length, oldName = store.previewSummaryInput().items[0].session_name;
   rows[0].message.content = 'Different first user message and derived session title'; writeRows(); await scanSessions();
   assert.notEqual(store.previewSummaryInput().items[0].session_name, oldName);
-  await warm(); assert.equal(calls().length, before); assert.equal(runs().length, 1); untouched();
+  await warm(); assert.ok(calls().length > before); assert.equal(runs().length, 2);
+  const after = calls().length; await warm(); assert.equal(calls().length, after); untouched();
 });
 
-test('removals count once and refresh retained summaries only at the batch threshold', async () => {
+test('removals refresh retained summaries at the next idle check', async () => {
   background.setAutoSummary(true); await append(128); await warm(); const before = calls().length;
   for (const removed of [32, 63, 64]) {
     rows.length = 128 - removed; writeRows(); await scanSessions(); await warm();
-    if (removed < 64) assert.equal(calls().length, before);
-    else assert.ok(calls().length > before);
+    assert.ok(calls().length > before);
   }
-  assert.deepEqual(runs().map(run => run.total_entries), [128, 64]); untouched();
+  assert.deepEqual(runs().map(run => run.total_entries), [128, 96, 65, 64]); untouched();
 });
 
 test('lost or corrupt outputs invalidate completed receipts and rebuild only bounded reusable cache work', async () => {

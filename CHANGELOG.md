@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3
+
+### Prepare summaries and embeddings ahead by default
+
+- Background summary preparation defaults on when no preference is saved, using the configured summary provider and quota/API billing. Explicit saved opt-outs remain off.
+- Remove the 64-entry gates and active-conversation scheduling split. Idle minute checks index and summarize new or changed activity, including single-entry tails, without creating a sync, briefing or review.
+- Reuse the existing scheduler, shared summary cache, durable receipts and embedding checkpoints. Unchanged prepared inputs cause no new model calls. Explicit syncs reuse completed work and generate their briefing; unfinished or changed inputs may still require preparation.
+- Retain foreground priority, cancellation ownership, invocation limits and pause-until-retry handling for provider failures. No schema, endpoint, worker or preview system added.
+
 ## 0.8.2
 
 ### Show new activity instead of the unreviewed backlog

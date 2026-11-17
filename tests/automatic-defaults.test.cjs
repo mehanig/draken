@@ -18,12 +18,12 @@ function legacy(settings = []) {
 function noActivity(db) {
   for (const table of ['agent_sessions', 'agent_entries', 'syncs', 'sync_items', 'sync_runs', 'background_runs', 'sync_messages', 'sync_coverage', 'live_calls']) assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, table);
 }
-function readOnlySettings(expected) {
+function readOnlySettings(expected, summaries = true) {
   const db = getDb(), changes = db.prepare('SELECT total_changes() n').get().n;
   for (let n = 0; n < 3; n++) {
     assert.equal(autoIndexSettings().enabled, expected);
-    assert.equal(autoIndexSettings().summary_enabled, false, 'local indexing consent never authorizes paid cache work');
-    assert.equal(summaryPreparationSettings().enabled, false, 'retired paid consent is not revived on upgrade');
+    assert.equal(autoIndexSettings().summary_enabled, summaries);
+    assert.equal(summaryPreparationSettings().enabled, summaries);
   }
   assert.equal(db.prepare('SELECT total_changes() n').get().n, changes, 'settings reads do not migrate, seed or start work');
   for (const key of obsolete) assert.equal(db.prepare('SELECT value FROM sync_settings WHERE key=?').get(key), undefined);
@@ -57,7 +57,11 @@ for (const settings of [
     }
   });
 }
-test('an older nonempty database without sync settings stays off and is never seeded on restart', () => {
+test('explicit summary opt-out survives initialization and restart', () => {
+  legacy([['auto_index', 'true'], ['auto_summary', 'false']]);
+  readOnlySettings(true, false); closeDb(); readOnlySettings(true, false);
+});
+test('an older nonempty database without sync settings keeps indexing off and is never seeded on restart', () => {
   const old = new Database(path.join(root, 'draken.db'));
   old.exec("CREATE TABLE sqliteX_prior_data(id INTEGER PRIMARY KEY,note TEXT); INSERT INTO sqliteX_prior_data VALUES(1,'keep me')"); old.close();
   for (let n = 0; n < 2; n++) {

@@ -28,13 +28,11 @@ test('exact idle deadline is metadata-only until cleanup, never review or transc
   store.saveNotes(id, 'Keep decision', 'Keep carry forward');
   clock += IDLE - 1;
   assert.equal(lifecycle.conversationStatus(id).ended_at, null);
-  assert.equal(lifecycle.hasActiveConversations(), true);
   for (let n = 0; n < 3; n++) { store.homeOverview(); store.overview(); store.getProgress(id); }
   assert.equal(lifecycle.conversationStatus(id).last_user_at, original.last_user_at);
   clock++;
   const changes = db.prepare('SELECT total_changes() n').get().n;
   assert.equal(lifecycle.conversationStatus(id).ended_at, original.expires_at);
-  assert.equal(lifecycle.hasActiveConversations(), false);
   assert.equal(db.prepare('SELECT total_changes() n').get().n, changes, 'Polling does not persist expiry');
   assert.equal(persisted(id).conversation_ended_at, null);
   lifecycle.expireConversations();

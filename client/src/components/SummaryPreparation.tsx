@@ -35,7 +35,7 @@ export function SummaryPreparation({ active, indexing, controls = false, disable
         onChange={event => void save(event.target.checked)} />
         <span><strong>Prepare summaries ahead</strong><span className="small muted">Use the configured summary provider and its quota or API billing to cache reusable summaries. Never create a sync or briefing automatically.</span></span>
       </label>
-      <p className="small muted">Off until you enable it, including after an upgrade. Requires automatic indexing. After 64 new or changed eligible entries, prepare summary chunks and compaction in the background. Starting a chat or sync reuses completed work; changed tails, reconciliation and the opening briefing may still need preparation.</p>
+      <p className="small muted">On by default; saved opt-outs are preserved. Requires automatic indexing. New or changed activity is indexed and summarized at idle checks, including small tails. Starting a chat or sync reuses completed work; changed tails, reconciliation and the opening briefing may still need preparation.</p>
       <p className="small muted">Foreground work takes priority. Disabling either option stops background preparation and keeps valid cache entries. Provider failures pause paid retries until you explicitly retry. Preparation usage includes these requests; cached entries are not reviewed work or completed syncs.</p>
     </>}
     {settings && (controls || settings.enabled) && <>
