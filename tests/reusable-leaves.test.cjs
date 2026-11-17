@@ -662,12 +662,25 @@ async function rebuildBriefing(id) {
   try { return await generateReply(id, undefined, undefined, { deferHistory: true }); }
   finally { getDb().prepare('UPDATE syncs SET briefing=? WHERE id=?').run(briefing, id); }
 }
+test('briefing lifecycle checks do not reload originals; final admission and commit each verify provenance once', async t => {
+  session(3); const sync = await start(), seed = new SummaryTree(sync, 0, new AbortController().signal);
+  seedLeaf(seed, sync.items); seed.leaves.close();
+  const originalOpen = store.requireOpen, originalVerify = SummaryTree.prototype.verifyFinal;
+  const reads = []; let verified = 0;
+  t.mock.method(store, 'requireOpen', (...args) => { reads.push(args[2] ?? true); return originalOpen(...args); });
+  t.mock.method(SummaryTree.prototype, 'verifyFinal', function () { verified++; return originalVerify.call(this); });
+  const result = await generateReply(sync.id, undefined, undefined, { deferHistory: true });
+  assert.ok(result.briefing); assert.equal(reads.filter(Boolean).length, 1);
+  assert.ok(reads.filter(value => !value).length >= 2);
+  assert.equal(verified, 2, 'verify at final inference admission and inside the save transaction');
+});
+
 for (const boundary of ['before-final', 'queued-exclusion', 'queued-cancel', 'returned-final', 'before-repair', 'returned-repair', 'persistence', 'agent-disabled'])
   test(`generateReply final fresh gate outside call prevents ${boundary}`, async () => {
     const data = session(3), sync = await start(), seed = new SummaryTree(sync, 0, new AbortController().signal);
     seedLeaf(seed, sync.items); seed.leaves.close();
     const originalBuild = SummaryTree.prototype.build, originalCall = SummaryTree.prototype.call, originalVerify = SummaryTree.prototype.verifyFinal;
-    let invoked = 0, verified = 0;
+    let invoked = 0;
     const revoke = () => store.setIncluded(data.id, false);
     SummaryTree.prototype.build = async function () {
       const roots = await originalBuild.call(this);
@@ -679,7 +692,7 @@ for (const boundary of ['before-final', 'queued-exclusion', 'queued-cancel', 're
       return roots;
     };
     SummaryTree.prototype.verifyFinal = function () {
-      if (++verified === 3 && boundary === 'persistence') revoke();
+      if (getDb().inTransaction && boundary === 'persistence') revoke();
       return originalVerify.call(this);
     };
     SummaryTree.prototype.call = async function (payload) {

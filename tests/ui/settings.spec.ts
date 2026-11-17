@@ -19,7 +19,7 @@ async function openSources(page: Page) {
 
 test('automatic indexing saves only enabled, preserves the choice on reload and retries local failures explicitly', async ({ page }) => {
   await nativePeer(page);
-  let state = { enabled: false, check_seconds: 60, batch_records: 64, phase: 'off', pending_records: 3, pending_entries: 131, last_completed_at: null, error: '' };
+  let state = { enabled: false, summary_enabled: false, check_seconds: 60, batch_records: 64, phase: 'off', pending_records: 3, pending_entries: 131, last_completed_at: null, error: '' };
   let fail = false;
   const patches: unknown[] = [], mutations: string[] = [];
   page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) mutations.push(new URL(request.url()).pathname); });
@@ -27,7 +27,7 @@ test('automatic indexing saves only enabled, preserves the choice on reload and 
     if (route.request().method() === 'PATCH') {
       const body = route.request().postDataJSON(); patches.push(body);
       if (fail) return route.fulfill({ status: 503, json: { error: 'Synthetic indexing settings failure' } });
-      state = { ...state, enabled: body.enabled, phase: body.enabled ? 'waiting' : 'off', error: '' };
+      state = { ...state, enabled: body.enabled, summary_enabled: body.enabled, phase: body.enabled ? 'waiting' : 'off', error: '' };
     }
     if (fail) return route.fulfill({ status: 503, json: { error: 'Synthetic indexing settings failure' } });
     return route.fulfill({ json: state });
@@ -37,26 +37,26 @@ test('automatic indexing saves only enabled, preserves the choice on reload and 
     return page.getByRole('dialog', { name: 'Settings', exact: true });
   };
   await page.goto('/'); let dialog = await open();
-  let toggle = dialog.getByRole('switch', { name: /Automatically index history/ });
+  let toggle = dialog.getByRole('switch', { name: /Automatically prepare history/ });
   await expect(toggle).toBeEnabled(); await expect(toggle).not.toBeChecked();
   await toggle.check(); await expect(toggle).toBeEnabled(); await expect(toggle).toBeChecked();
-  expect(patches).toEqual([{ enabled: true }]);
-  await page.reload(); dialog = await open(); toggle = dialog.getByRole('switch', { name: /Automatically index history/ });
+  expect(patches).toEqual([{ enabled: true, summaries: true }]);
+  await page.reload(); dialog = await open(); toggle = dialog.getByRole('switch', { name: /Automatically prepare history/ });
   await expect(toggle).toBeChecked(); await expect(dialog).toContainText('3 source changes waiting for local indexing');
   await expect(dialog).not.toContainText('entries available for your next sync');
   fail = true; await toggle.click();
   await expect(dialog.getByRole('alert')).toHaveText('Synthetic indexing settings failure'); await expect(toggle).toBeChecked();
   fail = false; await toggle.uncheck(); await expect(toggle).toBeEnabled(); await expect(toggle).not.toBeChecked();
-  await page.reload(); dialog = await open(); toggle = dialog.getByRole('switch', { name: /Automatically index history/ });
+  await page.reload(); dialog = await open(); toggle = dialog.getByRole('switch', { name: /Automatically prepare history/ });
   await expect(toggle).toBeEnabled(); await expect(toggle).not.toBeChecked();
-  expect(patches).toEqual([{ enabled: true }, { enabled: false }, { enabled: false }]);
+  expect(patches).toEqual([true, false, false].map(enabled => ({ enabled, summaries: true })));
   state = { ...state, enabled: true, phase: 'error', error: 'Synthetic local indexing failure' };
   await page.reload(); dialog = await open();
   await expect(dialog.getByRole('alert')).toHaveText('Synthetic local indexing failure');
-  await dialog.getByRole('button', { name: 'Retry automatic indexing' }).click();
-  await expect(dialog.getByRole('button', { name: 'Retry automatic indexing' })).toHaveCount(0);
-  await expect(dialog.getByRole('region', { name: 'Automatic indexing', exact: true })).toContainText('Waiting for the next indexing batch');
-  expect(patches).toEqual([{ enabled: true }, { enabled: false }, { enabled: false }, { enabled: true }]);
+  await dialog.getByRole('button', { name: 'Retry automatic preparation' }).click();
+  await expect(dialog.getByRole('button', { name: 'Retry automatic preparation' })).toHaveCount(0);
+  await expect(dialog.getByRole('region', { name: 'Automatic preparation', exact: true })).toContainText('Waiting for the next preparation batch');
+  expect(patches).toEqual([true, false, false, true].map(enabled => ({ enabled, summaries: true })));
   expect(mutations).toEqual(patches.map(() => '/api/settings/auto-index'));
   expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
 });

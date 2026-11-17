@@ -32,7 +32,7 @@ export interface Evidence {
 }
 
 export interface AutoIndexSettings {
-  enabled: boolean; summary_enabled: boolean; check_seconds: number; batch_records: number;
+  enabled: boolean; summary_enabled: boolean; summary: SummaryPreparationSettings; check_seconds: number; batch_records: number;
   phase: 'off' | 'waiting' | 'scanning' | 'indexing' | 'summarizing' | 'paused' | 'stopping' | 'error';
   pending_records: number; last_completed_at: string | null; error: string;
   pending_entries: number;

@@ -4,19 +4,19 @@ import type { SummaryPreparationSettings } from '../types';
 import { activity } from './activity';
 import { historyProgress } from '../memory/service';
 import { assertEvidenceAvailable, previewSummaryInput } from './store';
-import { SummaryTree, summaryPreparationKey, type SummaryInput } from './tree';
-import { digest, sourceKey } from './normalize';
+import { SummaryTree, summaryPreparationKey } from './tree';
+import { digest } from './normalize';
+import { defaultModels } from './models';
 
-const FAILURE = 'Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly enable summaries to retry. Cached work is retained.';
+const FAILURE = 'Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
 function save(key: string, value: string) {
   getDb().prepare('INSERT INTO sync_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
 }
-export const summaryPreparationEnabled = () => (setting('auto_summary') ?? 'true') === 'true';
+const summaryPreparationEnabled = () => (setting('auto_summary') ?? 'true') === 'true';
 const indexingEnabled = () => setting('auto_index') === 'true';
 const idle = () => activity.backgroundIdle && !historyProgress().active && !historyProgress().queued;
-interface Receipt { id: number; input_key: string; source_keys_json: string; cache_receipt_json: string; total_entries: number; completed_at: string | null }
-interface Checkpoint { keys: [string, string][]; recipe: string }
+interface Receipt { cache_receipt_json: string; total_entries: number; completed_at: string | null }
 interface Run { id: number; invocations: number; max_invocations: number }
 let consentRevision = 0;
 let active: { controller: AbortController; done: Promise<void>; working: boolean } | undefined;
@@ -42,17 +42,8 @@ export function configureAutoSummary(value: unknown): void {
   })();
 }
 
-function checkpoint(input: SummaryInput): Checkpoint {
-  // Canonical recipe/input hashes only; no original text, paths or provider output.
-  // SQL sequence IDs can be reassigned by a full rescan; that does not turn
-  // unchanged original records into another paid batch. Receipt identity still
-  // includes full ordering, while this delta counts canonical source changes.
-  return { keys: input.items.map(item => [digest(JSON.stringify([item.agent || 'pi', item.session_id, item.entry_id])),
-    digest(JSON.stringify([sourceKey(item), item.agent, item.session_id, item.cwd, item.timestamp, item.role]))]),
-    recipe: summaryPreparationKey({ ...input, items: [] }) };
-}
 function matching(key: string): Receipt | undefined {
-  return getDb().prepare("SELECT id,input_key,source_keys_json,cache_receipt_json,total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key=? ORDER BY id DESC LIMIT 1").get(key) as Receipt | undefined;
+  return getDb().prepare("SELECT cache_receipt_json,total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key=? ORDER BY id DESC LIMIT 1").get(key) as Receipt | undefined;
 }
 
 function cacheIntact(value: string | [string, string][]): boolean {
@@ -104,7 +95,6 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
       const receipt = matching(key);
       if (receipt && cacheIntact(receipt.cache_receipt_json)) return;
       if (!input.items.length) return;
-      const sources = checkpoint(input);
       check();
       run = db.prepare(`SELECT id,invocations,max_invocations FROM background_runs WHERE input_key=?
         AND status IN ('cancelled','interrupted') ORDER BY id DESC LIMIT 1`).get(key) as Run | undefined;
@@ -115,8 +105,8 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
         db.prepare("UPDATE background_runs SET status='running',stage='Planning',processed_entries=0,cache_hits=0,error='',completed_at=NULL WHERE id=?").run(run.id);
         input.models = { ...input.models, max_invocations: run.max_invocations };
       } else {
-        const result = db.prepare(`INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key,source_keys_json)
-          VALUES (?,?,?,?,?,?,?)`).run(input.models.summary, input.models.final, input.models.max_invocations, input.items.length, new Date().toISOString(), key, JSON.stringify(sources));
+        const result = db.prepare(`INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key)
+          VALUES (?,?,?,?,?,?)`).run(input.models.summary, input.models.final, input.models.max_invocations, input.items.length, new Date().toISOString(), key);
         run = { id: Number(result.lastInsertRowid), invocations: 0, max_invocations: input.models.max_invocations };
       }
       owner.working = true; onWork?.();
@@ -131,10 +121,10 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
       };
       await tree.build();
       check();
-      // Inputs can change while a provider is in flight. Keep useful cache fragments,
-      // but never publish a receipt for sources/models no longer admitted or available.
-      const latestInput = previewSummaryInput(); assertEvidenceAvailable(latestInput);
-      if (summaryPreparationKey(latestInput) !== key) { controller.abort(); throw new Error('Input changed'); }
+      // This receipt describes the captured input, not later arrivals. Verify its
+      // originals and permissions without rebuilding the entire live snapshot.
+      tree.verifyFinal();
+      if (JSON.stringify(defaultModels()) !== JSON.stringify(input.models)) { controller.abort(); throw new Error('Models changed'); }
       const cacheReceipt = tree.cacheReceipt();
       if (!cacheIntact(cacheReceipt)) throw new Error('Summary cache changed before completion');
       db.prepare("UPDATE background_runs SET status='completed',stage='Cached',error='',completed_at=?,cache_receipt_json=? WHERE id=?")

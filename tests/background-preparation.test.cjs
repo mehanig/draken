@@ -48,7 +48,7 @@ async function waitFor(predicate) {
   assert.fail('Timed out waiting for synthetic work');
 }
 
-test('summaries default on; explicit opt-out is validated and preserved across upgrades and indexing toggles', async () => {
+test('saved opt-outs survive upgrades; explicit automatic preparation controls both stages', async () => {
   await append(64);
   assert.equal(background.autoIndexSettings().enabled, true); assert.equal(background.autoIndexSettings().summary_enabled, true);
   background.setAutoSummary(false); initSchema(getDb()); assert.equal(prep.summaryPreparationSettings().enabled, false);
@@ -57,10 +57,11 @@ test('summaries default on; explicit opt-out is validated and preserved across u
   background.setAutoIndex(false); assert.throws(() => background.setAutoSummary(true), /automatic indexing/);
   getDb().prepare("DELETE FROM sync_settings WHERE key='auto_summary'").run();
   initSchema(getDb()); assert.equal(prep.summaryPreparationSettings().enabled, true);
-  background.setAutoIndex(true); background.setAutoSummary(true); background.setAutoIndex(false);
-  assert.equal(prep.summaryPreparationSettings().enabled, true); assert.equal(prep.summaryPreparationSettings().status, 'paused');
+  const on = background.setAutoIndex(true); assert.equal(on.summary.enabled, true);
+  background.setAutoIndex(false);
+  assert.equal(prep.summaryPreparationSettings().enabled, false); assert.equal(prep.summaryPreparationSettings().status, 'off');
   await warm(); assert.equal(calls().length, 0);
-  await background.stopBackgroundIndexing(); closeDb(); assert.equal(prep.summaryPreparationSettings().enabled, true);
+  await background.stopBackgroundIndexing(); closeDb(); assert.equal(prep.summaryPreparationSettings().enabled, false);
   background.setAutoIndex(true); background.setAutoSummary(false); await warm(); assert.equal(calls().length, 0); untouched();
 });
 
@@ -174,8 +175,10 @@ test('provider failures and malformed-output repairs pause paid work durably unt
   assert.equal(prep.summaryPreparationSettings().status, 'error');
   for (let n = 0; n < 5; n++) await warm(); assert.equal(calls().length, 2);
   await background.stopBackgroundIndexing(); closeDb(); store.recoverInterruptedRuns(); await warm(); assert.equal(calls().length, 2);
-  background.setAutoIndex(false); background.setAutoIndex(true); await warm(); assert.equal(calls().length, 2, 'index consent does not clear the paid retry block');
-  background.setAutoSummary(true); await warm(); assert.equal(calls().length, 4); assert.equal(runs().length, 2); await warm(); assert.equal(calls().length, 4);
+  assert.equal(background.autoIndexSettings().phase, 'error');
+  assert.equal(background.autoIndexSettings().error, prep.summaryPreparationSettings().error);
+  background.setAutoIndex(false); await warm(); assert.equal(calls().length, 2);
+  background.setAutoIndex(true); await warm(); assert.equal(calls().length, 4); assert.equal(runs().length, 2); await warm(); assert.equal(calls().length, 4);
   control({}); background.setAutoSummary(true); await warm(); assert.equal(runs().at(-1).status, 'completed');
   const usage = preparationUsage(getDb(), {}, Date.now() + 1000); assert.equal(usage.totals.requests, calls().length); assert.equal(usage.totals.failed_attempts, 2);
   assert.equal(usage.totals.entries, 0); assert.equal(usage.totals.completed_batches, 0); assert.ok(usage.totals.cost.usd > 0);
@@ -259,11 +262,11 @@ test('disable-enable cannot revive an old signal and foreground yielding drains 
   assert.equal(calls().length, 1);
 });
 
-test('disabling local indexing cancels paid work without withdrawing the separate saved summary opt-in', async () => {
+test('disabling automatic preparation cancels both stages; enabling resumes the same bounded allowance', async () => {
   background.setAutoSummary(true); await append(64); control({ delay: 10000 });
   const running = warm(); await waitFor(() => calls().length === 1);
   background.setAutoIndex(false); await background.yieldBackgroundIndexing(); await running;
-  assert.equal(prep.summaryPreparationSettings().enabled, true); assert.equal(prep.summaryPreparationSettings().status, 'paused');
+  assert.equal(prep.summaryPreparationSettings().enabled, false); assert.equal(prep.summaryPreparationSettings().status, 'off');
   control({}); await warm(); assert.equal(calls().length, 1);
   background.setAutoIndex(true); await warm(); assert.equal(runs().length, 1); assert.equal(runs()[0].invocations, 2); assert.equal(runs()[0].status, 'completed'); untouched();
 });
@@ -302,6 +305,20 @@ test('late foreground activity blocks subsequent provider calls even without a r
   try { await running; assert.equal(calls().length, 1); assert.equal(runs()[0].status, 'cancelled'); await warm(); assert.equal(calls().length, 1); }
   finally { release(); }
   control({}); await warm(); assert.equal(runs()[0].status, 'completed'); untouched();
+});
+
+test('later arrivals do not discard a completed captured batch; edited originals still block its receipt', async () => {
+  background.setAutoIndex(true); await append(1); control({ delay: 150 });
+  let running = warm(); await waitFor(() => calls().length === 1);
+  await append(1); await running;
+  assert.equal(runs()[0].status, 'completed'); assert.equal(runs()[0].total_entries, 1);
+  assert.equal(prep.summaryPreparationSettings().prepared_entries, 1);
+  running = warm(); await waitFor(() => calls().length === 2);
+  rows[1].message.content += ' changed while provider was running'; writeRows();
+  await running;
+  assert.equal(runs().at(-1).status, 'failed');
+  assert.equal(prep.summaryPreparationSettings().prepared_entries, 1);
+  assert.equal(background.autoIndexSettings().phase, 'error'); untouched();
 });
 
 test('a model configuration change during a request cannot publish a receipt for the new input', async () => {
