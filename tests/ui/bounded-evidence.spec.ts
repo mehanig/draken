@@ -8,7 +8,7 @@ test('starting and opening chat transfers no originals; citations fetch one exce
   expect(path.basename(path.dirname(overview.session_root))).toMatch(/^draken-browser-/);
   const id = randomUUID(), timestamp = new Date().toISOString();
   fs.writeFileSync(path.join(overview.session_root, id + '.jsonl'), [
-    { type: 'session', version: 3, id, timestamp, cwd: '/synthetic/bounded-evidence' },
+    { type: 'session', version: 3, id, timestamp, cwd: `/synthetic/bounded-evidence/${id}` },
     ...Array.from({ length: 60 }, (_, i) => ({ type: 'message', id: `${id}-${i}`, parentId: i ? `${id}-${i - 1}` : null, timestamp,
       message: { role: 'assistant', content: `Long original ${i}: ` + 'Source detail; not deployment verification. '.repeat(220) } })),
   ].map(JSON.stringify).join('\n') + '\n');
@@ -36,7 +36,7 @@ test('starting and opening chat transfers no originals; citations fetch one exce
   await citation.click(); await expect.poll(() => reads.length).toBe(2);
   await expect(page.locator('.evidence-body pre')).toBeVisible();
   await page.getByRole('button', { name: 'Back to evidence list' }).click();
-  await page.getByRole('textbox', { name: 'Filter evidence metadata' }).fill('/synthetic/bounded-evidence');
+  await page.getByRole('textbox', { name: 'Filter evidence metadata' }).fill(`/synthetic/bounded-evidence/${id}`);
   const panel = page.getByRole('region', { name: 'Snapshot evidence' });
   await expect(panel.locator('.pagination')).toContainText('60 entries');
   await expect(panel.getByRole('button', { name: /^Read evidence/ })).toHaveCount(25);

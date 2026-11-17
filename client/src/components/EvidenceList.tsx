@@ -18,7 +18,7 @@ export function SnapshotSource({ syncId, reference }: { syncId: number; referenc
         <dt>Source</dt><dd>{excerpt.item.source_path}</dd><dt>Entry</dt><dd>{excerpt.item.entry_id} · {excerpt.item.timestamp}</dd></dl>
       {excerpt.item.unavailable ? <p className="alert warning" role="status">{excerpt.item.unavailable}</p> : <>
         <pre>{excerpt.item.text}</pre><p className="small muted">Characters {Math.min(offset + 1, excerpt.total)}–{Math.min(offset + 4000, excerpt.total)} of {excerpt.total}</p>
-        {excerpt.total > 4000 && <div className="pagination"><button className="btn btn-secondary" disabled={!offset} onClick={() => setOffset(offset - 4000)}>Earlier text</button><button className="btn btn-secondary" disabled={offset + 4000 >= excerpt.total} onClick={() => setOffset(offset + 4000)}>Later text</button></div>}
+        {excerpt.total > 4000 && <div className="pagination"><button className="btn btn-secondary" disabled={!offset} onClick={() => { setExcerpt(null); setOffset(offset - 4000); }}>Earlier text</button><button className="btn btn-secondary" disabled={offset + 4000 >= excerpt.total} onClick={() => { setExcerpt(null); setOffset(offset + 4000); }}>Later text</button></div>}
       </>}
     </>}
   </article>;
@@ -54,10 +54,10 @@ export function EvidenceList({ syncId, active }: { syncId: number; active: boole
       {active && <SnapshotSource key={selection.revision} syncId={syncId} reference={selection.ref} />}
     </> : <>
       {error && <p role="alert">{error}</p>}
-      <div className="evidence-controls"><select className="input" aria-label="Evidence group" value={group} onChange={event => { setGroup(event.target.value); setOffset(0); }}><option value="items">New evidence in this snapshot</option><option value="context">Earlier context — not new progress</option></select>
-        <input className="input" aria-label="Filter evidence metadata" placeholder="Find a workspace, session, or evidence ID…" maxLength={200} value={query} onChange={event => { setQuery(event.target.value); setOffset(0); }} /></div>
+      <div className="evidence-controls"><select className="input" aria-label="Evidence group" value={group} onChange={event => { setPage(null); setGroup(event.target.value); setOffset(0); }}><option value="items">New evidence in this snapshot</option><option value="context">Earlier context — not new progress</option></select>
+        <input className="input" aria-label="Filter evidence metadata" placeholder="Find a workspace, session, or evidence ID…" maxLength={200} value={query} onChange={event => { setPage(null); setQuery(event.target.value); setOffset(0); }} /></div>
       {!page && !error && active && <p role="status">Loading evidence list…</p>}
-      {page && <><div className="pagination"><button className="btn btn-secondary" disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 25))}>Previous</button><span>{Math.floor(offset / 25) + 1} / {Math.max(1, Math.ceil(page.total / 25))} · {page.total} entries</span><button className="btn btn-secondary" disabled={offset + 25 >= page.total} onClick={() => setOffset(offset + 25)}>Next</button></div>
+      {page && <><div className="pagination"><button className="btn btn-secondary" disabled={!offset} onClick={() => { setPage(null); setOffset(Math.max(0, offset - 25)); }}>Previous</button><span>{Math.floor(offset / 25) + 1} / {Math.max(1, Math.ceil(page.total / 25))} · {page.total} entries</span><button className="btn btn-secondary" disabled={offset + 25 >= page.total} onClick={() => { setPage(null); setOffset(offset + 25); }}>Next</button></div>
         <div className="evidence-list">{page.items.map(item => <button className="btn btn-secondary" key={item.ref} onClick={() => select(item.ref)} aria-label={`Read evidence ${item.ref}`}><span className="reference">{item.ref}</span> {item.session_name || item.cwd} · {item.role}</button>)}</div>
       </>}
     </>}
