@@ -42,7 +42,8 @@ test('automatic indexing saves only enabled, preserves the choice on reload and 
   await toggle.check(); await expect(toggle).toBeEnabled(); await expect(toggle).toBeChecked();
   expect(patches).toEqual([{ enabled: true }]);
   await page.reload(); dialog = await open(); toggle = dialog.getByRole('switch', { name: /Automatically index history/ });
-  await expect(toggle).toBeChecked(); await expect(dialog).toContainText('131 entries available for your next sync');
+  await expect(toggle).toBeChecked(); await expect(dialog).toContainText('3 source changes waiting for local indexing');
+  await expect(dialog).not.toContainText('entries available for your next sync');
   fail = true; await toggle.click();
   await expect(dialog.getByRole('alert')).toHaveText('Synthetic indexing settings failure'); await expect(toggle).toBeChecked();
   fail = false; await toggle.uncheck(); await expect(toggle).toBeEnabled(); await expect(toggle).not.toBeChecked();

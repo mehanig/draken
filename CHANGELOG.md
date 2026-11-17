@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.2
+
+### Show new activity instead of the unreviewed backlog
+
+- Home now headlines **new entries to prepare**: eligible indexed entries never included in an earlier sync. Previously included unreviewed entries, reservations and review totals remain under collapsed Details.
+- Calculate the count from existing entry IDs and snapshot membership in the ordinary Home metadata query. No planner check, original-log reads, database copies, workers, new endpoints or background jobs are added.
+- Keep the meaning explicit: this is new activity, not an exact inference or billing count. Cached work is reused; unfinished work and the final briefing may still need processing. Existing Mark reviewed behavior and all sync membership/preparation rules are unchanged.
+
 ## 0.8.1
 
 ### Carry unreviewed entries forward without repeating completed work

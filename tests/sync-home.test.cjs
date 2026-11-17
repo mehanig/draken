@@ -18,6 +18,31 @@ test('new snapshots reserve all available entries without review; discard releas
  closeDb();assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM syncs WHERE status='open'").get().n,2,'Restart preserves independently open snapshots');
  store.completeSync(third.id,'','',true);assert.equal(store.homeOverview().covered,130);assert.equal(store.pendingCount(),3);assert.equal(store.getSync(second.id).status,'open');
 });
+test('Home counts new eligible entries once, independently of processing, reservation and review',async()=>{
+ session(4);await scanSessions();assert.equal(store.homeOverview().new_entries,4);
+ const first=store.startConversationSync(randomUUID());assert.equal(store.homeOverview().new_entries,0);
+ session(2);await scanSessions();assert.equal(store.homeOverview().new_entries,2);
+ getDb().prepare('UPDATE syncs SET conversation_ended_at=? WHERE id=?').run(new Date().toISOString(),first.id);
+ let home=store.homeOverview();assert.equal(home.available,6);assert.equal(home.new_entries,2);assert.equal(home.covered,0);
+ const second=store.startConversationSync(randomUUID());store.discardSync(second.id);
+ home=store.homeOverview();assert.equal(home.available,6);assert.equal(home.new_entries,0,'Repeated inclusion is not new, even without completed processing');
+ store.completeSync(first.id,'','',true);home=store.homeOverview();assert.equal(home.covered,4);assert.equal(home.available,2);assert.equal(home.new_entries,0);
+ session(3);await scanSessions();assert.equal(store.homeOverview().new_entries,3);
+ const fresh=getDb().prepare("SELECT id FROM agent_sessions WHERE id NOT IN (SELECT json_extract(evidence_json,'$.session_id') FROM sync_items)").get().id;
+ store.setIncluded(fresh,false);assert.equal(store.homeOverview().new_entries,0);
+ store.setIncluded(fresh,true);assert.equal(store.homeOverview().new_entries,3);
+ store.setAgentEnabled('pi',false);assert.equal(store.homeOverview().new_entries,0);
+ store.setAgentEnabled('pi',true);assert.equal(store.homeOverview().new_entries,3);
+ getDb().prepare("UPDATE sync_settings SET value='2027-01-01T00:00:00Z' WHERE key='history_since'").run();assert.equal(store.homeOverview().new_entries,0);
+ assert.equal(calls().length,0);
+});
+test('Home new-entry count uses only indexed metadata, without reading originals or writing state',async()=>{
+ session(3);await scanSessions();fs.rmSync(path.join(root,'sessions'),{recursive:true});
+ const db=getDb(),before=db.prepare('SELECT total_changes() n').get().n;
+ server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ for(let i=0;i<3;i++){const response=await fetch(`http://127.0.0.1:${server.address().port}/api/home`);assert.equal(response.status,200);const home=await response.json();assert.equal(home.new_entries,3);assert.equal(home.available,3);}
+ assert.equal(db.prepare('SELECT total_changes() n').get().n,before);assert.equal(calls().length,0);assert.equal(db.prepare('SELECT count(*) n FROM syncs').get().n,0);
+});
 test('prior sync and call history are frozen, summarized cheaply and carried as summaries rather than active quotes',async()=>{
  session(2);await scanSessions();const first=store.startSync();await generateReply(first.id);getDb().prepare('INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,?,?,?)').run(first.id,'user','HISTORICAL_QUESTION: should we ship?','2026-01-02');
  const second=store.startConversationSync(randomUUID());getDb().prepare('INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,?,?,?)').run(first.id,'user','ARRIVED_AFTER_SNAPSHOT','2026-01-03');
