@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { getDataDir } from '../data-dir';
 import fs from 'fs';
+import { isMainThread } from 'worker_threads';
 import { entryTable, migratePointers } from './pointer-migration';
 import { migrateSnapshotPointers } from './snapshot-pointers';
 import { renameAgentTables, migrateAgents } from './agent-migration';
@@ -20,6 +21,15 @@ export function getDb(): Database.Database {
     db.pragma('busy_timeout = 5000');
     try { initSchema(db); } catch (error) { db.close(); db = null; throw error; }
   }
+  return db;
+}
+
+/** Preview workers open only the already-migrated private backup. Never run
+ * migrations/seed preferences or open the canonical application DB there. */
+export function openPreviewDb(): Database.Database {
+  if (isMainThread || db) throw new Error('Preview database requires a fresh worker');
+  db = new Database(path.join(getDataDir(), 'draken.db'), { fileMustExist: true });
+  db.pragma('foreign_keys = ON');
   return db;
 }
 

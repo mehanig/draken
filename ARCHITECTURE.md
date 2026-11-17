@@ -1,6 +1,6 @@
 # How Draken is built
 
-This guide describes Draken 0.8.1, not the older Docker/task dashboard or a claim of live deployment. The diagrams are plain text so they also work in a terminal. For a browser-friendly version, open the self-contained [visual architecture guide](docs/architecture.html). It needs no app login and contains no live data or executable controls.
+This guide describes Draken 0.8.2, not the older Docker/task dashboard or a claim of live deployment. The diagrams are plain text so they also work in a terminal. For a browser-friendly version, open the self-contained [visual architecture guide](docs/architecture.html). It needs no app login and contains no live data or executable controls.
 
 ## 1. What Draken does
 
@@ -134,6 +134,8 @@ AVAILABLE -- create snapshot --> INCLUDED IN AN OPEN SYNC
 ```
 
 Several snapshots may remain open. A new sync skips unreviewed entries reserved by another open, non-ended conversation. Idle ending releases the reservation, not the original snapshot membership. Source selection and the installation's saved history-start date also affect eligibility.
+
+Home separates that membership from processing. Its primary counts are estimated **entries needing new summaries** and **entries already cached**; review totals are collapsed under Details. A dedicated local preview uses the actual leaf planner and verified original evidence, without provider/embedding calls or creating snapshots, runs, review or billing activity. The Home client requests this free check explicitly through POST; status GETs only read metadata. A single cancellable owner yields to foreground work and drains before shutdown. Counts are unknown while checking, stale, paused or unverifiable, and a ready estimate carries its check time for indexed inputs. Fresh actual preparation still rechecks evidence. Counts are unique primary entries, not leaf occurrences or background context, and never imply that reconciliation or final briefing inference is free.
 
 **Why:** you should be able to start a new conversation without being forced to approve the previous one. Reading, summarizing or hearing something is not the same as reviewing it.
 

@@ -7,6 +7,8 @@ import type { HomeOverview } from '../types';
 import { SyncCost } from '../components/SyncCost';
 import { SetupPanel } from '../components/SetupPanel';
 import { AutomaticPreparation } from '../components/AutomaticPreparation';
+import { PreparationPreview } from '../components/PreparationPreview';
+import { invalidatePreparationPreview } from '../api/preview-inputs';
 
 import { linkClick, type Navigate } from '../navigation';
 const date = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -29,7 +31,7 @@ export function Home({ navigate }: { navigate: Navigate }) {
   }, []);
   const start = async (mode: 'call' | 'chat' = 'call') => {
     if (starting.current) return;
-    starting.current = true; setWork('Collecting new activity…'); setError('');
+    starting.current = true; invalidatePreparationPreview(); setWork('Collecting new activity…'); setError('');
     requestId.current ||= newRequestId();
     try {
       if (mode === 'call') {
@@ -50,7 +52,12 @@ export function Home({ navigate }: { navigate: Navigate }) {
       {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div></div>
     {!window.isSecureContext && <p className="small muted">Use trusted HTTPS or localhost for the combined sync and call.</p>}
     <p className="home-hint muted small">Automatic indexing accumulates searchable history locally. Enable Prepare summaries ahead in Settings to cache summary work before your next chat. Click Sync with Draken or Chat instead to create the snapshot and opening briefing. Active conversations receive prepared updates between turns and end after 30 minutes without a user message. Nothing is marked reviewed until you confirm it.</p>
-    <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> available for a new sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> reserved, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
+    <PreparationPreview loading={!home} busy={Boolean(work || home?.busy || home?.active_call)} />
+    <details className="home-scope-details">
+      <summary>Details — sync scope and review history</summary>
+      <p className="small muted">Scope tracking, not billable work. Review status and prior inclusion do not indicate whether summaries are cached.</p>
+      <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> available for a new sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> reserved, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
+    </details>
     <AutomaticPreparation />
     <details className="home-preparation-info">
       <summary>Automatic indexing and cost tracking</summary>

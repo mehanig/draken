@@ -129,7 +129,13 @@ export async function stopBackgroundIndexing() {
   if (unregisterStatus === unregister) unregisterStatus = undefined;
   if (!timer && worker === prior) worker = undefined;
 }
-export async function yieldBackgroundIndexing() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }
+/** Preview already owns its independent lease; never drain that lease here. */
+export async function yieldIndexingForPreview() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }
+export async function yieldBackgroundIndexing() {
+  const release = activity.beginMutation(true);
+  try { await Promise.all([yieldIndexingForPreview(), activity.drainPreview()]); }
+  finally { release(); }
+}
 export function autoIndexSettings(): AutoIndexSettings {
   const on = enabled();
   const last = getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_last_completed'").get() as { value: string } | undefined;

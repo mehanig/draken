@@ -7,6 +7,7 @@ import { cleanText, digest, NormalizedEntry } from './normalize';
 import { fileRecords, RECORD_BYTES, type RecordPointer } from './jsonl';
 import { getSourceRoots } from '../sources/registry';
 import { identifySource, normalizeSource } from '../sources/adapters';
+import { activity } from './activity';
 
 interface Source {
   id: string; agent: AgentKind; external_id: string; path: string; cwd: string; name: string; byte_offset: number;
@@ -227,11 +228,13 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
 
 let scanning: Promise<ScanResult> | null = null;
 export function scanSessions(signal?: AbortSignal): Promise<ScanResult> {
+  activity.assertNoPreview();
   if (scanning) return scanning.catch(error => {
     signal?.throwIfAborted();
     if (error instanceof Error && error.name === 'AbortError') return scanSessions(signal);
     throw error;
   });
+  const release = activity.beginMutation();
   scanning = (async () => {
     const warnings: string[] = [];
     const db = getDb(), roots = getSourceRoots(), seen = new Set<string>();
@@ -264,12 +267,18 @@ export function scanSessions(signal?: AbortSignal): Promise<ScanResult> {
     }
     signal?.throwIfAborted();
     db.transaction(() => {
-      for (const { id } of agents) db.prepare('UPDATE agent_sessions SET missing=1 WHERE agent=? AND agent IN (SELECT id FROM agent_sources WHERE enabled=1)').run(id);
-      const mark = db.prepare('UPDATE agent_sessions SET missing = 0 WHERE id = ?');
+      // Do not toggle every present session through missing=1 on each scan:
+      // unchanged bookkeeping must not revoke a verified preparation estimate.
+      const missing = db.prepare('UPDATE agent_sessions SET missing=1 WHERE id=?');
+      for (const { id } of agents) {
+        const rows = db.prepare('SELECT id FROM agent_sessions WHERE agent=? AND missing=0 AND agent IN (SELECT id FROM agent_sources WHERE enabled=1)').all(id) as { id: string }[];
+        for (const row of rows) if (!seen.has(row.id)) missing.run(row.id);
+      }
+      const mark = db.prepare('UPDATE agent_sessions SET missing = 0 WHERE id = ? AND missing!=0');
       for (const id of seen) mark.run(id);
     })();
     if (!warnings.length) db.prepare("UPDATE sync_settings SET value='1' WHERE key='source-scan-complete-v1'").run();
     return { files, added, warnings: warnings.slice(0, 100) };
-  })().finally(() => { scanning = null; });
+  })().finally(() => { scanning = null; release(); });
   return scanning;
 }

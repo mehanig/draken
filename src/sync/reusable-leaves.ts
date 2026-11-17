@@ -6,6 +6,7 @@ import { digest, sourceKey } from './normalize';
 import { EvidenceScope, evidenceIdentities } from './evidence-scope';
 import { EntryReader } from './source-files';
 import { cleanText } from './normalize';
+import { admittedAgent } from '../sources/registry';
 
 export interface LeafInput {
   session: string;
@@ -34,11 +35,11 @@ export class ReusableLeaves {
   private readonly normalization = new NormalizationCache();
   private readonly scope: EvidenceScope;
   constructor(private db: Database.Database, frozenScope: Iterable<Evidence> = []) {
-    this.reader = new EvidenceReader(db, undefined, this.normalization);
     const scopeReader = new EvidenceReader(db, undefined, this.normalization);
     try {
       this.scope = new EvidenceScope(db, [...frozenScope].map(item => JSON.parse(scopeReader.freeze(item))));
     } finally { scopeReader.close(); }
+    this.reader = new EvidenceReader(db, undefined, this.normalization);
   }
   /** A node boundary must reopen originals: RecordReader's successful reads and
    * descriptors are deliberately local to a synchronous verification batch.
@@ -58,6 +59,22 @@ export class ReusableLeaves {
       catch { this.reads.set(encoded, null); }
     }
     return this.reads.get(encoded) || undefined;
+  }
+  /** Distinguish a legitimate current-projection change from unreadable physical
+   * provenance. The latter must not silently become a replacement paid leaf. */
+  originalsAvailable(value: string): boolean {
+    const reader = new EvidenceReader(this.db, undefined, this.normalization);
+    try {
+      const input = JSON.parse(value);
+      const consent = this.db.prepare(`SELECT agent FROM agent_sessions s WHERE id=? AND included=1 AND missing=0 AND ${admittedAgent('s')}`);
+      for (const item of [...input.evidence, ...input.background]) {
+        const session = consent.get(item.session_id) as { agent: string } | undefined;
+        if (!session || session.agent !== (item.agent || 'pi')) return false;
+        reader.read(item);
+      }
+      return true;
+    } catch { return false; }
+    finally { reader.close(); }
   }
   decode(value: string): LeafInput | undefined {
     try {

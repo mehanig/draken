@@ -173,6 +173,7 @@ function sourceData(item: Evidence, background = false, frozenText = false) {
 /** Evidence and models only: background preparation does not own a sync. */
 export type SummaryInput = Pick<SyncDetail, 'items' | 'context' | 'models'>;
 const BACKGROUND = Symbol('background summary preparation');
+const PREVIEW = Symbol('provider-forbidden preparation preview');
 
 /** A receipt identity, not a persisted copy of the evidence. Keep this recipe
  * version in step with planning/validation/transport changes, even when old
@@ -199,6 +200,7 @@ export class SummaryTree {
   private readonly accountAggregation: boolean;
   private readonly runTable: 'sync_runs' | 'background_runs';
   private readonly background: boolean;
+  private readonly preview: boolean;
   private readonly cacheHashes = new Map<string, string>();
   private readonly dependencies = new Map<string, Set<Evidence>>();
   private leaves?: ReusableLeaves;
@@ -287,8 +289,13 @@ export class SummaryTree {
     return new SummaryTree(input, runId, signal, BACKGROUND);
   }
 
-  constructor(private sync: SummaryInput & { id?: number }, private runId: number, private signal: AbortSignal, mode?: typeof BACKGROUND) {
-    this.background = mode === BACKGROUND;
+  static forPreview(input: SummaryInput, signal: AbortSignal): SummaryTree {
+    return new SummaryTree(input, 0, signal, PREVIEW);
+  }
+
+  constructor(private sync: SummaryInput & { id?: number }, private runId: number, private signal: AbortSignal, mode?: typeof BACKGROUND | typeof PREVIEW) {
+    this.preview = mode === PREVIEW;
+    this.background = mode === BACKGROUND || this.preview;
     this.runTable = this.background ? 'background_runs' : 'sync_runs';
     if (!this.background && !Number.isSafeInteger(sync.id)) throw new Error('Foreground summary preparation requires a sync ID');
     assertEvidenceAvailable(sync);
@@ -314,7 +321,12 @@ export class SummaryTree {
     this.db.prepare(`UPDATE ${this.runTable} SET stage = ? WHERE id = ?`).run(label, this.runId);
   }
 
+  private forbidPreviewProvider() {
+    if (this.preview) throw new Error('Preparation preview cannot invoke a provider');
+  }
+
   async call(payload: unknown, system: string, final = false): Promise<string> {
+    this.forbidPreviewProvider();
     if (this.background && final) throw new HttpError(409, 'Background preparation cannot call the final provider');
     if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
     const model = final ? this.sync.models.final : this.sync.models.summary;
@@ -450,6 +462,7 @@ export class SummaryTree {
           // Keep this outside call(): even synthetic/overridden providers must
           // never receive revoked originals after an asynchronous planning yield.
           verify();
+          this.forbidPreviewProvider();
           const response = await this.call({ task: citationRepair ? 'repair_summary_citations' : spec.kind === 'topics' ? 'group_topics' : 'summarize', stage: spec.kind,
             input: wire.input,
             ...(citationRepair ? { citation_repairs: citationCandidate!.observations.flatMap((item, index) => item.evidence.length > MAX_EVIDENCE ? [{ observation: index + 1, topic: item.topic, state: item.state, summary: item.summary, candidate_source_ids: item.evidence, max_references: MAX_EVIDENCE }] : []) } : {}),
@@ -569,7 +582,7 @@ export class SummaryTree {
       }
     };
     const unresolvedReceipts = new Set<string>();
-    const unresolvedReceipt = () => { throw new HttpError(409, 'A completed leaf receipt is unavailable, changed or unresolved. Cached work is intact; no paid replacement was requested.'); };
+    const unresolvedReceipt = () => { throw new HttpError(409, 'A completed leaf receipt is unavailable, changed, excluded or unresolved. Cached work is intact; no paid replacement was requested.'); };
     let receiptCount = 0;
     for (const receipt of receipts) {
       if (++receiptCount % 32 === 0) await this.planningYield();
@@ -603,6 +616,10 @@ export class SummaryTree {
             item.cwd === current.cwd && item.sequence === current.sequence && item.role === current.role &&
             item.timestamp === current.timestamp && (item.agent || 'pi') === (current.agent || 'pi');
         })) unresolvedReceipt();
+        // The primary pointer can be unchanged while an uncited dependency is
+        // unreadable/tampered. That is blocked completed work, not permission to
+        // repack a different leaf and charge for its primary entries again.
+        if (!changedBackground && !store.originalsAvailable(receipt.input_json)) unresolvedReceipt();
         continue;
       }
       const spec = this.leafSpec(input, Boolean(receipt.batch));
@@ -1197,8 +1214,7 @@ export class SummaryTree {
 
   private async buildBatched(): Promise<SummaryNode[]> {
     this.stage('Planning token-budgeted summary batches');
-    const specs = await this.batchSpecs();
-    this.assertLeafCoverage(specs);
+    const specs = await this.planLeaves();
     const missing = specs.filter(spec => !this.cached(spec)).length;
     // A lower bound: reconciliation may add calls, or reuse a cached parent.
     // Do not reject an all-cached tree that only needs its reserved final slot.
@@ -1230,7 +1246,39 @@ export class SummaryTree {
     return nodes;
   }
 
+  /** Shared packing/reuse path: preview never builds nodes or reconciles. */
+  private async planLeaves(): Promise<Spec[]> {
+    const specs = isBatchSummaryModel(this.sync.models.summary) ? await this.batchSpecs()
+      : this.savePlan(this.conservativeSpecs(await this.reusableSpecs()));
+    this.assertLeafCoverage(specs);
+    return specs;
+  }
+
+  async previewCounts(verified?: () => void): Promise<{ needs_processing: number; cached: number; total: number }> {
+    if (!this.preview) throw new Error('Preview requires provider-forbidden mode');
+    try {
+      await this.beforePreparation();
+      const specs = await this.planLeaves();
+      // Final pass is synchronous: fresh physical evidence and all receipt aliases,
+      // including redundant coverage and uncited dependencies, before publishing.
+      await this.planningYield();
+      const covered = new Set<string>();
+      for (const spec of specs) {
+        const input = spec.leafInput!;
+        this.leafStore().verify([...input.evidence, ...input.background]);
+        this.retainInputs([...input.evidence, ...input.background]);
+        const cached = this.cached(spec);
+        if (!cached && spec.reuseOnly) throw new HttpError(409, 'Completed leaf changed during preview');
+        if (cached) for (const key of spec.sources) if (this.primary.has(key)) covered.add(key);
+      }
+      this.verifyInputs();
+      verified?.();
+      return { cached: covered.size, needs_processing: this.primary.size - covered.size, total: this.primary.size };
+    } finally { this.leaves?.close(); this.leaves = undefined; }
+  }
+
   async build(): Promise<SummaryNode[]> {
+    this.forbidPreviewProvider();
     try { return await this.buildTree(); }
     finally { this.leaves?.close(); this.leaves = undefined; }
   }
@@ -1238,15 +1286,12 @@ export class SummaryTree {
   private async buildTree(): Promise<SummaryNode[]> {
     if (isBatchSummaryModel(this.sync.models.summary)) return this.buildBatched();
     // Unknown/operator-selected models retain their established conservative limits.
-    const retained = await this.reusableSpecs();
     const specs = new Map<string, Spec[]>();
-    for (const spec of this.conservativeSpecs(retained)) {
+    for (const spec of await this.planLeaves()) {
       const session = spec.leafInput!.session;
       if (!specs.has(session)) specs.set(session, []);
       specs.get(session)!.push(spec);
     }
-    this.savePlan([...specs.values()].flat());
-    this.assertLeafCoverage([...specs.values()].flat());
     const missing = [...specs.values()].flat().filter(spec => !this.cached(spec)).length;
     const minimum = missing + (this.background ? 0 : 1);
     if (minimum > this.sync.models.max_invocations) throw new HttpError(409,

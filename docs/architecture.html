@@ -40,7 +40,7 @@
       <h1>How Draken<br>fits together.</h1>
       <p class="intro">A companion for understanding work across coding sessions. It freezes evidence, prepares a briefing, talks it through with you, and keeps the conversation. <strong>It does not run the work.</strong></p>
       <div class="hero-facts"><span class="tag">One application</span><span class="tag">One SQLite database</span><span class="tag">One voice engine</span></div>
-      <p class="hero-note">This guide describes Draken 0.8.1, not a live deployment or account status. It is a self-contained document: no login, tracking, API requests, microphone access or live session data.</p>
+      <p class="hero-note">This guide describes Draken 0.8.2, not a live deployment or account status. It is a self-contained document: no login, tracking, API requests, microphone access or live session data.</p>
     </div>
     <div class="layout">
       <nav class="toc" aria-label="Guide sections">
@@ -118,6 +118,7 @@
             <figcaption>Summarizing, talking, hearing a reply and saving a recap do not move an entry into the final state.</figcaption>
           </figure>
           <div class="two">
+            <div class="card"><h3>Processing is not membership</h3><p>Home estimates entries needing new summaries versus already cached entries using a provider-free local planner check. Unknown counts stay unknown, and review totals live under Details. Estimates describe indexed inputs at the displayed check time; reconciliation and the final briefing may still require inference.</p></div>
             <div class="card yellow"><h3>Reservation is not review</h3><p>Sync B skips entries reserved by open, non-ended Sync A. Idle ending releases A’s unreviewed reservations for the next explicit sync, without deleting its snapshot or marking it reviewed.</p></div>
             <div class="card"><h3>Discard releases, not erases</h3><p>Discarding releases held entries if they are still eligible and unreviewed. The discarded sync’s history remains readable.</p></div>
           </div>
@@ -261,7 +262,7 @@
           <div class="build-line"><code>site/</code> → matching npm-version gate → website deployment workflow → public landing page</div>
           <div class="build-line"><code>client/</code> → <code>public/</code> → private local/LAN application</div>
           <div class="build-line"><code>docs/architecture.html</code> → this standalone guide → separate static serving, no app API</div>
-          <p class="small" style="margin-top:16px">The public landing-page artwork is separate from the procedural call dragon. The existing <code>scripts/site-release.cjs</code> gate withholds website deployment until npm <code>latest</code> matches the root package and site version. Copy describes 0.8.1 after release; editing it does not merge, publish or deploy anything, modify that artwork or change application authentication.</p>
+          <p class="small" style="margin-top:16px">The public landing-page artwork is separate from the procedural call dragon. The existing <code>scripts/site-release.cjs</code> gate withholds website deployment until npm <code>latest</code> matches the root package and site version. Copy describes 0.8.2 after release; editing it does not merge, publish or deploy anything, modify that artwork or change application authentication.</p>
           <p class="why"><strong>Why separate build output and source?</strong> People installing the app need ready-to-run files, not the frontend toolchain. Developers work in source directories; generated <code>dist/</code> and <code>public/</code> should not be edited by hand.</p>
         </section>
 

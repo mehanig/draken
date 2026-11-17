@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { isFreePreviewRequest } from './preparation-preview-fixture';
 
 test('Home shows accumulated local history without automatic sync links, summaries or capture', async ({ page }) => {
   test.setTimeout(60_000);
   let state = { enabled: true, check_seconds: 60, batch_records: 64, phase: 'indexing', pending_records: 64, pending_entries: 64, last_completed_at: null as string | null, error: '' };
   let unavailable = false, mutations = 0;
   const home = await (await page.request.get('/api/home')).json();
-  page.on('request', req => { if (new URL(req.url()).pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method())) mutations++; });
+  page.on('request', req => { if (new URL(req.url()).pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method()) && !isFreePreviewRequest(req)) mutations++; });
   await page.addInitScript(() => {
     (window as any).__captures = 0;
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => { (window as any).__captures++; throw Error('No capture while viewing progress'); } } });
@@ -22,6 +23,8 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(progress).toContainText('128 unchanged passages reused');
   await expect(progress).toContainText('64 source changes waiting for local indexing');
   await expect(progress).toContainText('64 entries available for your next sync');
+  await expect(page.getByText('available for a new sync', { exact: false })).not.toBeVisible();
+  await page.locator('.home-scope-details summary').click();
   await expect(page.getByText('available for a new sync', { exact: false })).toBeVisible();
   for (const width of [390, 1440]) { await page.setViewportSize({ width, height: 900 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
   for (const entries of [64, 128, 131]) {

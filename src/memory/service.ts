@@ -7,6 +7,7 @@ import { HttpError } from '../errors';
 import { historyUpdate, type HistoryPage, type HistoryProgress, type HistoryQuery, type HistoryResults, type HistoryUpdate } from './types';
 import { storedHistoryReadiness } from './readiness';
 import { scanSessions } from '../sync/collector';
+import { activity } from '../sync/activity';
 
 // One owned CPU worker; ordinary concurrent requests wait rather than requiring
 // the user to manage an index. No model/runtime is loaded in the dashboard.
@@ -99,6 +100,7 @@ function pump() {
   } catch { settle(work, failure()); retire(); if (!retiring.size) pump(); }
 }
 function request<T>(method: string, args: Record<string, unknown> = {}, signal?: AbortSignal, background = false): Promise<T> {
+  try { activity.assertNoPreview(); } catch (error) { return Promise.reject(error); }
   if (shuttingDown) return Promise.reject(new HttpError(503, 'Draken is stopping. No new history work can start.'));
   if (signal?.aborted) return Promise.reject(cancelled());
   const roots = JSON.stringify(getSourceRoots());

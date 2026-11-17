@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { nativePeer } from './native-fixture';
+import { isFreePreviewRequest } from './preparation-preview-fixture';
 
 async function inventory(page: Page) {
   const value = await (await page.request.get('/api/overview')).json();
@@ -22,7 +23,7 @@ test('automatic indexing saves only enabled, preserves the choice on reload and 
   let state = { enabled: false, check_seconds: 60, batch_records: 64, phase: 'off', pending_records: 3, pending_entries: 131, last_completed_at: null, error: '' };
   let fail = false;
   const patches: unknown[] = [], mutations: string[] = [];
-  page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) mutations.push(new URL(request.url()).pathname); });
+  page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method()) && !isFreePreviewRequest(request)) mutations.push(new URL(request.url()).pathname); });
   await page.route('**/api/settings/auto-index', async route => {
     if (route.request().method() === 'PATCH') {
       const body = route.request().postDataJSON(); patches.push(body);
@@ -89,7 +90,7 @@ test('settings inventory shows recorded sources; scan, selection and missing-sou
   ].map(JSON.stringify).join('\n') + '\n';
   fs.writeFileSync(file, content); fs.writeFileSync(malformed, '{invalid}\n');
   const mutations: string[] = [];
-  page.on('request', request => { if (request.method() !== 'GET') mutations.push(new URL(request.url()).pathname); });
+  page.on('request', request => { if (request.method() !== 'GET' && !isFreePreviewRequest(request)) mutations.push(new URL(request.url()).pathname); });
   try {
     await page.goto('/'); const dialog = await openSources(page), pi = dialog.getByRole('region', { name: 'pi', exact: true });
     const scan = dialog.getByRole('button', { name: 'Scan enabled agents', exact: true });

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { isFreePreviewRequest } from './preparation-preview-fixture';
 
 async function fixture(page: Page, delayFull = false) {
   const before = new Date(Date.now() - 60000).toISOString();
@@ -11,8 +12,11 @@ async function fixture(page: Page, delayFull = false) {
     tree: { complete: true, busy: false, run: null, nodes: [] }, conversation: state,
     messages: [{ id: 90001, role: 'user', content: 'Earlier question', created_at: before },
       { id: 90002, role: 'assistant', content: 'Earlier answer stays unchanged.', created_at: before }] };
-  const observed = { reads: 0, endedReads: 0, fullReads: 0, fail: false, mutations: [] as string[] };
-  page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) observed.mutations.push(new URL(request.url()).pathname); });
+  const observed = { reads: 0, endedReads: 0, fullReads: 0, fail: false, mutations: [] as string[], freePreviews: [] as string[] };
+  page.on('request', request => {
+    if (!['GET', 'HEAD'].includes(request.method())) observed.mutations.push(new URL(request.url()).pathname);
+    if (isFreePreviewRequest(request)) observed.freePreviews.push(new URL(request.url()).pathname);
+  });
   const initialSync = structuredClone(sync);
   let releaseFull!: () => void;
   const fullReady = new Promise<void>(resolve => { releaseFull = resolve; });
@@ -62,7 +66,9 @@ test('live status is small and read-only; pending updates do not block chat, ove
   page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Start a new sync', exact: true }).click();
   await expect(page).toHaveURL('/');
   const reads = observed.reads; await page.clock.runFor(9000); expect(observed.reads).toBe(reads);
-  expect(observed.mutations).toEqual([]);
+  // Returning Home may request only the exact provider-free POST {}. All earlier
+  // assertions still prohibit mutations while reading the ended conversation.
+  expect(observed.mutations).toEqual(observed.freePreviews);
 });
 
 test('snapshot totals distinguish carried unreviewed entries from newly included work without starting preparation', async ({ page }) => {

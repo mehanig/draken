@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { nativePeer } from './native-fixture';
+import { isFreePreviewRequest } from './preparation-preview-fixture';
 
 test('first-run instructions explain private pi and separate voice login; readiness never starts a sync or microphone', async ({ page }) => {
   await nativePeer(page);
   const home = await (await page.request.get('/api/home')).json(), voice = await (await page.request.get('/api/voice/status')).json();
   let state = 'missing', audio = false, fail = false;
   const mutations: string[] = [];
-  page.on('request', request => { if (request.method() !== 'GET') mutations.push(new URL(request.url()).pathname); });
+  page.on('request', request => { if (request.method() !== 'GET' && !isFreePreviewRequest(request)) mutations.push(new URL(request.url()).pathname); });
   await page.route('**/api/home', route => route.fulfill({ json: { ...home, syncs: [], busy: false, active_call: false } }));
   await page.route('**/api/voice/status', route => route.fulfill({ json: { ...voice, installed: audio } }));
   await page.route('**/api/setup*', route => fail ? route.abort('failed') : route.fulfill({ json: {

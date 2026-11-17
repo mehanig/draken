@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { nativePeer } from './native-fixture';
+import { isFreePreviewRequest } from './preparation-preview-fixture';
 
 test('paid cache preparation is a separate explicit choice with visible failures and retry, never a sync action', async ({ page }) => {
   await nativePeer(page);
@@ -7,7 +8,7 @@ test('paid cache preparation is a separate explicit choice with visible failures
   let summary = { enabled: false, status: 'off', prepared_entries: 0, last_completed_at: null as string | null, error: '' };
   const mutations: { path: string; body: unknown }[] = [];
   page.on('request', request => {
-    if (request.method() !== 'GET') mutations.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() });
+    if (request.method() !== 'GET' && !isFreePreviewRequest(request)) mutations.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() });
   });
   await page.route('**/api/settings/auto-index', route => route.fulfill({ json: {
     enabled: indexing, summary_enabled: summary.enabled, check_seconds: 60, batch_records: 64,

@@ -6,7 +6,7 @@ const root=path.join(__dirname,'../site');
 const version=require('../package.json').version,anchor=version.replaceAll('.','');
 test('public release copy and documentation match the npm version',()=>{
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
- assert.equal(version,'0.8.1');
+ assert.equal(version,'0.8.2');
  const lock=require('../package-lock.json');assert.equal(lock.version,version);assert.equal(lock.packages[''].version,version);
  require('../scripts/site-release.cjs').validateCopy(version,html);
  assert.ok(html.includes(`Version ${version} / Available on npm`));
@@ -53,6 +53,9 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
   assert.match(notes,/newly prepared original history between user turns as dated H evidence/);
   assert.match(notes,/Each answer pins one history cutoff/);
+  assert.match(notes,/estimates processing work using the actual reuse planner and verified original evidence/);
+  assert.match(notes,/local check makes no provider requests/);
+  assert.match(notes,/Review totals stay under Details; reconciliation and the final briefing may still require inference/);
   assert.match(notes,/Updates do not interrupt replies or disable already-prepared chat/);
   assert.match(notes,/initial snapshot, E\/C references, briefing, saved transcript and notes are not rewritten/);
   assert.match(notes,/Initial briefing and history preparation are still required once/);

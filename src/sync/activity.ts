@@ -16,15 +16,47 @@ class SyncActivity {
   private call?: { id: number; token: symbol; connected: boolean; holds: Set<symbol>; turns: Set<symbol> };
   private start?: symbol;
   private stopping = false;
+  private preview?: { controller: AbortController; done: Promise<void>; release: () => void };
+  private mutations = new Set<symbol>();
   private drained?: Promise<void>;
   private finishDrain?: () => void;
 
   private admit() { if (this.stopping) throw new HttpError(503, 'Draken is stopping. No new work can start.'); }
-  private changed() { if (!this.jobs.size && !this.call && !this.start) this.finishDrain?.(); }
+  private changed() { if (!this.jobs.size && !this.call && !this.start && !this.preview && !this.mutations.size) this.finishDrain?.(); }
+  assertAccepting() { this.admit(); }
+  assertNoPreview() {
+    this.admit();
+    if (this.preview) throw new HttpError(409, 'Local preparation verification is stopping. Retry shortly.');
+  }
+  get previewIdle(): boolean { return !this.stopping && !this.preview && !this.mutations.size && !this.busy && !this.call; }
+  beginPreview(controller: AbortController): (() => void) | undefined {
+    this.admit();
+    if (!this.previewIdle) return;
+    let finish!: () => void;
+    const owner = { controller, done: new Promise<void>(resolve => { finish = resolve; }), release: () => {} };
+    owner.release = () => {
+      if (this.preview === owner) { this.preview = undefined; finish(); this.changed(); }
+    };
+    this.preview = owner;
+    return owner.release;
+  }
+  drainPreview(): Promise<void> {
+    const owner = this.preview;
+    owner?.controller.abort();
+    return owner?.done || Promise.resolve();
+  }
+  /** Reserve before awaiting cancellation, so another POST cannot steal the gap. */
+  beginMutation(draining = false): () => void {
+    if (!draining) this.admit();
+    const token = Symbol(); this.mutations.add(token);
+    this.preview?.controller.abort();
+    return () => { this.mutations.delete(token); this.changed(); };
+  }
   shutdown(): Promise<void> {
     this.stopping = true;
     const done = this.drained ||= new Promise<void>(resolve => { this.finishDrain = resolve; });
     for (const { controller } of this.jobs.values()) controller.abort();
+    this.preview?.controller.abort();
     this.changed(); return done;
   }
 
@@ -32,13 +64,13 @@ class SyncActivity {
   get busy(): boolean { return Boolean(this.start || this.jobs.size); }
   get starting(): boolean { return this.start !== undefined; }
   get callActive(): boolean { return this.call !== undefined; }
-  get backgroundIdle(): boolean { return !this.stopping && !this.busy && (!this.call || (this.call.connected && !this.call.holds.size && !this.call.turns.size)); }
+  get backgroundIdle(): boolean { return !this.stopping && !this.preview && !this.mutations.size && !this.busy && (!this.call || (this.call.connected && !this.call.holds.size && !this.call.turns.size)); }
   voiceTurnActive(id: number): boolean { return this.call?.id === id && this.call.turns.size > 0; }
   jobActive(id: number): boolean { return this.jobs.has(id); }
   voiceActive(id: number): boolean { return this.call?.id === id; }
 
   beginJob(id: number, controller: AbortController): () => void {
-    this.admit();
+    this.assertNoPreview();
     if (this.jobs.has(id)) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
     if (this.voiceActive(id)) throw new HttpError(409, 'End the voice call before changing this sync.');
     const owner = { controller };
@@ -51,14 +83,14 @@ class SyncActivity {
     owner.controller.abort(); return true;
   }
   beginStart(): () => void {
-    this.admit();
+    this.assertNoPreview();
     if (this.start) throw new HttpError(409, 'A sync is already being prepared');
     if (this.busy || this.callActive) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
     const token = Symbol(); this.start = token;
     return () => { if (this.start === token) { this.start = undefined; this.changed(); } };
   }
   beginCall(id: number): VoiceLease {
-    this.admit();
+    this.assertNoPreview();
     if (this.call) throw new HttpError(409, 'End the existing call first.');
     if (this.jobs.has(id)) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
     const token = Symbol();

@@ -1,4 +1,5 @@
-import type { ConversationState, PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, SummaryPreparationSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
+import { changingPreviewInputs } from './preview-inputs';
+import type { PreparationPreview, ConversationState, PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, SummaryPreparationSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
 import { authorizationHeaders, clearSession } from '../auth/session';
@@ -26,15 +27,17 @@ export const autoIndexSettings = () => request<AutoIndexSettings>('/settings/aut
 export const setAutoIndex = (enabled: boolean) => request<AutoIndexSettings>('/settings/auto-index', 'PATCH', { enabled });
 export const summaryPreparationSettings = () => request<SummaryPreparationSettings>('/settings/auto-summary');
 export const setAutoSummary = (enabled: boolean) => request<SummaryPreparationSettings>('/settings/auto-summary', 'PATCH', { enabled });
+export const preparationPreview = () => request<PreparationPreview>('/preparation-preview');
+export const checkPreparationPreview = () => request<PreparationPreview>('/preparation-preview', 'POST', {});
 export const home = (before?: number) => request<HomeOverview>(`/home${before ? `?before=${before}` : ''}`);
 export const startCall = (request_id: string) => request<{ sync: SyncDetail; scan: ScanResult }>('/syncs/start-call', 'POST', { request_id });
 export const startChat = (request_id: string) => request<{ sync: SyncDetail; scan: ScanResult }>('/syncs/start-chat', 'POST', { request_id });
 export const chat = (id: number, message: string, request_id: string) => request<SyncDetail>(`/syncs/${id}/chat/messages`, 'POST', { message, request_id });
 export const recap = (id: number) => request<SyncDetail>(`/syncs/${id}/recap`, 'POST');
 export const overview = () => request<Overview>('/overview');
-export const scan = () => request<ScanResult>('/scan', 'POST');
-export const enableAgent = (agent: string, enabled: boolean) => request<Overview>(`/agents/${encodeURIComponent(agent)}`, 'PATCH', { enabled });
-export const include = (id: string, included: boolean) => request<Overview>(`/sessions/${encodeURIComponent(id)}`, 'PATCH', { included });
+export const scan = () => changingPreviewInputs(() => request<ScanResult>('/scan', 'POST'));
+export const enableAgent = (agent: string, enabled: boolean) => changingPreviewInputs(() => request<Overview>(`/agents/${encodeURIComponent(agent)}`, 'PATCH', { enabled }));
+export const include = (id: string, included: boolean) => changingPreviewInputs(() => request<Overview>(`/sessions/${encodeURIComponent(id)}`, 'PATCH', { included }));
 export const sync = (id: number) => request<SyncDetail>(`/syncs/${id}`);
 export const conversationStatus = (id: number, signal?: AbortSignal) => request<ConversationState>(`/syncs/${id}/conversation`, 'GET', undefined, signal);
 export const progress = (id: number) => request<TreeProgress>(`/syncs/${id}/progress`);

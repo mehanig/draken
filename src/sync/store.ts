@@ -23,7 +23,8 @@ const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.bri
 const historyWindow = `e.timestamp >= COALESCE((SELECT value FROM sync_settings WHERE key = 'history_since'), '')`;
 const pendingWhere = `e.active = 1 AND e.present = 1 AND e.is_activity = 1 AND e.effective_length > 0
   AND ${historyWindow} AND s.included = 1 AND s.missing = 0 AND ${admittedAgent('s')} AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)`;
-const availableFilter = (exceptSync = 0) => `${pendingWhere} AND NOT EXISTS (SELECT 1 FROM sync_items i JOIN syncs held ON held.id=i.sync_id WHERE i.event_key=e.event_key AND held.status='open' AND held.conversation_ended_at IS NULL AND held.id != ${exceptSync})`;
+const availableFilter = (exceptSync = 0, preview = false) => `${pendingWhere} AND NOT EXISTS (SELECT 1 FROM sync_items i JOIN syncs held ON held.id=i.sync_id WHERE i.event_key=e.event_key AND held.status='open' AND held.conversation_ended_at IS NULL AND held.id != ${exceptSync}
+  ${preview ? `AND COALESCE(held.conversation_last_user_at,held.created_at) > '${new Date(Date.now() - 30 * 60_000).toISOString()}'` : ''})`;
 const availableWhere = availableFilter();
 const evidenceSelect = `SELECT s.agent,e.id AS source_id, e.event_key, e.session_id, s.name AS session_name, s.path AS source_path,
   s.cwd, e.entry_id, e.timestamp, e.role FROM agent_entries e JOIN agent_sessions s ON s.id = e.session_id`;
@@ -77,12 +78,14 @@ export function homeOverview(before?: number): HomeOverview {
 }
 
 export function setAgentEnabled(agent: string, enabled: boolean): Overview {
+  activity.assertNoPreview();
   if (!AGENTS.some(value => value === agent)) throw new HttpError(404, 'Unknown agent source');
   getDb().prepare('UPDATE agent_sources SET enabled=? WHERE id=?').run(Number(enabled), agent);
   return overview();
 }
 
 export function setIncluded(sessionId: string, included: boolean): void {
+  activity.assertNoPreview();
   const result = getDb().prepare('UPDATE agent_sessions SET included = ? WHERE id = ?').run(Number(included), sessionId);
   if (!result.changes) throw new HttpError(404, 'Session not found');
 }
@@ -126,6 +129,7 @@ export function assertEvidenceAvailable(sync: Pick<SyncDetail, 'items' | 'contex
 }
 
 export function requireOpen(id: number, allowBusy = false): SyncDetail {
+  activity.assertNoPreview();
   const sync = getSync(id);
   if (sync.status !== 'open') throw new HttpError(409, 'This sync is already closed');
   if (!allowBusy && sync.busy) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
@@ -134,7 +138,7 @@ export function requireOpen(id: number, allowBusy = false): SyncDetail {
 }
 
 /** No LIMIT: the snapshot contains ALL eligible entries. Inference, not coverage, is chunked. */
-function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence[] } {
+function snapshot(previous?: SyncDetail, preview = false): { items: Evidence[]; context: Evidence[] } {
   const db = getDb();
   const old = new Map(previous?.items.map(item => [item.event_key, item]) || []);
   let nextRef = Math.max(0, ...[...(previous?.items || []), ...(previous?.context || [])]
@@ -144,7 +148,7 @@ function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence
   const firstBySession = new Map<string, number>();
   const reader = new EntryReader(db);
   try {
-  for (const row of db.prepare(`${evidenceSelect} WHERE ${availableFilter(previous?.id)} ORDER BY e.timestamp, e.id`).iterate() as Iterable<Evidence & { source_id: number }>) {
+  for (const row of db.prepare(`${evidenceSelect} WHERE ${availableFilter(previous?.id, preview)} ORDER BY e.timestamp, e.id`).iterate() as Iterable<Evidence & { source_id: number }>) {
     if (seen.has(row.event_key)) continue;
     const { source_id, ...metadata } = row;
     const data = { ...metadata, text: reader.effective(source_id) };
@@ -182,7 +186,7 @@ function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence
 
 /** Read verified originals without scanning, reserving entries or persisting a snapshot. */
 export function previewSummaryInput(): SummaryInput {
-  return { ...snapshot(), models: defaultModels() };
+  return { ...snapshot(undefined, true), models: defaultModels() };
 }
 
 function frozenContext(db: ReturnType<typeof getDb>, items: Evidence[]): string {
@@ -197,6 +201,7 @@ function persistItems(id: number, items: Evidence[]): void {
 }
 
 export function startSync(since?: string | null): SyncDetail {
+  activity.assertNoPreview();
   expireConversations();
   const db = getDb();
   return db.transaction(() => {
@@ -223,6 +228,7 @@ export function startSync(since?: string | null): SyncDetail {
 /** New one-click workflow: reserve previously unassigned entries, never review them.
  * Repeated transport requests reuse the same immutable snapshot. */
 export function startConversationSync(requestId: string): SyncDetail {
+  activity.assertNoPreview();
   expireConversations();
   const db = getDb();
   return db.transaction(() => {

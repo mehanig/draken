@@ -37,6 +37,17 @@ export interface AutoIndexSettings {
   pending_records: number; last_completed_at: string | null; error: string;
   pending_entries: number;
 }
+/** Free, locally verified leaf coverage estimate for currently indexed inputs.
+ * Reconciliation/final inference are separate; unknown counts are always null. */
+export interface PreparationPreview {
+  phase: 'checking' | 'ready' | 'stale' | 'paused' | 'unavailable';
+  needs_processing: number | null;
+  cached: number | null;
+  total: number | null;
+  checked_at: string | null;
+  error: string;
+}
+
 export interface SummaryPreparationSettings {
   enabled: boolean;
   status: 'off' | 'waiting' | 'running' | 'paused' | 'error';

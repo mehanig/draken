@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { isFreePreviewRequest } from './preparation-preview-fixture';
 
 test('Home separates local indexing from explicit briefing preparation and retained usage without enabling work or capture', async ({ page }) => {
   let mutations = 0;
-  page.on('request', request => { if (request.url().includes('/api/') && !['GET', 'HEAD'].includes(request.method())) mutations++; });
+  page.on('request', request => { if (request.url().includes('/api/') && !['GET', 'HEAD'].includes(request.method()) && !isFreePreviewRequest(request)) mutations++; });
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => { throw Error('Unexpected microphone capture'); } } });
   });

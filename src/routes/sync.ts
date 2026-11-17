@@ -13,6 +13,7 @@ import { preparationUsage } from '../sync/usage';
 import { summaryPreparationSettings } from '../sync/summary-preparation';
 import { activity } from '../sync/activity';
 import { conversationStatus } from '../sync/conversation';
+import { preparationPreview, requestPreparationPreview } from '../sync/preparation-preview';
 
 const router = Router();
 function id(req: Request): number {
@@ -28,6 +29,12 @@ function text(value: unknown, name: string, max = 4000): string {
 router.get('/setup', route(async (req, res) => {
   if (Object.keys(req.query).some(key => key !== 'refresh') || (req.query.refresh !== undefined && req.query.refresh !== '1')) throw new HttpError(400, 'Unknown setup status option');
   res.json({ pi: await piSetupStatus(req.query.refresh === '1'), data_dir: getDataDir() });
+}));
+router.get('/preparation-preview', route((_req, res) => res.json(preparationPreview())));
+router.post('/preparation-preview', route((req, res) => {
+  if (!req.body || Array.isArray(req.body) || typeof req.body !== 'object' || Object.keys(req.body).length) throw new HttpError(400, 'Only an empty object is accepted');
+  const status = requestPreparationPreview();
+  res.status(status.phase === 'checking' ? 202 : 200).json(status);
 }));
 router.get('/settings/preparation-usage', route((req, res) => res.json(preparationUsage(getDb(), req.query))));
 router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettings())));

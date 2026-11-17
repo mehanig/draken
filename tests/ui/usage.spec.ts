@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { isFreePreviewRequest } from './preparation-preview-fixture';
 function usage(range = '7d', bucket = '1h', usd: number | null = 1.25) {
   const totals = { cost: { usd, complete: false }, completed_batches: 3, entries: 192, requests: 5, incomplete_pricing: 1, approximate_timing: 2, failed_attempts: 1 };
   return { range, bucket, from: '2026-01-14T12:30:00.000Z', to: '2026-01-15T12:30:00.000Z', active_attempts: 1, totals,
@@ -8,7 +9,7 @@ function usage(range = '7d', bucket = '1h', usd: number | null = 1.25) {
 test('Settings usage offers every range and bucket, honest partial costs and a wider responsive read-only dashboard', async ({ page }) => {
   test.setTimeout(60000);
   let requests = 0, mutations = 0;
-  page.on('request', request => { if (request.url().includes('/api/') && !['GET', 'HEAD'].includes(request.method())) mutations++; });
+  page.on('request', request => { if (request.url().includes('/api/') && !['GET', 'HEAD'].includes(request.method()) && !isFreePreviewRequest(request)) mutations++; });
   await page.route('**/api/settings/preparation-usage?*', route => { requests++; const q = new URL(route.request().url()).searchParams; return route.fulfill({ json: usage(q.get('range')!, q.get('bucket')!) }); });
   await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true }), panel = dialog.getByRole('region', { name: 'Preparation usage', exact: true });

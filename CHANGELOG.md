@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.2
+
+### Show processing work, not the unreviewed backlog
+
+- Replace the Home headline's unreviewed-entry count with verified estimates of entries needing new summaries and entries already covered by compatible cached summaries. Keep available, reserved and reviewed totals under collapsed Details: membership is not processing or billing.
+- Check the actual summary planner against indexed inputs and original evidence without invoking providers, generating embeddings, creating a sync or changing review status. Unknown, stale or unverifiable counts are not displayed as zero or as an all-uncached backlog.
+- Show when the estimate was checked. New activity or changed inputs can change the eventual plan; reconciliation and the final briefing may still require inference even when every entry's leaf summary is cached.
+- Keep the local check cancellable and separate from paid background preparation. Foreground work and shutdown drain its owner before proceeding. Existing consent, cancellation, histories, cached summaries and embeddings are preserved.
+
 ## 0.8.1
 
 ### Carry unreviewed entries forward without repeating completed work
