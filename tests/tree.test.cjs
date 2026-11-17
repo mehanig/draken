@@ -246,6 +246,7 @@ test('question retrieval can reach raw evidence omitted by summaries and final c
   assert.ok(retrieveEvidence(sync, 'Show me E220').some(item => item.ref === 'E220'));
   assert.throws(() => validateVerdict('A claim [E999]', new Set(['E1'])), /outside the supplied evidence/);
   assert.throws(() => validateVerdict('A claim without evidence', new Set(['E1'])), /lacked evidence citations/);
+  await generateReply(sync.id);
   const result = await generateReply(sync.id, 'Show me E220');
   const last = calls().at(-1);
   const original = sync.items.find(item => item.ref === 'E220');

@@ -105,19 +105,20 @@ export function getProgress(id: number): TreeProgress {
     run: run ? { ...fields, metrics: JSON.parse(metrics_json) } as TreeRun : null, nodes };
 }
 
-export function getSync(id: number): SyncDetail {
+export function getSync(id: number, evidence: boolean | readonly string[] = true): SyncDetail {
   const db = getDb();
   const row = db.prepare(`${summaryQuery} WHERE s.id = ?`).get(id) as SyncSummary | undefined;
   if (!row) throw new HttpError(404, 'Sync not found');
   const extra = db.prepare('SELECT context_json, memory_json, model_config_json FROM syncs WHERE id = ?').get(id) as any;
   const reader = new EvidenceReader(db);
   try {
-    const items = (db.prepare('SELECT evidence_json FROM sync_items WHERE sync_id = ? ORDER BY rowid').all(id) as any[]).map(item => reader.read(item.evidence_json, true));
+    const refs = typeof evidence === 'boolean' ? null : evidence;
+    const items = evidence && (!refs || refs.length) ? (db.prepare(`SELECT evidence_json FROM sync_items WHERE sync_id = ? ${refs ? `AND json_extract(evidence_json,'$.ref') IN (${refs.map(() => '?').join(',')})` : ''} ORDER BY rowid`).all(id, ...(refs || [])) as any[]).map(item => reader.read(item.evidence_json, true)) : [];
     return {
       ...row, previously_included_count: (db.prepare(`SELECT COUNT(*) AS n FROM sync_items current
         WHERE current.sync_id=? AND EXISTS (SELECT 1 FROM sync_items previous
           WHERE previous.event_key=current.event_key AND previous.sync_id<current.sync_id)`).get(id) as { n: number }).n,
-      conversation: conversationStatus(id), aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: JSON.parse(extra.context_json).map((item: Record<string, any>) => reader.read(item, true)), memory: JSON.parse(extra.memory_json),
+      conversation: conversationStatus(id), aggregation_cost: aggregationCost(db, id, Boolean(row.briefing)), items, context: evidence ? JSON.parse(extra.context_json).filter((item: Record<string, any>) => !refs || refs.includes(item.ref)).map((item: Record<string, any>) => reader.read(item, true)) : [], memory: JSON.parse(extra.memory_json),
       messages: db.prepare('SELECT id, role, content, created_at FROM sync_messages WHERE sync_id = ? ORDER BY id').all(id) as SyncDetail['messages'],
       busy: activity.jobActive(id), history_since: historySince(),
       models: { ...defaultModels(), ...JSON.parse(extra.model_config_json) }, tree: getProgress(id),
@@ -129,8 +130,8 @@ export function assertEvidenceAvailable(sync: Pick<SyncDetail, 'items' | 'contex
   if ([...sync.items, ...sync.context].some(item => item.unavailable)) throw new HttpError(409, 'Original session evidence is unavailable or changed. Restore the session files before summarizing, calling or marking this snapshot reviewed. Conversation and notes remain accessible.');
 }
 
-export function requireOpen(id: number, allowBusy = false): SyncDetail {
-  const sync = getSync(id);
+export function requireOpen(id: number, allowBusy = false, evidence = true): SyncDetail {
+  const sync = getSync(id, evidence);
   if (sync.status !== 'open') throw new HttpError(409, 'This sync is already closed');
   if (!allowBusy && sync.busy) throw new HttpError(409, 'A reply is still being generated. Wait or cancel before changing this sync.');
   if (!allowBusy && activity.voiceActive(id)) throw new HttpError(409, 'End the voice call before changing this sync.');

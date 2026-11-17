@@ -115,10 +115,10 @@ function canonical() {
     .map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
 }
 async function prepareDelta(expected) {
-  const before = model.calls.length, original = canonical();
+  const before = model.calls.length, queries = model.queries.length, original = canonical();
   await index.prepare(); // Global coverage, not a source/sync-scoped shortcut.
   assert.deepEqual(model.calls.slice(before).sort(), [...expected].sort(), 'inference only for genuinely missing passage inputs');
-  assert.equal(model.queries.length, 0, 'no query embeddings hidden in the source counter');
+  assert.equal(model.queries.length, queries, 'preparation must not embed queries');
   assert.equal(canonical(), original, 'index preparation cannot change review, membership or source metadata');
   assert.equal(indexReadiness(cache, db, false).ready, true);
 }
@@ -261,7 +261,7 @@ test('rollover reuse never bypasses original verification, exclusions or missing
   await assert.rejects(index.prepare({ sync_id: combined.id }), /unavailable|changed/, 'scoped preparation must verify original bytes too');
   assert.throws(() => index.read(refs[0]), /unavailable|changed/);
   await assert.rejects(index.search({ question: 'VERIFY', sync_id: combined.id }, undefined, true), /unavailable|changed/);
-  assert.equal(model.calls.length, calls); assert.equal(model.queries.length, 0);
+  assert.equal(model.calls.length, calls); assert.equal(model.queries.length, 1, 'query inference selects candidates before original validation');
   fs.renameSync(file + '.missing', file); await prepareDelta([]);
   fs.writeFileSync(file, original.toString().replace('VERIFY', 'BROKEN'));
   // Scoped preparation bypasses receipt-file metadata checks, not authoritative
@@ -278,7 +278,7 @@ test('rollover reuse never bypasses original verification, exclusions or missing
     assert.equal(cache.prepare("SELECT COUNT(*) n FROM records WHERE session_id='session-a'").get().n, 0);
     for (const ref of refs) assert.throws(() => index.read(ref), /no longer admitted/);
     assert.deepEqual((await index.search({ question: 'VERIFY', session_id: 'session-a' }, undefined, true)).results, []);
-    assert.equal(model.queries.length, 0);
+    assert.equal(model.queries.length, 1, 'an empty admitted scope adds no query inference');
     db.prepare("UPDATE agent_sessions SET included=1,missing=0 WHERE id='session-a'").run();
     // Pruned excluded passages may legitimately need rebuilding after readmission.
     const delta = expectedMissing(); assert.equal(delta.length, 3);

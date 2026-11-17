@@ -26,7 +26,7 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
   const [voiceActive, setVoiceActive] = useState(false), [callAfterPreparation, setCallAfterPreparation] = useState(false);
   const [decisions, setDecisions] = useState(''), [carry, setCarry] = useState(''), [question, setQuestion] = useState('');
   const alive = useRef(true), chatRequest = useRef<{ text: string; id: string } | null>(null);
-  const show = (value: SyncDetail) => { if (alive.current) { setSync(value); setDecisions(value.decisions); setCarry(value.carry_forward); } };
+  const show = (value: SyncDetail, retainEvidence = false) => { if (alive.current) { setSync(current => retainEvidence && current ? { ...value, items: current.items, context: current.context } : value); setDecisions(value.decisions); setCarry(value.carry_forward); } };
   const run = async (label: string, action: () => Promise<void>) => {
     setWork(label); setError('');
     try { await action(); } catch (error) { if (alive.current) setError(error instanceof Error ? error.message : 'Something went wrong'); }
@@ -44,7 +44,7 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
         const progress = await api.progress(id);
         if (stopped) return;
         if (progress.busy) setSync(current => current ? { ...current, tree: progress } : current);
-        else { const value = await api.sync(id); if (!stopped) show(value); return; }
+        else { const retain = Boolean(progress.run?.question); const value = await api.sync(id, !retain); if (!stopped) show(value, retain); return; }
       } catch (error) { if (!stopped) setError(error instanceof Error ? error.message : 'Could not refresh progress'); }
       if (!stopped) timer = setTimeout(() => void poll(), 1000);
     };
@@ -104,7 +104,7 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
   });
   const discuss = (text = question) => void run('Starting discussion…', async () => {
     if (dirty) await api.notes(id, decisions, carry);
-    show(await api.discuss(id, text));
+    show(await api.discuss(id, text), true);
   });
   const sendChat = (text = question) => void run('Sending message…', async () => {
     consume();
@@ -115,14 +115,14 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
     try { value = await api.chat(id, text, pending.id); }
     catch (error) {
       // Recover an accepted job after a lost response; never silently resend it.
-      const recovered = await api.sync(id).catch(() => null);
+      const recovered = await api.sync(id, false).catch(() => null);
       if (recovered?.tree.run?.request_id !== pending.id) {
         if (recovered) setSync(current => current ? { ...current, conversation: recovered.conversation } : current);
         throw error;
       }
       value = recovered;
     }
-    show(value); setQuestion(''); chatRequest.current = null;
+    show(value, true); setQuestion(''); chatRequest.current = null;
   });
   const resume = () => sync?.tree.run?.question ? (chat || sync.tree.run.request_id ? sendChat(sync.tree.run.question) : discuss(sync.tree.run.question)) : prepare();
   const cancel = () => { consume(); void run('Stopping preparation…', async () => { await api.cancel(id); }); };

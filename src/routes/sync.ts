@@ -90,7 +90,7 @@ router.post('/syncs', route(async (req, res) => {
   const scan = await completeScan();
   res.json({ sync: startSync(since), scan });
 }));
-router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req)))));
+router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req), req.query.evidence !== 'false'))));
 router.get('/syncs/:id/conversation', route((req, res) => res.json(conversationStatus(id(req)))));
 router.get('/syncs/:id/progress', route((req, res) => res.json(getProgress(id(req)))));
 router.get('/syncs/:id/call-readiness', route((req, res) => res.json(callReadiness(id(req)))));

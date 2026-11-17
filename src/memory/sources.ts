@@ -12,8 +12,8 @@ export interface SourceRecord extends HistoryRecord { group: string; position: n
 /** Read canonical metadata/frozen pointers and verified, admitted JSONL records.
  * No discovery, scan, recovery or application/source writes. Current exclusions
  * and baseline apply to archive retrieval, not to frozen pages. */
-export function* historySources(db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache, scope: Partial<HistoryQuery> = {}): Generator<SourceRecord> {
-  const sessions = new Map((db.prepare('SELECT s.id,s.included,s.missing,a.enabled FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent').all() as { id: string; included: number; missing: number; enabled: number }[]).map(row => [row.id, row]));
+export function* historySources(db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache, scope: Partial<HistoryQuery> = {}, only?: Omit<SourceRecord, 'text'>): Generator<SourceRecord> {
+  const sessions = new Map((db.prepare('SELECT s.id,s.included,s.missing,a.enabled FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent' + (only ? ' WHERE s.id=?' : '')).all(...(only ? [only.session_id] : [])) as { id: string; included: number; missing: number; enabled: number }[]).map(row => [row.id, row]));
   const baseline = (db.prepare("SELECT value FROM sync_settings WHERE key='history_since'").get() as { value: string } | undefined)?.value || '';
   const allowed = (session: string, at: string) => scope.kind !== 'conversation'
     && (!scope.session_id || session === scope.session_id) && (!scope.session_ids || scope.session_ids.includes(session))
@@ -33,16 +33,16 @@ export function* historySources(db: Database.Database, root: RootInput = getSour
   };
   const frozen = new EvidenceReader(db, root, cache);
   try {
-  for (const row of db.prepare("SELECT i.sync_id,i.evidence_json FROM sync_items i JOIN syncs s ON s.id=i.sync_id WHERE s.status!='discarded' ORDER BY i.sync_id,i.rowid").iterate() as Iterable<{ sync_id: number; evidence_json: string }>) {
+  for (const row of only && only.kind !== 'snapshot' ? [] : db.prepare("SELECT i.sync_id,i.evidence_json FROM sync_items i JOIN syncs s ON s.id=i.sync_id WHERE s.status!='discarded'" + (only ? " AND i.sync_id=? AND json_extract(i.evidence_json,'$.ref')=?" : '') + ' ORDER BY i.sync_id,i.rowid').iterate(...(only ? [only.sync_id, only.origin_ref] : [])) as Iterable<{ sync_id: number; evidence_json: string }>) {
     if (scope.sync_id && scope.sync_id !== row.sync_id) continue;
     const metadata = JSON.parse(row.evidence_json);
     if (!allowed(metadata.session_id, metadata.timestamp)) continue;
     const result = evidence(frozen.read(metadata), row.sync_id); if (result) yield result;
   }
-  for (const row of db.prepare("SELECT id,status,completed_at,context_json,decisions,carry_forward FROM syncs WHERE status!='discarded' ORDER BY id").iterate() as Iterable<{ id: number; status: string; completed_at: string | null; context_json: string; decisions: string; carry_forward: string }>) {
+  for (const row of only && !['snapshot', 'decisions', 'carry_forward'].includes(only.kind) ? [] : db.prepare("SELECT id,status,completed_at,context_json,decisions,carry_forward FROM syncs WHERE status!='discarded'" + (only ? ' AND id=?' : '') + ' ORDER BY id').iterate(...(only ? [only.sync_id] : [])) as Iterable<{ id: number; status: string; completed_at: string | null; context_json: string; decisions: string; carry_forward: string }>) {
     if (scope.sync_id && scope.sync_id !== row.id) continue;
     for (const item of JSON.parse(row.context_json) as Evidence[]) {
-      if (!allowed(item.session_id, item.timestamp)) continue;
+      if ((only && item.ref !== only.origin_ref) || !allowed(item.session_id, item.timestamp)) continue;
       const result = evidence(frozen.read(item), row.id); if (result) yield result;
     }
     for (const kind of ['decisions', 'carry_forward'] as const) if (scope.kind !== 'sources' && !scope.session_id && !scope.session_ids && (!scope.before || (row.completed_at && row.completed_at <= scope.before)) && row[kind].trim()) yield record(`${kind}:${row.id}`, {
@@ -54,9 +54,9 @@ export function* historySources(db: Database.Database, root: RootInput = getSour
   } finally { frozen.close(); }
   const reader = new EntryReader(db, root, cache);
   try {
-  for (const row of db.prepare(`SELECT e.id,e.event_key,e.session_id,s.agent,s.name,s.cwd,e.role,e.timestamp
+  for (const row of only && only.kind !== 'session' ? [] : db.prepare(`SELECT e.id,e.event_key,e.session_id,s.agent,s.name,s.cwd,e.role,e.timestamp
       FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id
-      WHERE e.active=1 AND e.present=1 AND e.is_activity=1 AND e.effective_length>0 ORDER BY e.id`).iterate() as Iterable<{ id: number; event_key: string; session_id: string; agent: string; name: string; cwd: string; role: string; timestamp: string }>) {
+      WHERE e.active=1 AND e.present=1 AND e.is_activity=1 AND e.effective_length>0 ${only ? 'AND e.id=?' : ''} ORDER BY e.id`).iterate(...(only ? [only.position] : [])) as Iterable<{ id: number; event_key: string; session_id: string; agent: string; name: string; cwd: string; role: string; timestamp: string }>) {
     if (scope.sync_id || !allowed(row.session_id, row.timestamp)) continue;
     const text = reader.effective(row.id);
     const key = digest(row.event_key + '\0' + cleanText(text, Number.MAX_SAFE_INTEGER));
@@ -65,7 +65,7 @@ export function* historySources(db: Database.Database, root: RootInput = getSour
       qualification: 'Indexed active session excerpt, not a reviewed snapshot. Assistant claims are not independently verified.', group: `session:${row.session_id}`, position: row.id }, key);
   }
   } finally { reader.close(); }
-  for (const row of db.prepare(`SELECT m.id,m.sync_id,m.role,m.content,m.created_at FROM sync_messages m JOIN syncs s ON s.id=m.sync_id WHERE s.status!='discarded' ORDER BY m.id`).iterate() as Iterable<{ id: number; sync_id: number; role: string; content: string; created_at: string }>) {
+  for (const row of only && only.kind !== 'discussion' ? [] : db.prepare(`SELECT m.id,m.sync_id,m.role,m.content,m.created_at FROM sync_messages m JOIN syncs s ON s.id=m.sync_id WHERE s.status!='discarded' ${only ? 'AND m.id=?' : ''} ORDER BY m.id`).iterate(...(only ? [only.position] : [])) as Iterable<{ id: number; sync_id: number; role: string; content: string; created_at: string }>) {
     if (scope.kind === 'sources' || scope.session_id || scope.session_ids || (scope.sync_id && scope.sync_id !== row.sync_id) || (scope.before && row.created_at > scope.before) || !row.content.trim()) continue;
     yield record(`message:${row.id}`, { kind: 'discussion', session_id: null, sync_id: row.sync_id, origin_ref: null, title: `Sync #${row.sync_id} discussion`, workspace: '', role: row.role,
       at: row.created_at, text: row.content, qualification: 'Historical conversation, not a current request. Generated text is not proof of playback, agreement or execution.', group: `discussion:${row.sync_id}`, position: row.id });

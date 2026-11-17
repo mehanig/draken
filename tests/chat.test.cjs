@@ -33,7 +33,7 @@ test('start-chat scans/prepares without a native account, call, review or microp
  assert.equal(fs.existsSync(process.env.DRAKEN_CODEX_HOME),false);
 });
 
-test('chat requires prepared history, deduplicates delivery, retains the user immediately and reuses the briefing tree',async()=>{
+test('chat requires prepared history, deduplicates delivery and retains the user immediately',async()=>{
  const {id}=await ready(),before=calls().length,coverage=store.homeOverview().covered;
  const prepared=store.getSync(id).conversation.history_before;getDb().prepare('UPDATE syncs SET conversation_before=NULL WHERE id=?').run(id);
  assert.throws(()=>launchChat(id,'What remains?',randomUUID()),/Prepare/);assert.equal(calls().length,before);
@@ -68,9 +68,11 @@ test('actual chat route survives appended/scanned originals and adopts newly ind
  assert.equal(JSON.stringify(done.items),originalItems);assert.equal(done.briefing,initial.briefing);assert.equal(store.homeOverview().covered,0);
  assert.ok(calls().at(-1).historical_evidence.sources.some(item=>item.text.includes('Fresh original update')),'New original is supplied separately as H history');
  assert.ok(done.messages.some(item=>/\[H[a-f0-9]{24}\]/.test(item.content))||calls().at(-1).historical_evidence.sources.length>0);
- // A damaged original frozen source remains fail-closed, despite retained readiness.
- fs.writeFileSync(path.join(root,'sessions',trail+'.jsonl'),'damaged original\n');const paid=calls().length;
- const rejected=await api(`/syncs/${id}/chat/messages`,{message:'Continue',request_id:randomUUID()});assert.equal(rejected.status,409);assert.equal(calls().length,paid);
+ // Damage outside the supplied evidence is not a chat admission veto.
+ fs.writeFileSync(path.join(root,'sessions',trail+'.jsonl'),'damaged original\n');
+ assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'Continue',request_id:randomUUID()})).status,202);await idle();
+ assert.equal(store.getSync(id).tree.run.status,'completed');
+ assert.deepEqual(calls().at(-1).historical_evidence.sources,[]);
 });
 
 test('history cutoff stays pinned for the whole answer; unavailable updates are qualified, not a different search mode',async()=>{
@@ -89,54 +91,38 @@ test('history cutoff stays pinned for the whole answer; unavailable updates are 
  const packet=calls().at(-1).historical_evidence;assert.deepEqual(packet.sources,[]);assert.match(packet.limitations,/temporarily unavailable or updating/);
 });
 
-for (const boundary of ['tree', 'history', 'history-error', 'final', 'repair']) {
- for (const ref of ['E', 'C']) {
-  for (const damage of ['delete', 'rewrite']) {
-   test(`${ref} original ${damage} during ${boundary} fails closed and releases the accepted chat`,async t=>{
-    const {id,trail}=await ready(),db=getDb(),file=path.join(root,'sessions',trail+'.jsonl');
-    if(ref==='C'){
-     // Make this file context-only, so validation must cover C as well as E.
-     const items=db.prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(id);
-     const context=JSON.parse(db.prepare('SELECT context_json FROM syncs WHERE id=?').get(id).context_json);
-     for(const item of items){const frozen=JSON.parse(item.evidence_json);if(frozen.session_id!==trail)continue;
-      frozen.ref='C'+(context.length+1);context.push(frozen);
-      db.prepare('DELETE FROM sync_items WHERE sync_id=? AND event_key=?').run(id,item.event_key);
-     }
-     db.prepare('UPDATE syncs SET context_json=? WHERE id=?').run(JSON.stringify(context),id);
-    }
-    const initial=store.getSync(id),before=calls().length,key=randomUUID();let entered,finish;
-    const arrived=new Promise(resolve=>entered=resolve),blocked=new Promise(resolve=>finish=resolve);
-    const pause=async()=>{entered();await blocked;};
-    const {SummaryTree}=require('../dist/sync/tree');
-    if(boundary==='tree'){
-     const build=SummaryTree.prototype.build;
-     t.mock.method(SummaryTree.prototype,'build',async function(...args){const result=await build.apply(this,args);await pause();return result;});
-    }else if(boundary==='final'||boundary==='repair'){
-     if(boundary==='repair')fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true}));
-     const call=SummaryTree.prototype.call;
-     t.mock.method(SummaryTree.prototype,'call',async function(...args){const result=await call.apply(this,args);if(args[2]&&(boundary==='final'||args[0].repair))await pause();return result;});
-    }else{
-     memory.searchPreparedHistory=async()=>{await pause();if(boundary==='history-error')throw Error('Historical retrieval failed');return {mode:'hybrid',results:[],limitations:'Synthetic no match.'};};
-    }
-    launchChat(id,'What remains in Trailboard?',key);
-    try{
-     await arrived;
-     if(damage==='delete')fs.unlinkSync(file);
-     else {const original=fs.readFileSync(file,'utf8');fs.writeFileSync(file,original.replace('Check Trailboard','Break Trailboard'));}
-    }finally{finish();}
-    await idle();const done=store.getSync(id);
-    assert.equal(done.tree.run.status,'failed');assert.match(done.tree.run.error,/Original session evidence is unavailable or changed/);
-    assert.deepEqual(done.messages.map(row=>[row.role,row.content]),[['user','What remains in Trailboard?']]);
-    assert.equal(done.briefing,initial.briefing);assert.equal(done.conversation.history_before,initial.conversation.history_before);
-    assert.equal(done.busy,false);assert.equal(activity.jobActive(id),false);assert.equal(activity.callActive,false);
-    const release=activity.beginJob(id,new AbortController());release();
-    assert.equal(calls().slice(before).filter(call=>call.task==='final_verdict').length,boundary==='repair'?2:boundary==='final'?1:0);
-    assert.equal(launchChat(id,'What remains in Trailboard?',key).tree.run.status,'failed','Delivery retry retains the failed run without a new provider call');
-    assert.equal(store.homeOverview().covered,0);
-   });
-  }
- }
-}
+test('prepared chat never traverses the summary tree, reads the frozen corpus or starts indexing',async t=>{
+ const {id}=await ready(),initial=store.getSync(id),before=calls().length;
+ getDb().prepare('DELETE FROM summary_planning_context WHERE sync_id=?').run(id); // Pre-receipt briefing upgrade.
+ const {SummaryTree}=require('../dist/sync/tree'),{EvidenceReader}=require('../dist/db/evidence');
+ const forbidden=()=>{throw Error('Chat entered a preparation/full-snapshot path');};
+ for(const method of ['beforePreparation','build','beforeFinal','verifyFinal'])t.mock.method(SummaryTree.prototype,method,forbidden);
+ t.mock.method(EvidenceReader.prototype,'read',forbidden);
+ t.mock.method(memory,'historyPreparationStatus',()=>({ready:true,before:initial.conversation.history_before}));
+ t.mock.method(memory,'historyReadiness',forbidden);t.mock.method(memory,'prepareHistory',forbidden);
+ const api=await http(),key=randomUUID();
+ assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'What remains?',request_id:key})).status,202);await idle();
+ const done=await(await api(`/syncs/${id}?evidence=false`)).json();
+ assert.equal(done.tree.run.status,'completed');assert.equal(done.messages.length,2);
+ assert.equal(done.briefing,initial.briefing);assert.equal(calls().length-before,1);
+ assert.equal(calls().at(-1).opening_briefing,initial.briefing.replace(/\[([EC]\d+)\]/g,'(quoted reference $1)'));assert.deepEqual(calls().at(-1).summary_tree,[]);
+ assert.equal(done.item_count,initial.items.length);assert.equal(store.homeOverview().covered,0);
+ assert.equal((await api(`/syncs/${id}/messages`,{message:'And now?'})).status,202);await idle();
+ assert.equal(store.getProgress(id).run.status,'completed');assert.equal(calls().length-before,2,'Legacy discussion uses the same fast path');
+ assert.equal(getDb().prepare('SELECT COUNT(*) n FROM summary_planning_context WHERE sync_id=?').get(id).n,0,'Chat must not manufacture preparation provenance');
+});
+
+test('explicit frozen citations read only the requested original and reject revoked source access',async t=>{
+ const {id}=await ready(),item=store.getSync(id).items[0],before=calls().length;
+ const {EvidenceReader}=require('../dist/db/evidence'),read=EvidenceReader.prototype.read;let reads=0;
+ t.mock.method(EvidenceReader.prototype,'read',function(value,...args){const metadata=typeof value==='string'?JSON.parse(value):value;assert.equal(metadata.ref,item.ref);reads++;return read.call(this,value,...args);});
+ launchChat(id,`Explain ${item.ref}`,randomUUID());await idle();
+ assert.equal(store.getProgress(id).run.status,'completed');assert.equal(reads,1);assert.equal(calls().length-before,1);
+ assert.ok(calls().at(-1).retrieved_evidence.some(source=>source.sequence===item.sequence));
+ store.setIncluded(item.session_id,false);
+ launchChat(id,`Explain ${item.ref}`,randomUUID());await idle();
+ assert.equal(store.getProgress(id).run.status,'failed');assert.equal(calls().length-before,1,'Revoked evidence cannot reach another model request');
+});
 
 test('a history implementation that returns after cancellation cannot reach the final model',async()=>{
  const {id}=await ready(),before=calls().length;let entered,finish;
@@ -161,28 +147,6 @@ test('accepted user time survives retries/restart; an in-flight answer finishes 
   const next=store.startConversationSync(randomUUID());assert.notEqual(next.id,id);assert.deepEqual(next.items.map(item=>item.event_key),done.items.map(item=>item.event_key));
   assert.equal(store.getSync(id).briefing,done.briefing);assert.equal(store.getSync(id).messages.length,2);assert.equal(store.homeOverview().covered,0);
  } finally {Date.now=clock;}
-});
-
-test('chat gets a short-answer policy instead of briefing headings, with explicit detail and format requests preserved',async()=>{
- const {id}=await ready(),briefing=store.getSync(id).briefing;
- const opening=calls().find(call=>call.task==='final_verdict');
- assert.match(opening.system,/Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion/);
- assert.doesNotMatch(opening.system,/60-100 words/);
- for(const question of ['Where are we with Trailboard now? Anything else left?', 'What remains in Trailboard? Answer in one sentence.', 'Give me a detailed breakdown of Trailboard progress, remaining implementation and acceptance checks.']){
-  const before=calls().length;launchChat(id,question,randomUUID());await idle();
-  const attempts=calls().slice(before);assert.equal(attempts.length,1,'Style does not add another model pass');
-  const reply=attempts[0];assert.equal(reply.user_question,question);assert.equal(reply.model,opening.model);
-  assert.match(reply.system,/one short paragraph OR at most three short bullets, usually 60-100 words excluding citations/);
-  assert.match(reply.system,/Follow an explicit user request for a shorter answer, a particular format, or a detailed breakdown/);
-  assert.match(reply.system,/not because sources or earlier assistant replies are long/);
-  assert.match(reply.system,/Read and reconcile all supplied relevant evidence/);
-  assert.match(reply.system,/Every factual claim about session work MUST cite/);
-  assert.match(reply.system,/Brevity must not remove necessary later-report citations or qualifications/);
-  assert.doesNotMatch(reply.system,/Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion/);
-  assert.ok(reply.verification_evidence.length);assert.ok(reply.reference_labels.length);
-  assert.equal(store.getSync(id).briefing,briefing,'The opening briefing is not rewritten');
- }
- assert.equal(store.homeOverview().covered,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
 });
 
 test('chat shares project focus across native/user turns and reload, never from assistant instructions',async()=>{
@@ -227,56 +191,32 @@ function reconciliationFixture(session){
  memory.searchPreparedHistory=async query=>{assert.equal(query.reconcile,true);return {mode:'hybrid',limitations:'Synthetic original reports, not independently verified.',results:ids.map((ref,i)=>({ref,kind:'session',session_id:session,sync_id:null,origin_ref:null,title:'Trailboard',workspace:'/demo/Trailboard',role:'assistant',at:`2026-01-0${i+1}T00:00:00.000Z`,sequence:i+1,offset:0,score:1,qualification:'Agent report.',text:['Client wiring and durable jobs remain unfinished.','Client wiring implemented; delivery disabled.','Durable job foundations implemented; delivery remains disabled.'][i]})),reconciliation:{checked_narratives:3,omitted_narratives:0,omitted_threads:0,threads:[{earlier_ref:ids[0],later_refs:ids.slice(1),matched_terms:['wiring','jobs'],other_candidates:0}],qualification:'Candidates, not automatic proof of completion.'}};};
  return ids;
 }
-test('an unreconciled draft gets one bounded same-model repair and only the corrected answer is saved',async()=>{
+test('checkpoint citation heuristics neither veto answers nor trigger a second paid call',async()=>{
  const {id,trail}=await ready(),refs=reconciliationFixture(trail),before=calls().length;
- fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true,damageLongReference:true}));
+ fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
- const sync=store.getSync(id),attempts=calls().slice(before);
- assert.equal(sync.tree.run.status,'completed');assert.equal(sync.messages.length,2);assert.match(sync.messages[1].content,/Corrected synthetic answer/);
- assert.equal(attempts.length,2);assert.ok(attempts.every(call=>call.model==='test/strong'&&call.task==='final_verdict'));
- assert.ok(attempts[1].reconciliation_repair);assert.equal(attempts[0].reconciliation_repair,undefined);
- assert.ok(refs.slice(1).every(ref=>sync.messages[1].content.includes(ref)));
- assert.ok(attempts.every(call=>call.historical_evidence.sources.every(source=>/^R\d+$/.test(source.ref))));
- assert.deepEqual(attempts[0].reference_labels,attempts[1].reference_labels);
- assert.equal(attempts[0].system,attempts[1].system,'The correction retains the same short-answer policy');
- assert.match(attempts[1].system,/60-100 words/);
- assert.match(attempts[1].reconciliation_repair.instruction,/same response style and user-requested level of detail/);
- assert.ok(attempts[1].reconciliation_repair.gaps.every(gap=>/^R\d+$/.test(gap.earlier_ref)&&gap.missing_later_refs.every(ref=>/^R\d+$/.test(ref))));
- assert.equal(store.homeOverview().covered,0);assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
+ const sync=store.getSync(id);assert.equal(sync.tree.run.status,'completed');assert.equal(calls().length-before,1);
+ assert.ok(sync.messages.at(-1).content.includes(refs[0]));assert.ok(!sync.messages.at(-1).content.includes(refs[1]));
+ // This verifies removal of the veto, not the synthetic answer's factual quality.
 });
 test('bad or missing first-draft citations get the same single bounded correction',async()=>{
- const {id}=await ready();
+ const {id,trail}=await ready();reconciliationFixture(trail);
  for(const controlValue of [{invalidFinalOnce:true},{missingFinalOnce:true}]){
   fs.writeFileSync(control,JSON.stringify(controlValue));const before=calls().length;
   launchChat(id,'What remains in Trailboard?',randomUUID());await idle();const sync=store.getSync(id),attempts=calls().slice(before);
-  assert.equal(sync.tree.run.status,'completed');assert.equal(attempts.length,2);assert.ok(attempts[1].reconciliation_repair.citation_issue);assert.match(sync.messages.at(-1).content,/\[[ECH]/);assert.doesNotMatch(sync.messages.at(-1).content,/R999999|Unsupported draft/);
+  assert.equal(sync.tree.run.status,'completed');assert.equal(attempts.length,2);assert.ok(attempts[1].citation_repair.citation_issue);assert.match(sync.messages.at(-1).content,/\[[ECH]/);assert.doesNotMatch(sync.messages.at(-1).content,/R999999|Unsupported draft/);
  }
  const before=calls().length,key=randomUUID();launchChat(id,'INVALID_CITATION',key);await idle();assert.equal(calls().length-before,2);assert.match(store.getSync(id).tree.run.error,/outside the supplied evidence/);assert.equal(store.getSync(id).messages.at(-1).role,'user');launchChat(id,'INVALID_CITATION',key);assert.equal(calls().length-before,2);
 });
 
-test('citation and later-report gaps share one correction rather than separate retry loops',async()=>{
+test('citation correction cannot exceed the invocation ceiling or publish a draft after cancellation',async()=>{
  const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
- fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true,staleCheckpoint:true,damageLongReference:true}));
- launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();const attempts=calls().slice(before);
- assert.equal(store.getSync(id).tree.run.status,'completed');assert.equal(attempts.length,2);assert.equal(attempts[1].reconciliation_repair.citation_issue,'outside_catalog');assert.ok(attempts[1].reconciliation_repair.gaps.length);assert.doesNotMatch(store.getSync(id).messages.at(-1).content,/R999999|Unsupported draft/);
-});
-
-test('a second unreconciled answer fails visibly without saving either draft or retrying indefinitely',async()=>{
- const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length,key=randomUUID();
- fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true,ignoreReconciliation:true}));
- launchChat(id,'What is still blocked in Trailboard?',key);await idle();
- const sync=store.getSync(id);assert.equal(sync.tree.run.status,'failed');assert.match(sync.tree.run.error,/did not reconcile/);
- assert.equal(sync.messages.length,1);assert.equal(sync.messages[0].role,'user');assert.equal(calls().length-before,2);
- launchChat(id,'What is still blocked in Trailboard?',key);assert.equal(calls().length-before,2,'Delivery retry cannot pay for another repair');
-});
-test('reconciliation cannot exceed the invocation ceiling or publish a draft after cancellation',async()=>{
- const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
- store.configureModels(id,{...store.getSync(id).models,max_invocations:1});fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true}));
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:1});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
  assert.equal(calls().length-before,1);assert.equal(store.getSync(id).tree.run.status,'failed');assert.match(store.getSync(id).tree.run.error,/Invocation budget/);assert.equal(store.getSync(id).messages.length,1);
- store.configureModels(id,{...store.getSync(id).models,max_invocations:10});fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true,delay:300}));
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:10});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true,delay:300}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());
- const until=Date.now()+5000;while(store.getProgress(id).run.stage!=='Reconciling later evidence'){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
+ const until=Date.now()+5000;while(store.getProgress(id).run.stage!=='Checking evidence references'){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
  assert.equal(store.getSync(id).messages.length,2,'Both rows are retained user questions, not the rejected draft');
  cancelReply(id);await idle();assert.equal(store.getSync(id).tree.run.status,'cancelled');assert.ok(store.getSync(id).messages.every(message=>message.role==='user'));
 });

@@ -21,10 +21,10 @@ process.stdin.on('end', () => {
   const model = args[args.indexOf('--model') + 1];
   const control = process.env.DRAKEN_FAKE_CONTROL ? JSON.parse(fs.readFileSync(process.env.DRAKEN_FAKE_CONTROL, 'utf8')) : {};
   if (process.env.DRAKEN_TEST_CALL_LOG) fs.appendFileSync(process.env.DRAKEN_TEST_CALL_LOG, JSON.stringify({
-    task: value.task, stage: value.stage, model, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree,
+    task: value.task, stage: value.stage, model, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree, opening_briefing: value.opening_briefing,
     input_characters: input.length, input_bytes: Buffer.byteLength(input), system: args[args.indexOf('--system-prompt') + 1],
     verification_evidence: value.verification_evidence, retrieved_evidence: value.retrieved_evidence, historical_evidence: value.historical_evidence,
-    recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, reconciliation_repair: value.reconciliation_repair, reference_labels: value.reference_labels,
+    recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, citation_repair: value.citation_repair, reference_labels: value.reference_labels,
     allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair, citation_repairs: value.citation_repairs,
   }) + '\n');
   if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage)) {
@@ -91,12 +91,9 @@ process.stdin.on('end', () => {
     if (value.user_question === 'INVALID_CITATION') return emit('Invented outcome [E9999999]');
     if (control.invalidFinalOnce && !value.repair) return emit('Unsupported draft [R999999]' + (value.historical_evidence?.reconciliation?.threads?.[0] ? ` [${value.historical_evidence.reconciliation.threads[0].earlier_ref}]` : ''));
     if (control.missingFinalOnce && !value.repair) return emit('Draft missing its evidence links.');
-    if (control.staleCheckpoint && value.historical_evidence?.reconciliation?.threads?.length) {
-      if (!value.reconciliation_repair || control.ignoreReconciliation) return emit(`The old client wiring is still blocked. [${value.historical_evidence.reconciliation.threads[0].earlier_ref}]`);
-      return emit(`Corrected synthetic answer: client wiring and job foundations were reported implemented; delivery remains disabled. ${value.historical_evidence.sources.map(source => `[${control.damageLongReference && source.ref.startsWith('H') ? source.ref.slice(0,-1)+'0' : source.ref}]`).join(' ')}`);
-    }
+    if (control.staleCheckpoint && value.historical_evidence?.reconciliation?.threads?.length) return emit(`The old client wiring is still blocked. [${value.historical_evidence.reconciliation.threads[0].earlier_ref}]`);
     if (value.historical_evidence?.sources?.length) return emit(`Historical source reports a speech-path change; not proof of deployment. [${value.historical_evidence.sources[0].ref}]`);
-    const refs = value.verification_evidence || [];
+    const refs = [...(value.verification_evidence || []), ...(value.retrieved_evidence || [])];
     const reference = refs[0] ? ` [${refs[0].ref}]` : '';
     if (value.user_question) return emit('The session reports targeted tests passing, not a deployment. Keep the dashboard decision open.' + reference);
     const outcomes = value.summary_tree.flatMap(node => node.observations.map(observation => `${observation.summary} [${observation.evidence[0]}]`)).join('\n');

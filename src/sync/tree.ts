@@ -296,11 +296,12 @@ export class SummaryTree {
     this.runTable = this.background ? 'background_runs' : 'sync_runs';
     if (!this.background && !Number.isSafeInteger(sync.id)) throw new Error('Foreground summary preparation requires a sync ID');
     assertEvidenceAvailable(sync);
-    this.accountAggregation = this.background || (this.db.prepare('SELECT question FROM sync_runs WHERE id=?').get(runId) as { question: string | null } | undefined)?.question === null;
+    const question = !this.background && (this.db.prepare('SELECT question FROM sync_runs WHERE id=?').get(runId) as { question: string | null } | undefined)?.question;
+    this.accountAggregation = this.background || question === null;
     // Citation representatives are stable: initial E, then the first C. Extras
     // with the same canonical body key must not overwrite either representative.
     this.sourceMap = sourceRepresentatives(sync.items, sync.context);
-    this.planningContext = planningContext(this.db, sync.id, sync.context);
+    this.planningContext = question ? [] : planningContext(this.db, sync.id, sync.context);
     // Added citation dependencies never become initial C on retry/reopen. Their
     // original pointers stay readable, but their admission must remain current.
     this.frozenScope = this.background ? [] : [...sync.items, ...this.planningContext];

@@ -35,7 +35,7 @@ export const overview = () => request<Overview>('/overview');
 export const scan = () => request<ScanResult>('/scan', 'POST');
 export const enableAgent = (agent: string, enabled: boolean) => request<Overview>(`/agents/${encodeURIComponent(agent)}`, 'PATCH', { enabled });
 export const include = (id: string, included: boolean) => request<Overview>(`/sessions/${encodeURIComponent(id)}`, 'PATCH', { included });
-export const sync = (id: number) => request<SyncDetail>(`/syncs/${id}`);
+export const sync = (id: number, evidence = true) => request<SyncDetail>(`/syncs/${id}${evidence ? '' : '?evidence=false'}`);
 export const conversationStatus = (id: number, signal?: AbortSignal) => request<ConversationState>(`/syncs/${id}/conversation`, 'GET', undefined, signal);
 export const progress = (id: number) => request<TreeProgress>(`/syncs/${id}/progress`);
 export const callReadiness = (id: number, signal?: AbortSignal) => request<CallReadiness>(`/syncs/${id}/call-readiness`, 'GET', undefined, signal);

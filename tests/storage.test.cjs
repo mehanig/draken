@@ -237,12 +237,12 @@ test('frozen historical search windows survive migration, ordinary preparation a
   const original = fs.readFileSync(file, 'utf8');
   fs.writeFileSync(file, original.replace('a'.repeat(699), 'z'.repeat(699)));
   await assert.rejects(cold.search({ question: 'Frozen', session_id: 'frozen-multi', before: cutoff }, undefined, true), /unavailable/);
-  assert.equal(queries, 4, 'source verification precedes query inference');
+  assert.equal(queries, 5, 'query inference precedes selected-source verification');
   assert.deepEqual(bytes(), expectedBytes);
   fs.writeFileSync(file, original);
   db.prepare("UPDATE agent_sessions SET included=0 WHERE id='frozen-multi'").run();
   assert.deepEqual((await cold.search({ question: 'Frozen', session_id: 'frozen-multi', before: cutoff }, undefined, true)).results, []);
-  assert.throws(() => cold.read(records.find(record => record.session_id === 'frozen-multi').ref, 0, cutoff), /no longer admitted/);
+  assert.throws(() => cold.read(records.find(record => record.session_id === 'frozen-multi').ref, 0, cutoff), /unavailable|no longer admitted/);
   old.prepare("INSERT INTO words(words,rank) VALUES('integrity-check',1)").run();
   assert.deepEqual(old.pragma('foreign_key_check'), []);
 });
@@ -328,8 +328,8 @@ test('missing source blocks generation, calls and review, not conversations or e
   db.prepare('INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES(?,?,?,?)').run(first.id,'user','Retain this discussion',at);
   fs.unlinkSync(s.file);
   const unavailable=store.getSync(first.id);assert.ok(unavailable.items[0].unavailable);assert.equal(unavailable.messages[0].content,'Retain this discussion');
-  const manager=require('../dist/sync/manager');assert.throws(()=>manager.launchReply(first.id,'Explain'),/Original session evidence/);
-  await assert.rejects(manager.generateReply(first.id,'Explain'),/Original session evidence/);
+  const manager=require('../dist/sync/manager');assert.throws(()=>manager.launchReply(first.id),/Original session evidence/);
+  await assert.rejects(manager.generateReply(first.id),/Original session evidence/);
   await assert.rejects(require('../dist/voice/live').createLiveCall(first.id,new AbortController().signal),/Original session evidence/);
   assert.throws(()=>store.completeSync(first.id,'','',true),/Original session evidence/);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_runs').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);

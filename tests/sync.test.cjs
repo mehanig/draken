@@ -347,6 +347,7 @@ test('manager uses tool-free pi, persists replies and memory, and does not advan
   assert.equal((await generateReply(first.id, 'Explain')).messages.length, 2);
   store.completeSync(first.id, 'Prefer correctness', 'Revisit migration', true);
   const next = store.startSync();
+  await generateReply(next.id);
   const response = await generateReply(next.id, 'SHOW MEMORY');
   assert.match(response.messages[1].content, /Prefer correctness/);
 });
@@ -356,6 +357,8 @@ test('model failure and timeout retain accepted user turns without saving incomp
   session([event('u', null, 'Task', 'user')]);
   await scanSessions();
   const first = store.startSync();
+  await assert.rejects(() => generateReply(first.id, 'FAIL'), /Prepare the briefing/);
+  await generateReply(first.id);
   await assert.rejects(() => generateReply(first.id, 'FAIL'), /provider unavailable/);
   process.env.DRAKEN_PI_TIMEOUT_MS = '1000';
   await assert.rejects(() => generateReply(first.id, 'TIMEOUT'), /timed out/);

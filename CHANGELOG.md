@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Prepared text chat uses the saved briefing, conversation and prepared search; it no longer rebuilds the summary tree or repeatedly reads/verifies the full snapshot and archive receipt.
+- Rank prepared search candidates before resolving selected originals. Preserve source permissions, original-byte checks for supplied evidence, explicit frozen-reference reads and invocation/cancellation accounting.
+- Remove the checkpoint-citation veto and its model retry. Invalid citation labels still receive at most one correction; heuristic citation combinations no longer discard an answer.
+- Return metadata-only chat updates without discarding the browser's loaded evidence. Remove obsolete chat-wide verification and prompt-wording tests; retain preparation-cache tests at preparation boundaries.
+
 ## 0.8.6
 
 ### Brief current project state, not exhaustive history

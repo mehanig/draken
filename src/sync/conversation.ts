@@ -96,7 +96,7 @@ export function captureConversationHistory(id: number): string | null {
   assertConversationActive(id);
   const value = row(id);
   if (!value.conversation_before) return null;
-  const latest = historyReadiness(true);
+  const latest = historyPreparationStatus();
   const before = latest.ready && latest.before && latest.before > value.conversation_before ? latest.before : value.conversation_before;
   if (before !== value.conversation_before) getDb().prepare('UPDATE syncs SET conversation_before=? WHERE id=?').run(before, id);
   return before;

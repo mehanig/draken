@@ -95,6 +95,13 @@ function seedParent(tree, nodes) {
   return spec;
 }
 function planRows() { return getDb().prepare('SELECT * FROM summary_leaf_plans ORDER BY rowid').all(); }
+// Exercise preparation reuse explicitly, not the unrelated prepared-chat path.
+async function rebuildBriefing(id) {
+  const { briefing } = store.getSync(id);
+  getDb().prepare("UPDATE syncs SET briefing='' WHERE id=?").run(id);
+  try { return await generateReply(id, undefined, undefined, { deferHistory: true }); }
+  finally { getDb().prepare('UPDATE syncs SET briefing=? WHERE id=?').run(briefing, id); }
+}
 
 test('first complete leaf with omitted-sequence initial C keeps all completed work', async () => {
   await scanSessions(); const sync = moveToContext(store.startSync(), 2), before = metadata(sync);
@@ -107,7 +114,7 @@ test('first complete leaf with omitted-sequence initial C keeps all completed wo
   // Genuine initial C keeps its captured as-of authority after catalog changes.
   await edit('initial-later-edit', 'Changed current catalog body.');
   getDb().prepare('UPDATE agent_sessions SET cwd=? WHERE id=?').run('/new/catalog', sid); closeDb();
-  await generateReply(sync.id, 'Again?', undefined, { deferHistory: true });
+  await rebuildBriefing(sync.id);
   assert.deepEqual(calls, ['final', 'final']); assert.deepEqual(metadata(sync), before); assert.deepEqual(planRows(), plans);
 });
 
@@ -133,7 +140,7 @@ for (const initial of ['E', 'C']) test(`same-key no-op pointer remains a durable
   assert.ok(store.getSync(sync.id).tree.nodes.some(node => node.key === root.key));
   const plans = planRows();
   for (let n = 0; n < 2; n++) {
-    closeDb(); await generateReply(sync.id, 'Unchanged retry?', undefined, { deferHistory: true });
+    closeDb(); await rebuildBriefing(sync.id);
     assert.deepEqual(metadata(sync), after, 'no duplicate C/ref churn'); assert.deepEqual(planRows(), plans);
     const retry = new SummaryTree(store.getSync(sync.id), 0, signal());
     assert.equal(retry.sourceMap.get(sourceKey(captured)).ref, captured.ref, 'old E/C remains canonical representative');
@@ -141,7 +148,7 @@ for (const initial of ['E', 'C']) test(`same-key no-op pointer remains a durable
   assert.deepEqual(calls, ['final', 'final', 'final']);
   await edit('different-body-edit', 'New edited body is unrelated.', 'same-body-edit'); closeDb();
   const count = calls.length;
-  await assert.rejects(generateReply(sync.id, 'What remains?', undefined, { deferHistory: true }), /unavailable|changed|excluded/);
+  await assert.rejects(rebuildBriefing(sync.id), /unavailable|changed|excluded/);
   await assert.rejects(live.createLiveCall(sync.id, signal()), /unavailable|changed|excluded/);
   assert.equal(calls.length, count, 'zero new leaf/parent/final calls');
   assert.equal(probes, 0); assert.deepEqual(nativeRequests, [], 'zero live open/context/text');
@@ -201,7 +208,7 @@ test('fully overlapping completed leaves cannot discard a distinct same-key back
   const result = store.getSync(sync.id);
   assert.equal(result.context.length, 1); assert.ok(result.tree.nodes.some(node => node.key === root.key));
   await edit('overlap-conflict', 'Conflicting body.', 'overlap-noop'); closeDb();
-  await assert.rejects(generateReply(sync.id, 'Retry?', undefined, { deferHistory: true }), /unavailable|changed|excluded/);
+  await assert.rejects(rebuildBriefing(sync.id), /unavailable|changed|excluded/);
   assert.deepEqual(calls, ['final']);
 });
 
@@ -216,7 +223,7 @@ test('physical old selected edit is verified despite a same-key newer extra', as
   const text = fs.readFileSync(file, 'utf8');
   fs.writeFileSync(file, text.split('\n').map(line => line.includes('"id":"old-selected-edit"') ? line.replace('Captured edited body.', 'Tampered edited body.') : line).join('\n'));
   closeDb();
-  await assert.rejects(generateReply(sync.id, 'Retry?', undefined, { deferHistory: true }), /unavailable|changed/);
+  await assert.rejects(rebuildBriefing(sync.id), /unavailable|changed/);
   await assert.rejects(live.createLiveCall(sync.id, signal()), /unavailable|changed/);
   assert.deepEqual(calls, ['final']); assert.deepEqual(nativeRequests, []);
 });
@@ -246,13 +253,13 @@ for (const overlapping of [false, true]) test(`primary no-op selected pointer su
   assert.ok(result.tree.nodes.some(node => node.key === root.key));
   assert.equal(getDb().prepare('SELECT count(*) n FROM sync_coverage').get().n, 0, 'no implicit review');
   for (let n = 0; n < 2; n++) {
-    closeDb(); await generateReply(sync.id, 'Unchanged retry?', undefined, { deferHistory: true });
+    closeDb(); await rebuildBriefing(sync.id);
     assert.deepEqual(metadata(sync), after); assert.deepEqual(planRows(), plans); assert.deepEqual(cacheRows(), cache);
   }
   assert.deepEqual(calls, ['final', 'final', 'final']);
   const briefing = store.getSync(sync.id).briefing;
   await edit('primary-conflict', 'Conflicting effective body.', 'primary-noop'); closeDb();
-  await assert.rejects(generateReply(sync.id, 'Retry?', undefined, { deferHistory: true }), /unavailable|changed|excluded/);
+  await assert.rejects(rebuildBriefing(sync.id), /unavailable|changed|excluded/);
   await assert.rejects(async () => {
     const call = await live.createLiveCall(sync.id, signal());
     await live.connectLiveCall(call.id, 'synthetic SDP', signal());
@@ -292,7 +299,7 @@ for (const primary of [false, true]) test(`canonical final/tree/progress represe
   // neither remove it nor promote it into the original planning scope.
   assert.ok(result.context.some(item => item.ref !== captured.ref && sourceKey(item) === key));
   await edit('representative-conflict', 'Later conflicting edit.', 'representative-noop'); closeDb();
-  await assert.rejects(generateReply(sync.id, 'Retry?', undefined, { deferHistory: true }), /unavailable|changed|excluded/);
+  await assert.rejects(rebuildBriefing(sync.id), /unavailable|changed|excluded/);
   assert.deepEqual(calls, ['final']);
 });
 
@@ -364,7 +371,7 @@ for (const dependency of ['primary', 'background']) test(`restored pending ${dep
   assert.deepEqual(JSON.parse(getDb().prepare('SELECT refs_json FROM summary_planning_context WHERE sync_id=?').get(sync.id).refs_json), sync.context.map(item => item.ref));
   const completedPlans = planRows();
   for (let n = 0; n < 2; n++) {
-    closeDb(); await generateReply(sync.id, 'Unchanged?', undefined, { deferHistory: true });
+    closeDb(); await rebuildBriefing(sync.id);
     assert.deepEqual(metadata(sync), after); assert.deepEqual(cacheRows(), cache); assert.deepEqual(planRows(), completedPlans);
   }
   assert.deepEqual(planRows().filter(row => plans.some(plan => plan.identity === row.identity)), plans);
@@ -375,7 +382,7 @@ for (const dependency of ['primary', 'background']) test(`restored pending ${dep
     await live.connectLiveCall(call.id, 'synthetic SDP', signal());
     await live.sendLiveText(call.id, 'Retry?', randomUUID());
   }, /unavailable|changed|excluded/);
-  await assert.rejects(generateReply(sync.id, 'Retry?', undefined, { deferHistory: true }), /unavailable|changed|excluded/);
+  await assert.rejects(rebuildBriefing(sync.id), /unavailable|changed|excluded/);
   assert.deepEqual(calls, ['chunk', 'final', 'final', 'final']); assert.equal(probes, 0); assert.deepEqual(nativeRequests, []);
   assert.deepEqual(metadata(sync), after); assert.deepEqual(cacheRows(), cache); assert.deepEqual(planRows(), completedPlans);
 });
