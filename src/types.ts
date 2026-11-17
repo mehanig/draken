@@ -106,6 +106,8 @@ export interface PiSetupStatus {
 
 export interface HomeOverview {
   syncs: SyncCard[]; available: number; included_unreviewed: number; covered: number;
+  /** Eligible indexed entries never included in a snapshot; not a cache or billing estimate. */
+  new_entries: number;
   busy: boolean; active_call: boolean; next_cursor: number | null;
 }
 

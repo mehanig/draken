@@ -17,7 +17,7 @@ export function AutomaticProgress({ settings }: { settings: AutoIndexSettings })
     <p role="status"><strong>{phase}</strong></p>
     {settings.enabled && <>
       <p className="small muted">{settings.pending_records.toLocaleString()} source changes waiting for local indexing. {settings.last_completed_at && `Last completed indexing batch: ${new Date(settings.last_completed_at).toLocaleString()}.`}</p>
-      <p className="small muted">{settings.pending_entries.toLocaleString()} entries available for your next sync. History accumulates without creating snapshots or briefings.</p>
+      <p className="small muted">History accumulates without creating snapshots or briefings.</p>
     </>}
     {settings.error && <p role="alert">{settings.error}</p>}
     <HistoryProgress enabled={settings.enabled && settings.phase === 'indexing'} backgroundOnly />

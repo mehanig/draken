@@ -50,7 +50,13 @@ export function Home({ navigate }: { navigate: Navigate }) {
       {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div></div>
     {!window.isSecureContext && <p className="small muted">Use trusted HTTPS or localhost for the combined sync and call.</p>}
     <p className="home-hint muted small">Automatic indexing accumulates searchable history locally. Enable Prepare summaries ahead in Settings to cache summary work before your next chat. Click Sync with Draken or Chat instead to create the snapshot and opening briefing. Active conversations receive prepared updates between turns and end after 30 minutes without a user message. Nothing is marked reviewed until you confirm it.</p>
-    <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.available ?? '—'}</strong> available for a new sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> reserved, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
+    <div className="home-counts" aria-label="New activity"><span><strong>{home?.new_entries ?? '—'}</strong> new entries to prepare</span></div>
+    <p className="small muted">New means indexed entries not included in an earlier sync. Cached work is reused; unfinished work and the final briefing may still need processing.</p>
+    <details className="home-tracking-details">
+      <summary>Details: carried-forward entries and review</summary>
+      <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.new_entries === undefined ? '—' : home.available - home.new_entries}</strong> carried forward, unreviewed</span><span><strong>{home?.available ?? '—'}</strong> available for a new sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> reserved, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
+      <p className="small muted">These are entry counts, not a cache check or a bill. Mark reviewed on a completed sync to cover all entries in its snapshot; ending a conversation does not mark them reviewed.</p>
+    </details>
     <AutomaticPreparation />
     <details className="home-preparation-info">
       <summary>Automatic indexing and cost tracking</summary>

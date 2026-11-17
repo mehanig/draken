@@ -64,14 +64,18 @@ export function availableCount(): number {
 export function homeOverview(before?: number): HomeOverview {
   const db = getDb();
   const rows = db.prepare(`${summaryQuery} WHERE s.id < ? ORDER BY s.id DESC LIMIT 21`).all(before || Number.MAX_SAFE_INTEGER) as SyncSummary[];
-  const available = availableCount();
+  const { available, new_entries } = db.prepare(`SELECT COUNT(DISTINCT e.event_key) AS available,
+    COUNT(DISTINCT CASE WHEN NOT EXISTS (SELECT 1 FROM sync_items prior WHERE prior.event_key=e.event_key)
+      THEN e.event_key END) AS new_entries
+    FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE ${availableWhere}`)
+    .get() as { available: number; new_entries: number };
   const page = rows.slice(0, 20), conversations = conversationStatuses(page.map(row => row.id));
   return { syncs: page.map((row, index) => ({ conversation: conversations[index], aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)), id: row.id, status: row.status, created_at: row.created_at, item_count: row.item_count,
     preview: row.recap || row.briefing.replace(/\[([EC]\d+)\]/g, '').replace(/\s+/g, ' ').slice(0, 600),
     preview_kind: row.recap ? row.recap_state === 'ready' ? 'recap' : 'previous_recap' : row.briefing ? 'briefing' : 'empty', busy: activity.jobActive(row.id), active_call: activity.voiceActive(row.id),
     needs_retry: row.status === 'open' && !row.briefing && ['failed', 'cancelled', 'interrupted'].includes((db.prepare('SELECT status FROM sync_runs WHERE sync_id=? ORDER BY id DESC LIMIT 1').get(row.id) as any)?.status),
     calls: (db.prepare('SELECT (SELECT COUNT(*) FROM voice_calls WHERE sync_id=?) + (SELECT COUNT(*) FROM live_calls WHERE sync_id=?) AS n').get(row.id, row.id) as any).n })),
-    available, included_unreviewed: pendingCount() - available,
+    available, new_entries, included_unreviewed: pendingCount() - available,
     covered: (db.prepare('SELECT COUNT(*) AS n FROM sync_coverage').get() as any).n,
     busy: activity.busy, active_call: activity.callActive, next_cursor: rows.length > 20 ? rows[19].id : null };
 }

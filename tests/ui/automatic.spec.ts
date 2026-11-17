@@ -10,7 +10,7 @@ test('Home shows accumulated local history without automatic sync links, summari
     (window as any).__captures = 0;
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => { (window as any).__captures++; throw Error('No capture while viewing progress'); } } });
   });
-  await page.route('**/api/home', route => route.fulfill({ json: { ...home, available: state.pending_entries } }));
+  await page.route('**/api/home', route => route.fulfill({ json: { ...home, available: state.pending_entries, new_entries: state.pending_entries } }));
   await page.route('**/api/settings/auto-index', route => unavailable ? route.abort() : route.fulfill({ json: state }));
   await page.route('**/api/memory/progress', route => route.fulfill({ json: { active: true, background: true, queued: 0, elapsed_ms: 2000, updated_at: Date.now(), work: { stage: 'indexing', completed: 30, total: 64, reused: 128, remaining_seconds: 3, parallelism: { workers: 2, threads: 6 } } } }));
   await page.goto('/');
@@ -21,12 +21,14 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(progress).toContainText('30 / 64 new or changed passages ready');
   await expect(progress).toContainText('128 unchanged passages reused');
   await expect(progress).toContainText('64 source changes waiting for local indexing');
-  await expect(progress).toContainText('64 entries available for your next sync');
-  await expect(page.getByText('available for a new sync', { exact: false })).toBeVisible();
+  await expect(progress).toContainText('History accumulates without creating snapshots or briefings');
+  await expect(page.getByLabel('New activity')).toContainText('64 new entries to prepare');
+  await expect(page.getByLabel('Sync tracking')).not.toBeVisible();
+  await page.getByText('Details: carried-forward entries and review', { exact: true }).click();
   for (const width of [390, 1440]) { await page.setViewportSize({ width, height: 900 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
   for (const entries of [64, 128, 131]) {
     state = { ...state, phase: 'waiting', pending_records: entries === 131 ? 3 : 0, pending_entries: entries, last_completed_at: new Date().toISOString() };
-    await expect(progress).toContainText(`${entries} entries available for your next sync`, { timeout: 8000 });
+    await expect(page.getByLabel('New activity')).toContainText(`${entries} new entries to prepare`, { timeout: 8000 });
     await expect(progress).toContainText('Waiting for the next indexing batch', { timeout: 8000 });
     await expect(progress).toContainText('Last completed indexing batch:');
     await expect(page.getByLabel('Sync tracking')).toContainText(`${entries} available for a new sync`, { timeout: 8000 });
@@ -42,7 +44,7 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(progress).toContainText('Paused for your conversation or foreground work', { timeout: 8000 });
   state = { ...state, phase: 'error', error: 'Local indexing could not finish. Completed embeddings are retained; retry in five minutes.' };
   await expect(progress.getByRole('alert')).toContainText('Completed embeddings are retained', { timeout: 8000 });
-  await expect(progress).toContainText('131 entries available for your next sync');
+  await expect(progress).not.toContainText('entries available for your next sync');
   await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
   await expect(dialog.getByRole('switch', { name: /Automatically index history/ })).toBeChecked();
