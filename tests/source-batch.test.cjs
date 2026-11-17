@@ -44,17 +44,17 @@ test('real collector and durable index accumulate multiple batches and tails acr
  await worker.tick();assert.equal(jobs,1);assert.equal(embeddings,70);assert.equal(loadSourceCheckpoint(root+'/state').size,70);
  assert.equal(availableCount(),70);noAutomaticSyncs();
  for(let n=0;n<3;n++){await worker.tick();assert.equal(jobs,1);assert.equal(worker.state.pending_records,0);noAutomaticSyncs();}
- s.append(3);now+=86400000;await worker.tick();assert.equal(worker.state.pending_records,3);assert.equal(jobs,1);assert.equal(availableCount(),73);noAutomaticSyncs();
- s.append(61);await worker.tick();assert.equal(jobs,2);assert.equal(embeddings,134);assert.equal(availableCount(),134);noAutomaticSyncs();
+ s.append(3);now+=86400000;await worker.tick();assert.equal(worker.state.pending_records,0);assert.equal(jobs,2);assert.equal(availableCount(),73);noAutomaticSyncs();
+ s.append(61);await worker.tick();assert.equal(jobs,3);assert.equal(embeddings,134);assert.equal(availableCount(),134);noAutomaticSyncs();
  const checkpoint=loadSourceCheckpoint(root+'/state'),originals=fs.readFileSync(s.file,'utf8');
  await worker.stop();cache.close();cache=index=model=undefined;closeDb();
- worker=scheduler();await worker.tick();assert.equal(jobs,2);assert.deepEqual(loadSourceCheckpoint(root+'/state'),checkpoint);assert.equal(availableCount(),134);noAutomaticSyncs();
- s.append(63);now+=30*86400000;await worker.tick();assert.equal(jobs,2);assert.equal(worker.state.pending_records,63);assert.equal(availableCount(),197);noAutomaticSyncs();
- s.append();await worker.tick();assert.equal(jobs,3);assert.equal(embeddings,198,'reopened cache reuses all previously indexed vectors');assert.equal(availableCount(),198);noAutomaticSyncs();
- s.append(5);await worker.tick();assert.equal(jobs,3);assert.equal(worker.state.pending_records,5);assert.equal(availableCount(),203);noAutomaticSyncs();
+ worker=scheduler();await worker.tick();assert.equal(jobs,3);assert.deepEqual(loadSourceCheckpoint(root+'/state'),checkpoint);assert.equal(availableCount(),134);noAutomaticSyncs();
+ s.append(63);now+=30*86400000;await worker.tick();assert.equal(jobs,4);assert.equal(worker.state.pending_records,0);assert.equal(availableCount(),197);noAutomaticSyncs();
+ s.append();await worker.tick();assert.equal(jobs,5);assert.equal(embeddings,198,'reopened cache reuses all previously indexed vectors');assert.equal(availableCount(),198);noAutomaticSyncs();
+ s.append(5);await worker.tick();assert.equal(jobs,6);assert.equal(worker.state.pending_records,0);assert.equal(availableCount(),203);noAutomaticSyncs();
  const finalSource=fs.readFileSync(s.file,'utf8');assert.ok(finalSource.startsWith(originals));
  const requestId=require('node:crypto').randomUUID(),sync=startConversationSync(requestId);
- assert.equal(sync.items.length,203,'64 is an indexing threshold, never a snapshot limit');
+ assert.equal(sync.items.length,203,'background batch size never limits snapshot inclusion');
  assert.equal(new Set(sync.items.map(item=>item.event_key)).size,203);
  assert.equal(startConversationSync(requestId).id,sync.id);assert.equal(availableCount(),0);
  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM syncs').get().n,1);
@@ -63,30 +63,25 @@ test('real collector and durable index accumulate multiple batches and tails acr
  assert.equal(fs.readFileSync(s.file,'utf8'),finalSource);
 });
 
-test('real collector: 63 source entries plus session metadata never reaches 64, even after 30 days',async()=>{
- const s=session('batch63');s.append(63);const worker=scheduler();
- await worker.tick();assert.equal(worker.state.pending_records,63);assert.equal(jobs,0);assert.equal(embeddings,0);
- assert.equal(fs.existsSync(root+'/state/memory'),false,'small tails create no search DB/model');
- now+=30*86400000;await worker.tick();assert.equal(jobs,0);assert.equal(worker.state.pending_records,63);
- s.append();await worker.tick();assert.equal(jobs,1);assert.equal(embeddings,64);
- const checkpoint=loadSourceCheckpoint(root+'/state');assert.equal(checkpoint.size,64);
- const restarted=scheduler();await restarted.tick();assert.equal(jobs,1,'restart does not admit an unchanged archive');
- s.append();await restarted.tick();assert.equal(restarted.state.pending_records,1);assert.equal(jobs,1);
- await history().prepare();assert.equal(embeddings,65,'foreground handles a one-record tail');
- await scheduler().tick();assert.equal(jobs,1);
+test('real collector: a single entry and each later tail are indexed without a foreground action',async()=>{
+ const s=session('small');s.append();const worker=scheduler();
+ await worker.tick();assert.equal(worker.state.pending_records,0);assert.equal(jobs,1);assert.equal(embeddings,1);
+ await scheduler().tick();assert.equal(jobs,1,'restart does not repeat unchanged work');
+ s.append();await worker.tick();assert.equal(jobs,2);assert.equal(embeddings,2);
+ assert.equal(loadSourceCheckpoint(root+'/state').size,2);noAutomaticSyncs();
 });
 
 test('real collector: 32 appends across 32 existing sessions count as 32, not 64',async()=>{
  const sessions=Array.from({length:32},(_,i)=>session('many-'+i));sessions.forEach(s=>s.append());
  await scanSessions();await history().prepare();assert.equal(embeddings,32);
- sessions.forEach(s=>s.append());const worker=scheduler();await worker.tick();assert.equal(worker.state.pending_records,32);assert.equal(jobs,0);
- await scheduler().tick();assert.equal(jobs,0,'restart preserves the smaller pending tail');
- sessions.slice(0,31).forEach(s=>s.append());await worker.tick();assert.equal(worker.state.pending_records,63);assert.equal(jobs,0);
- sessions[31].append();await worker.tick();assert.equal(jobs,1);assert.equal(embeddings,96);
+ sessions.forEach(s=>s.append());const worker=scheduler();await worker.tick();assert.equal(worker.state.pending_records,0);assert.equal(jobs,1);assert.equal(embeddings,64);
+ await scheduler().tick();assert.equal(jobs,1,'restart preserves prepared work');
+ sessions.slice(0,31).forEach(s=>s.append());await worker.tick();assert.equal(worker.state.pending_records,0);assert.equal(jobs,2);
+ sessions[31].append();await worker.tick();assert.equal(jobs,3);assert.equal(embeddings,96);
  const before=loadSourceCheckpoint(root+'/state');
  await history().search({question:'synthetic',before:'2020-01-01T00:00:00.000Z'});
  assert.deepEqual(loadSourceCheckpoint(root+'/state'),before,'historical/scoped queries cannot replace the global checkpoint');
- await scheduler().tick();assert.equal(jobs,1);
+ await scheduler().tick();assert.equal(jobs,3);
 });
 
 test('frozen aliases coalesce with originals; edits/removals occupy one slot each, not metadata rows',async()=>{
@@ -108,11 +103,9 @@ test('real source rewrites count each edited record once; failed preparation kee
  const lines=fs.readFileSync(s.file,'utf8').trim().split('\n').map(JSON.parse);
  for(let i=1;i<=63;i++)lines[i].message.content+=' Corrected; still unverified.';
  fs.writeFileSync(s.file,lines.map(JSON.stringify).join('\n')+'\n');
- const worker=scheduler();await worker.tick();assert.equal(worker.state.pending_records,63);assert.equal(jobs,0);
- lines[64].message.content+=' Corrected; still unverified.';fs.writeFileSync(s.file,lines.map(JSON.stringify).join('\n')+'\n');
- const embed=model.embed;model.embed=async()=>{throw Error('Synthetic model failure');};
+ const worker=scheduler(),embed=model.embed;model.embed=async()=>{throw Error('Synthetic model failure');};
  await worker.tick();assert.equal(worker.state.phase,'error');assert.deepEqual(loadSourceCheckpoint(root+'/state'),before);
- model.embed=embed;await scheduler().tick();assert.equal(jobs,2);assert.equal(embeddings,128);
+ model.embed=embed;await scheduler().tick();assert.equal(jobs,2);assert.equal(embeddings,127);
 });
 
 test('an interrupted first preparation retains a known empty checkpoint and can retry after restart',async()=>{
@@ -124,13 +117,13 @@ test('an interrupted first preparation retains a known empty checkpoint and can 
  assert.equal(loadSourceCheckpoint(root+'/state').size,64);
 });
 
-test('a missing older checkpoint alone cannot admit a sub-64 archive',async()=>{
+test('a missing older checkpoint is restored for small archives without re-embedding',async()=>{
  const s=session('small-upgrade');s.append(63);await scanSessions();await history().prepare();
  cache.prepare("DELETE FROM meta WHERE key='background-source-stamps-v1'").run();
  assert.equal(loadSourceCheckpoint(root+'/state'),undefined);
  const worker=scheduler();await worker.tick();now+=30*86400000;await worker.tick();
- assert.equal(worker.state.pending_records,63);assert.equal(jobs,0);assert.equal(embeddings,63);assert.equal(loadSourceCheckpoint(root+'/state'),undefined);noAutomaticSyncs();
- s.append();await worker.tick();assert.equal(jobs,1);assert.equal(embeddings,64);assert.equal(loadSourceCheckpoint(root+'/state').size,64);noAutomaticSyncs();
+ assert.equal(worker.state.pending_records,0);assert.equal(jobs,1);assert.equal(embeddings,63);assert.equal(loadSourceCheckpoint(root+'/state').size,63);noAutomaticSyncs();
+ s.append();await worker.tick();assert.equal(jobs,2);assert.equal(embeddings,64);assert.equal(loadSourceCheckpoint(root+'/state').size,64);noAutomaticSyncs();
 });
 
 test('local indexing establishes a missing older checkpoint and unchanged checks do not repeat work',async()=>{

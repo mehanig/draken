@@ -305,8 +305,7 @@ export function initSchema(database: Database.Database): void {
     const seed = database.prepare('INSERT INTO sync_settings(key,value) VALUES (?,?)');
     seed.run('auto_index', 'true');
   }
-  // An absent auto_summary preference means false. Never seed paid consent from
-  // auto_index or the retired automatic-conversation preference on upgrades.
+  // Summary preparation defaults on; explicit saved opt-outs remain untouched.
   // Preserve the saved indexing choice while withdrawing the retired permission
   // to create snapshots and spend provider quota in the background.
   database.exec(`INSERT OR IGNORE INTO sync_settings(key,value)

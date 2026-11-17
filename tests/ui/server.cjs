@@ -55,6 +55,7 @@ const { getDb, closeDb } = require('../../dist/db/schema');
 // interference. The default-on timer is exercised with a controlled clock in
 // automatic-index.test.cjs; settings UI tests exercise persisted toggles.
 getDb().prepare("UPDATE sync_settings SET value='false' WHERE key='auto_index'").run();
+getDb().prepare("INSERT INTO sync_settings(key,value) VALUES('auto_summary','false')").run(); // Unrelated UI fixtures explicitly opt out of timed provider work.
 const { stopLiveCalls } = require('../../dist/voice/live');
 const { stopHistory } = require('../../dist/memory/service');
 const { stopBackgroundIndexing } = require('../../dist/sync/background');

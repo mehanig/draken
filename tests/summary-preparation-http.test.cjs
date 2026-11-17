@@ -20,10 +20,10 @@ afterEach(async () => {
 const patch = (body, headers = {}) => fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
 
 test('summary consent HTTP rejects malformed and cross-origin writes, persists separately and creates no work', async () => {
-  assert.equal((await (await fetch(url)).json()).enabled, false);
+  assert.equal((await (await fetch(url)).json()).enabled, true);
   for (const body of [{}, [], null, { enabled: 'true' }, { enabled: true, scope: 'automatic-syncs' }]) assert.equal((await patch(body)).status, 400);
   assert.equal((await patch({ enabled: true }, { Origin: 'https://other.invalid' })).status, 403);
-  assert.equal((await (await fetch(url)).json()).enabled, false);
+  assert.equal((await (await fetch(url)).json()).enabled, true);
   background.setAutoIndex(false); assert.equal((await patch({ enabled: true })).status, 409);
   background.setAutoIndex(true);
   assert.equal((await (await patch({ enabled: true })).json()).enabled, true);
@@ -48,7 +48,7 @@ test('summary progress GET reads historical accounting only, never opens origina
     for (let n = 0; n < 3; n++) {
       const response = await fetch(url); assert.equal(response.status, 200);
       const value = await response.json(); assert.equal(value.prepared_entries, 64); assert.equal(value.last_completed_at, completed);
-      assert.equal(value.error, ''); assert.equal(value.status, 'off');
+      assert.equal(value.error, ''); assert.equal(value.status, 'waiting');
     }
     assert.equal(reads, 0); assert.equal(db.prepare('SELECT total_changes() n').get().n, before);
   } finally { store.previewSummaryInput = original; }

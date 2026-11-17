@@ -6,7 +6,7 @@ const root=path.join(__dirname,'../site');
 const version=require('../package.json').version,anchor=version.replaceAll('.','');
 test('public release copy and documentation match the npm version',()=>{
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
- assert.equal(version,'0.8.2');
+ assert.equal(version,'0.8.3');
  const lock=require('../package-lock.json');assert.equal(lock.version,version);assert.equal(lock.packages[''].version,version);
  require('../scripts/site-release.cjs').validateCopy(version,html);
  assert.ok(html.includes(`Version ${version} / Available on npm`));
@@ -61,10 +61,10 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.match(notes,/Damaged or missing originals still fail closed/);
   assert.match(notes,/unavailable extra archive context must be disclosed, not guessed or silently replaced/);
   assert.match(notes,/active conversations check once a minute for any positive source changes/);
-  assert.match(notes,/With no active conversation, the 64-record threshold and no timed small-tail flush remain/);
+  assert.match(notes,/Small tails are also prepared without an active conversation/);
   assert.match(notes,/Connected idle voice.*never during a pending response or context delivery/);
   assert.match(notes,/user turn preempts and waits for owned indexing to stop/);
-  assert.match(notes,/separate default-off paid permission with its independent 64-record threshold/);
+  assert.match(notes,/Prepare summaries ahead defaults on, retains explicit opt-outs and includes small tails/);
   assert.match(notes,/Live H updates make no provider model calls/);
   assert.match(notes,/Neither background path creates syncs, final briefings, recaps, saved decisions or review/);
   assert.match(notes,/Settings and status reads only inspect metadata/);
@@ -84,14 +84,13 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.match(notes,/stop the server, upgrade and restart/);assert.match(notes,/No dependency-version changes/);
   const preparation=await page.locator('#preparation').innerText();
   assert.match(preparation,/Automatic local indexing/);assert.match(preparation,/does not edit or delete original agent logs/);
-  assert.match(preparation,/Active conversations check once a minute for any positive source changes, without waiting for 64/);
-  assert.match(preparation,/With no active conversation, indexing keeps 64-record batching and no timed small-tail flush/);
+  assert.match(preparation,/Idle minute checks index any positive source changes, including small tails, with or without an active conversation/);
   assert.match(preparation,/on by default for new installations/);assert.match(preparation,/no provider model calls/);
   assert.match(preparation,/Only an explicit Sync with Draken or Chat instead action/);assert.match(preparation,/past automatic work/);
   assert.match(preparation,/requires Automatically index history/);
-  assert.match(preparation,/off by default, even if local indexing was already on/);
+  assert.match(preparation,/Prepare summaries ahead defaults on/);
   assert.match(preparation,/bounded invocation allowance and no provider\/model fallback/);
-  assert.match(preparation,/Once-minute idle checks.*at least 64 new or changed eligible records, independently of the embedding checkpoint/);
+  assert.match(preparation,/Idle minute checks prepare new or changed eligible activity, including small tails, independently of the embedding checkpoint/);
   assert.match(preparation,/Unchanged prepared input makes no further calls/);
   assert.match(preparation,/Completed batches, including completed partial tails, are reused across appends and combined snapshots/);
   assert.match(preparation,/Uncovered or changed input and reconciliation for a different combined input can still need work at Start chat/);
@@ -119,7 +118,7 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   await page.getByText('Does opening the page start anything?',{exact:true}).click();
   const opening=await page.locator('.faq details[open]').innerText();
   assert.match(opening,/opening Settings or checking setup doesn’t.*start a summary/s);
-  assert.match(opening,/off by default and requires explicit paid opt-in plus local indexing/);
+  assert.match(opening,/defaults on, preserves saved opt-outs and requires local indexing/);
   assert.match(opening,/independently of browsing, never creating syncs, final briefings, recaps or review/);
   assert.equal(await page.evaluate(()=>window.__captures),0);
   assert.deepEqual(external,[]);assert.deepEqual(errors,[]);assert.deepEqual(failed,[]);

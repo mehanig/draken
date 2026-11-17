@@ -93,13 +93,6 @@ export function touchConversation(id: number, at = Date.now()): void {
     WHERE id=? AND status='open' AND conversation_ended_at IS NULL`).run(new Date(at).toISOString(), id);
 }
 
-/** Scheduler hint, with no original-source access or lifecycle writes. */
-export function hasActiveConversations(): boolean {
-  const rows = getDb().prepare(`SELECT id,status,created_at,conversation_last_user_at,conversation_ended_at,conversation_before
-    FROM syncs WHERE status='open' AND conversation_ended_at IS NULL`).all() as Row[];
-  return rows.some(value => !ended(value, Date.now()));
-}
-
 /** Turn admission only. Never turns a never-prepared conversation into a ready
  * one merely because another conversation/background job prepared the corpus. */
 export function captureConversationHistory(id: number): string | null {
