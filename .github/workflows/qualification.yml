@@ -34,9 +34,22 @@ jobs:
         run: node --test tests/site-browser.cjs
       - name: Audit application, client and separately shipped private runtime
         run: |
-          npm audit --audit-level=low
-          npm --prefix client audit --audit-level=low
-          npm --prefix runtime/pi audit --omit=dev --audit-level=low
+          for directory in . client runtime/pi; do
+            npm --prefix "$directory" audit --omit=dev --audit-level=low
+            npm --prefix "$directory" audit --json > "$RUNNER_TEMP/audit.json" || test "$?" -eq 1
+            node <<'JS'
+          const report = JSON.parse(require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/audit.json', 'utf8'));
+          if (report.error || !report.vulnerabilities) throw Error('Audit did not return a vulnerability report');
+          const findings = Object.values(report.vulnerabilities);
+          const advisories = findings.flatMap(finding => finding.via).filter(via => typeof via === 'object');
+          // Approved dev-only exception: unpatched picomatch ReDoS in knip/Vite.
+          // Strict production audit above also blocks this advisory if it becomes shipped.
+          if ((findings.length && !advisories.length) || advisories.some(via => via.name !== 'picomatch' || via.url !== 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf')) {
+            console.error(report); process.exit(1);
+          }
+          if (advisories.length) console.warn('Accepted dev-only GHSA-fc5q-39xc-vjpf; remove this exception when patched.');
+          JS
+          done
       - name: Fresh production-only package and lifecycle
         run: node tests/package-smoke.cjs
       - name: Private runtime setup and synthetic loopback protocol
