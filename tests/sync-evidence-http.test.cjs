@@ -16,7 +16,7 @@ test('48 MB of frozen originals never enter sync responses; evidence browsing an
   let first, sourceText;
   db.transaction(() => { for (let i = 1; i <= 8000; i++) {
     const text = `Original ${i}: ` + 'retained original text '.repeat(280);
-    const item = frozenEvidence(db, process.env.DRAKEN_PI_SESSIONS_DIR, text, { id: String(i), ref: `E${i}` });
+    const item = frozenEvidence(db, process.env.DRAKEN_PI_SESSIONS_DIR, text, { id: i === 1 ? 'large-entry-' + 'x'.repeat(100000) : String(i), ref: `E${i}` });
     put.run(id, item.event_key, JSON.stringify(item));
     if (i === 1) { first = item; sourceText = require('../dist/sync/normalize').cleanText(text, 6000); }
   } })();
@@ -49,7 +49,7 @@ test('48 MB of frozen originals never enter sync responses; evidence browsing an
     assert.equal(retry.status, 202); assert.deepEqual((await retry.json()).sync.items, []); assert.equal(reads, 0);
     for (const ref of ['E1', 'C1']) {
       const excerpt = await json(base + `/evidence?ref=${ref}`);
-      assert.equal(excerpt.item.text, sourceText.slice(0, 4000)); assert.equal(excerpt.total, sourceText.length);
+      assert.equal(excerpt.item.text, sourceText.slice(0, 4000)); assert.equal(excerpt.total, sourceText.length); assert.ok(excerpt.item.entry_id.length <= 220, 'display metadata is bounded too');
       assert.ok(Buffer.byteLength(JSON.stringify(excerpt)) < 10_000); assert.equal(excerpt.item.source_pointer, undefined);
     }
     assert.equal(reads, 2);

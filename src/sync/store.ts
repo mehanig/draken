@@ -140,7 +140,7 @@ export function evidencePage(id: number, group: 'items' | 'context', offset: num
   const items = rows.map(({ j }) => {
     const item = JSON.parse(j);
     return { ref: item.ref, agent: item.agent, role: cleanText(item.role || '', 40), session_name: cleanText(item.session_name || '', 200),
-      cwd: cleanText(item.cwd || '', 500), timestamp: item.timestamp };
+      cwd: cleanText(item.cwd || '', 500), timestamp: cleanText(item.timestamp || '', 40) };
   });
   return { items, total };
 }
@@ -155,8 +155,8 @@ export function evidenceExcerpt(id: number, ref: string, offset: number) {
   const reader = new EvidenceReader(db);
   try {
     const item = reader.read(metadata, true), total = item.text.length;
-    return { item: { ref: item.ref, agent: item.agent, event_key: item.event_key, role: item.role, session_name: cleanText(item.session_name || '', 200), cwd: cleanText(item.cwd || '', 500),
-      session_id: item.session_id, entry_id: item.entry_id, timestamp: item.timestamp, source_path: cleanText(item.source_path || '', 1000),
+    return { item: { ref: item.ref, agent: item.agent, event_key: item.event_key, role: cleanText(item.role || '', 40), session_name: cleanText(item.session_name || '', 200), cwd: cleanText(item.cwd || '', 500),
+      session_id: cleanText(item.session_id || '', 200), entry_id: cleanText(item.entry_id || '', 200), timestamp: cleanText(item.timestamp || '', 40), source_path: cleanText(item.source_path || '', 1000),
       text: item.text.slice(offset, offset + 4000), unavailable: item.unavailable }, total, offset };
   } finally { reader.close(); }
 }

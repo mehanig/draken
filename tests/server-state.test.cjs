@@ -35,7 +35,7 @@ test('corrupt, oversized, symlinked and non-origin records fail visibly rather t
 
 test('a data directory has one server owner across different listening ports, until shutdown', async () => {
  const freePort=()=>new Promise(resolve=>{const s=net.createServer().listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});
- const port=await freePort(), otherPort=await freePort();
+ const port=await freePort();
  const env={...process.env,DRAKEN_NO_AUTH:'true',DRAKEN_HOST:'127.0.0.1',DRAKEN_PORT:String(port)};
  let child,closed,db;
  const start=async configuration=>{
@@ -47,6 +47,9 @@ test('a data directory has one server owner across different listening ports, un
  const stop=async()=>{if(child){child.kill('SIGTERM');await closed;child=undefined;}};
  try {
   await start(env);
+  // Choose the second port only after the first is bound: two released
+  // ephemeral reservations can otherwise return the same port.
+  const otherPort=await freePort();assert.notEqual(otherPort,port);
   db=new(require('better-sqlite3'))(path.join(env.DRAKEN_DATA_DIR,'draken.db'));
   const at='2026-01-01T00:00:00.000Z';
   const id=Number(db.prepare('INSERT INTO syncs(created_at,snapshot_at) VALUES(?,?)').run(at,at).lastInsertRowid);
