@@ -5,6 +5,7 @@ let preparedBefore = new Date().toISOString();
 service.prepareHistory = async before => { preparedBefore = before || new Date().toISOString(); };
 // Readiness reads do not advance a preparation receipt or adopt new evidence.
 service.historyReadiness = () => ({ ready: true, before: preparedBefore });
+service.historyPreparationStatus = () => service.historyReadiness(true);
 service.searchHistory = async () => ({ mode: 'hybrid', results: [], limitations: 'Synthetic empty historical lookup.' });
 service.searchPreparedHistory = (...args) => service.searchHistory(...args);
 

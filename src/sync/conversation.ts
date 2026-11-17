@@ -1,7 +1,7 @@
 import { getDb } from '../db/schema';
 import { HttpError } from '../errors';
 import type { ConversationState } from '../types';
-import { historyProgress, historyReadiness } from '../memory/service';
+import { historyProgress, historyReadiness, historyPreparationStatus } from '../memory/service';
 import { activity } from './activity';
 import { backgroundUpdateStatus } from './update-status';
 
@@ -25,13 +25,11 @@ function ended(value: Row, now: number): string | null {
     ? new Date(deadline(value)).toISOString() : null);
 }
 
-/** Request-local metadata only: never starts work, adopts a cutoff, touches the
- * idle clock or persists expiry. Global checks are lazy and shared across cards,
- * never across responses (required original files must be checked again). */
+/** Recorded progress only. Full history validation belongs at use boundaries,
+ * not UI polling. Never adopts a cutoff, touches the idle clock or starts work. */
 export function conversationStatuses(ids: number[]): ConversationState[] {
   let shared: { history: ReturnType<typeof historyReadiness>; progress: ReturnType<typeof historyProgress>;
     enabled: boolean; background: ReturnType<typeof backgroundUpdateStatus> } | undefined;
-  let strict: ReturnType<typeof historyReadiness> | undefined;
   const now = Date.now();
   return ids.map(id => {
     const value = row(id), end = ended(value, now);
@@ -39,12 +37,13 @@ export function conversationStatuses(ids: number[]): ConversationState[] {
       expires_at: new Date(deadline(value)).toISOString(), ended_at: end, history_before: value.conversation_before };
     if (end || value.status !== 'open') return Object.freeze({ ...base, available_before: null, update_state: 'paused', error: '' });
     const { history, progress, enabled, background } = shared ||= {
-      history: historyReadiness(true), progress: historyProgress(), background: backgroundUpdateStatus(),
+      history: historyPreparationStatus(), progress: historyProgress(), background: backgroundUpdateStatus(),
       enabled: (getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_index'").get() as { value: string } | undefined)?.value === 'true',
     };
     const available = history.ready ? history.before : null;
     let update_state: ConversationState['update_state'], error = '';
-    if (!enabled) update_state = 'paused';
+    if (!value.conversation_before && activity.jobActive(id)) update_state = 'preparing';
+    else if (!enabled) update_state = 'paused';
     else if (background?.phase === 'error' || background?.error) {
       update_state = 'error';
       // Do not expose worker/provider/source error details through conversation GETs.
@@ -55,9 +54,7 @@ export function conversationStatuses(ids: number[]): ConversationState[] {
       const preparing = (progress.active && progress.work?.stage !== 'searching' && progress.work?.stage !== 'reading')
         || progress.queued > 0 || background?.phase === 'scanning' || background?.phase === 'indexing'
         || (background?.pending_records || 0) > 0;
-      // Captured readiness may remain valid while newly admitted records await
-      // preparation. Only ask for strict readiness when it affects the label.
-      update_state = preparing || !history.ready || !(strict ||= historyReadiness()).ready ? 'preparing' : 'up_to_date';
+      update_state = preparing || !history.ready ? 'preparing' : 'up_to_date';
     }
     return Object.freeze({ ...base, available_before: available, update_state, error });
   });

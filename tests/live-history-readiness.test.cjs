@@ -134,14 +134,14 @@ test('alternating home/overview captured and current polls reuse bounded metadat
  }finally{fs.lstatSync=lstat;query.close();}
 });
 
-test('home/overview check derived readiness and original files once per scope per response',async()=>{
+test('home/overview report checkpoints without walking history; admission still detects damaged or missing evidence',async()=>{
  await prepared();for(let n=0;n<55;n++)snapshot();
  db.prepare('UPDATE syncs SET conversation_last_user_at=?,conversation_before=?').run(new Date().toISOString(),BEFORE);
  await index.prepare({before:BEFORE},undefined,true);
  const store=require('../dist/sync/store'),memory=require('../dist/memory/service');
- const ready=memory.historyReadiness,prepare=cache.prepare,lstat=fs.lstatSync;
+ const ready=memory.historyPreparationStatus,prepare=cache.prepare,lstat=fs.lstatSync;
  let queries=0,stats=0;
- memory.historyReadiness=captured=>indexReadiness(cache,db,captured);
+ memory.historyPreparationStatus=()=>indexReadiness(cache,null);
  cache.prepare=function(sql){if(/p\.embedded=0/.test(sql))queries++;return prepare.call(this,sql);};
  fs.lstatSync=function(...args){stats++;return lstat.apply(this,args);};
  const saved=canonical(),changes=cache.prepare('SELECT total_changes() n').get().n;
@@ -150,19 +150,21 @@ test('home/overview check derived readiness and original files once per scope pe
    for(let n=0;n<2;n++){
     queries=stats=0;const cards=view().syncs;assert.equal(cards.length,count);
     assert.ok(cards.every(card=>card.conversation.update_state==='up_to_date'));
-    assert.equal(queries,2,'captured and strict checks shared by all rows');
-    assert.equal(stats,2,'each scope validates required original files anew per response, not per row');
+    assert.equal(queries,0,'status never scans passage readiness');
+    assert.equal(stats,0,'status never walks original files');
    }
   }
   cache.exec('UPDATE passages SET embedded=0');queries=0;
-  assert.ok(store.overview().syncs.every(card=>card.conversation.available_before===null));assert.equal(queries,1,'derived-index damage invalidates even a warm source cache');
+  assert.ok(store.overview().syncs.every(card=>card.conversation.available_before===BEFORE));assert.equal(queries,0);
+  assert.equal(indexReadiness(cache,db,true).ready,false,'actual admission rejects damaged passages');
   cache.exec('UPDATE passages SET embedded=1');assert.ok(store.overview().syncs.every(card=>card.conversation.available_before===BEFORE));
   fs.unlinkSync(root+'/sessions/captured.jsonl');queries=stats=0;
-  assert.ok(store.homeOverview().syncs.every(card=>card.conversation.available_before===null));assert.equal(queries,1);assert.equal(stats,1,'warm polls still detect missing originals');
+  assert.ok(store.homeOverview().syncs.every(card=>card.conversation.available_before===BEFORE));assert.equal(queries,0);assert.equal(stats,0);
+  assert.equal(indexReadiness(cache,db,true).ready,false,'actual admission rejects missing originals');
   assert.equal(canonical(),saved);
   // Only the two explicit embedding mutations above may change derived rows.
   assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes+2*cache.prepare('SELECT COUNT(*) n FROM passages').get().n);
- }finally{memory.historyReadiness=ready;cache.prepare=prepare;fs.lstatSync=lstat;}
+ }finally{memory.historyPreparationStatus=ready;cache.prepare=prepare;fs.lstatSync=lstat;}
 });
 
 test('incomplete-passage query starts with the partial index, not all occurrence links; old read-only schemas remain functional',async()=>{

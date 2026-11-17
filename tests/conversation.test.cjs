@@ -6,17 +6,18 @@ const { getDb, closeDb, initSchema } = require('../dist/db/schema');
 const lifecycle = require('../dist/sync/conversation'), store = require('../dist/sync/store');
 const { activity } = require('../dist/sync/activity');
 const memory = require('../dist/memory/service');
-let root, clock, originalNow, originalReady;
+let root, clock, originalNow, originalReady, originalStatus;
 const IDLE = 30 * 60_000;
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-conversation-'));
   process.env.DRAKEN_DATA_DIR = root;
   process.env.DRAKEN_PI_SESSIONS_DIR = path.join(root, 'sessions');
   originalNow = Date.now; clock = originalNow(); Date.now = () => clock;
-  originalReady = memory.historyReadiness;
+  originalReady = memory.historyReadiness; originalStatus = memory.historyPreparationStatus;
+  memory.historyPreparationStatus = () => memory.historyReadiness(true);
   memory.historyReadiness = () => ({ ready: false, before: null });
 });
-afterEach(() => { Date.now = originalNow; memory.historyReadiness = originalReady; closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { Date.now = originalNow; memory.historyReadiness = originalReady; memory.historyPreparationStatus = originalStatus; closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
 function sync() {
   return Number(getDb().prepare('INSERT INTO syncs(created_at,snapshot_at,snapshot_version) VALUES (?,?,2)').run(new Date(clock).toISOString(), new Date(clock).toISOString()).lastInsertRowid);
 }
@@ -126,7 +127,7 @@ test('text and voice readiness retain durable preparation despite new evidence, 
   assert.equal(callReadiness(id).ready, false);
 });
 
-test('update metadata distinguishes strict preparation from captured availability and ignores search/paid summaries', () => {
+test('update metadata reports recorded availability and scheduler progress, not full-history verification', () => {
   const bridge = require('../dist/sync/update-status');
   const id = sync(), first = new Date(clock - 1000).toISOString(), next = new Date(clock).toISOString();
   lifecycle.markConversationPrepared(id, first);
@@ -136,8 +137,8 @@ test('update metadata distinguishes strict preparation from captured availabilit
   const saved = persisted(id), changes = getDb().prepare('SELECT total_changes() n').get().n;
   const check = expected => { reads = []; assert.equal(lifecycle.conversationStatus(id).update_state, expected); };
   try {
-    check('up_to_date'); assert.deepEqual(reads, [true, false]);
-    strict = false; check('preparing');
+    check('up_to_date'); assert.deepEqual(reads, [true]);
+    strict = false; check('up_to_date');
     available = next; check('new_info'); assert.deepEqual(reads, [true], 'No unnecessary strict query');
     state = { phase: 'indexing', error: '', pending_records: 1 }; check('new_info');
     available = first; strict = true; check('preparing');
@@ -183,7 +184,7 @@ test('production background status reports failure, recovery and opt-out without
     background.setAutoIndex(false);
     assert.equal(lifecycle.conversationStatus(id).update_state, 'paused', 'Old valid receipt cannot hide opt-out');
     background.setAutoIndex(true); strict = false;
-    assert.equal(lifecycle.conversationStatus(id).update_state, 'preparing');
+    assert.equal(lifecycle.conversationStatus(id).update_state, 'up_to_date', 'Until the scheduler detects work, status reports the last completed checkpoint');
     clock += 60_000; t.mock.timers.tick(60_000); await until(() => prepares === 1);
     assert.equal(bridge.backgroundUpdateStatus().phase, 'indexing');
     assert.equal(lifecycle.conversationStatus(id).update_state, 'preparing');
@@ -222,7 +223,7 @@ test('home/overview share lazy global metadata per response, never across reques
         reads = []; progressReads = backgroundReads = 0;
         const cards = view().syncs; assert.equal(cards.length, count);
         assert.ok(cards.every(card => card.conversation.update_state === 'up_to_date'));
-        assert.deepEqual(reads, [true, false]); assert.equal(progressReads, 1); assert.equal(backgroundReads, 1);
+        assert.deepEqual(reads, [true]); assert.equal(progressReads, 1); assert.equal(backgroundReads, 1);
       }
     }
     ready = false; reads = [];
