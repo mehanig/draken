@@ -156,7 +156,7 @@ export async function generateReply(id: number, question?: string, requestId?: s
           });
           memory.push({ sync_id: prior.sync_id, status: prior.status, snapshot_at: prior.snapshot_at, recap, decisions: prior.decisions, carry_forward: prior.carry_forward });
           // Do not overwrite a newer presentation if the prior sync changed meanwhile.
-          if (recapHash(recapInput(getSync(prior.sync_id)), sync.models.summary) === recapHash(prior, sync.models.summary)) saveRecap(prior, sync.models.summary, recap);
+          if (recapHash(recapInput(getSync(prior.sync_id, false)), sync.models.summary) === recapHash(prior, sync.models.summary)) saveRecap(prior, sync.models.summary, recap);
         }
         db.prepare('UPDATE syncs SET memory_json=? WHERE id=?').run(JSON.stringify(memory), id);
         sync = getSync(id);
@@ -247,7 +247,7 @@ export async function generateReply(id: number, question?: string, requestId?: s
 
 /** Derived call/sync recap only. Never writes notes, status, snapshot evidence or coverage. */
 export function launchRecap(id: number): SyncDetail {
-  const sync = getSync(id);
+  const sync = getSync(id, false);
   if (sync.busy || activity.voiceActive(id)) throw new HttpError(409, 'Wait for the call or preparation to end before making its recap.');
   const input = recapInput(sync), hash = recapHash(input, sync.models.summary);
   const existing = getDb().prepare('SELECT recap_hash,recap_state FROM sync_presentations WHERE sync_id=?').get(id) as any;
@@ -266,7 +266,7 @@ export function launchRecap(id: number): SyncDetail {
     getDb().prepare("UPDATE sync_presentations SET recap_state='failed',recap_error=? WHERE sync_id=?")
       .run(controller.signal.aborted ? 'Recap cancelled. Original history is intact.' : 'Recap could not be prepared. Original history is intact; retry reuses cached fragments.', id);
   }).finally(release);
-  return getSync(id);
+  return getSync(id, false);
 }
 
 /** A chat request may be retried after a lost HTTP response without paying twice.
@@ -296,5 +296,5 @@ export function launchReply(id: number, question?: string): SyncDetail {
   if (question && (!sync.briefing || !sync.tree.complete || !sync.conversation.history_before)) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
   if (!question) configureModels(id, sync.models);
   void generateReply(id, question).catch(() => { /* Persisted run error is available through /progress. */ });
-  return getSync(id, !question);
+  return getSync(id, false);
 }

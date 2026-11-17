@@ -11,11 +11,11 @@ async function fixtures(page: Page) {
   return { root, sessions: overview.session_root, control: path.join(overview.session_root, 'fake-control.json') };
 }
 const microphone = nativePeer;
-function addActivity(sessions: string) {
+function addActivity(sessions: string, count = 1) {
   const id = randomUUID(), timestamp = new Date().toISOString();
   fs.writeFileSync(path.join(sessions, id + '.jsonl'), [
     { type: 'session', version: 3, id, timestamp, cwd: '/demo/new-work' },
-    { type: 'message', id, parentId: null, timestamp, message: { role: 'toolResult', content: [{ type: 'text', text: 'New isolated test result ' + id + ': deployment not checked.' }] } },
+    ...Array.from({ length: count }, (_, index) => ({ type: 'message', id: `${id}-${index}`, parentId: index ? `${id}-${index - 1}` : null, timestamp, message: { role: 'toolResult', content: [{ type: 'text', text: 'New isolated test result ' + id + '-' + index + ': deployment not checked.' }] } })),
   ].map(JSON.stringify).join('\n') + '\n');
 }
 async function end(page: Page) {
@@ -32,7 +32,7 @@ test.afterEach(async ({ page }) => {
 });
 
 test('one click scans, freezes, prepares and calls; compact cards and independent URLs retain summaries', async ({ page }) => {
-  await microphone(page); const { sessions, control } = await fixtures(page); fs.writeFileSync(control, JSON.stringify({ delay: 50 }));
+  await microphone(page); const { sessions, control } = await fixtures(page); addActivity(sessions, 55); fs.writeFileSync(control, JSON.stringify({ delay: 50 }));
   await page.goto('/'); await expect(page.getByRole('button', { name: 'Sync with Draken', exact: true })).toBeEnabled();
   expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
   await expect(page.locator('textarea, .tree-card, .session-source')).toHaveCount(0);
@@ -41,7 +41,7 @@ test('one click scans, freezes, prepares and calls; compact cards and independen
   await expect(page.getByRole('dialog')).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('dialog').getByRole('status', { name: 'Call state' })).toHaveText('Your turn', { timeout: 15000 });
   expect(await page.evaluate(() => (window as any).__captures)).toBe(1);
-  const first = await (await page.request.get(`/api/syncs/${firstId}`)).json(); expect(first.items.length).toBeGreaterThan(50);
+  const first = await (await page.request.get(`/api/syncs/${firstId}`)).json(); expect(first.item_count).toBeGreaterThan(50); expect(first.items).toEqual([]);
   await end(page);
   expect(first.aggregation_cost.complete).toBe(true); expect(first.aggregation_cost.usd).toBeGreaterThan(0);
   await expect(page.locator('.page-heading .sync-cost')).toContainText('Est. cost: $');
@@ -54,14 +54,14 @@ test('one click scans, freezes, prepares and calls; compact cards and independen
   await expect(card.locator('.sync-cost')).toContainText('Est. cost: $');
   await expect(card.locator('.sync-cost')).toHaveAttribute('title', /not a subscription charge or invoice/);
   expect(await card.locator('.sync-tile-preview').evaluate(element => element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) * 3 + 1)).toBe(true);
-  const tracked = await (await page.request.get('/api/home')).json(); expect(tracked.covered).toBe(0); expect(tracked.included_unreviewed).toBe(first.items.length);
+  const tracked = await (await page.request.get('/api/home')).json(); expect(tracked.covered).toBe(0); expect(tracked.included_unreviewed).toBe(first.item_count);
   await page.screenshot({ path: '.test-artifacts/sync-home-desktop.png', fullPage: true });
 
   addActivity(sessions);
   await page.getByRole('button', { name: 'Sync with Draken', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible({ timeout: 30000 }); const secondId = Number(new URL(page.url()).pathname.split('/').pop());
   expect(secondId).not.toBe(firstId); const second = await (await page.request.get(`/api/syncs/${secondId}`)).json();
-  expect(second.items).toHaveLength(1); expect(second.memory[0].sync_id).toBe(firstId); expect(second.memory[0].recap).toContain('deployment remains unverified');
+  expect(second.item_count).toBe(1); expect(second.items).toEqual([]); expect(second.memory[0].sync_id).toBe(firstId); expect(second.memory[0].recap).toContain('deployment remains unverified');
   expect((await (await page.request.get(`/api/syncs/${firstId}`)).json()).status).toBe('open');
   await end(page);
   await page.reload(); await expect(page.getByRole('button', { name: 'Call Draken', exact: true })).toBeVisible(); expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
@@ -100,12 +100,11 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
   await microphone(page);const { sessions,control }=await fixtures(page);addActivity(sessions);fs.writeFileSync(control,JSON.stringify({delay:20}));
   const {sync}=await(await page.request.post('/api/syncs/start-call',{data:{request_id:randomUUID()}})).json();
   await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).run?.status,{timeout:30000}).toBe('completed');
-  const original=await(await page.request.get(`/api/syncs/${sync.id}`)).json(),file=original.items[0].source_path;
+  const original=await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=E1`)).json(),file=original.item.source_path;
   expect(path.dirname(file)).toBe(sessions);fs.renameSync(file,file+'.hidden');
   try {
-    await page.goto(`/syncs/${sync.id}`);await expect(page.getByRole('alert')).toContainText('Original session evidence unavailable');
-    await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Mark reviewed',exact:true})).toBeDisabled();
-    await page.getByText('Evidence & preparation details',{exact:true}).click();await page.getByText('Original session source unavailable',{exact:true}).first().click();
+    await page.goto(`/syncs/${sync.id}`);await expect(page.getByRole('heading',{name:`Sync #${sync.id}`,exact:true})).toBeVisible();
+    await page.getByText('Evidence & preparation details',{exact:true}).click();await page.getByRole('button',{name:'Read evidence E1',exact:true}).click();
     await expect(page.locator('.evidence-body').filter({hasText:'Draken does not keep a text copy'})).toBeVisible();
     await page.getByText('Decisions & carry-forward',{exact:true}).click();await page.getByLabel('Decisions',{exact:true}).fill('Explicit note while source is offline.');await page.getByRole('button',{name:'Save notes',exact:true}).click();
     await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${sync.id}`)).json()).decisions).toBe('Explicit note while source is offline.');
@@ -117,7 +116,7 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
   // The exact captured file was restored, not replaced or rewritten. Its
   // verified receipt can be reused without another preparation or capture.
   await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});await expect(page.getByRole('alert')).not.toBeVisible();
-  expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}`)).json()).items).toEqual(original.items);
+  expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=E1`)).json()).item).toEqual(original.item);
 });
 
 test('settings persist local-only indexing without sync creation, browser capture or automatic review', async ({ page }) => {
@@ -174,17 +173,17 @@ test('Luna batch preparation exposes qualified timing without starting a call or
       message: { role: 'assistant', content: [{ type: 'text', text: index === 599 ? 'LATEST: implementation reported; deployment NOT checked.' : `Earlier plan ${index}. ${'x'.repeat(900)}` }] } })),
   ].map(JSON.stringify).join('\n') + '\n');
   const { sync } = await (await page.request.post('/api/syncs/start-call', { data: { request_id: randomUUID() } })).json();
-  expect(sync.items.filter((item: { session_id: string }) => item.session_id === sessionId)).toHaveLength(600);
+  expect((await (await page.request.get(`/api/syncs/${sync.id}/evidence?q=${encodeURIComponent('/synthetic/batch-ui')}`)).json()).total).toBe(600);
   await expect.poll(async () => (await (await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).run?.status, { timeout: 30000 }).toBe('completed');
   expect((await page.request.patch(`/api/syncs/${sync.id}/models`, { data: { summary: 'openai/gpt-6-luna', final: 'openai/gpt-6-astra', max_invocations: 120 } })).ok()).toBe(true);
   expect((await page.request.post(`/api/syncs/${sync.id}/briefing`)).status()).toBe(202);
   await expect.poll(async () => (await (await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).run?.status, { timeout: 15000 }).toBe('completed');
   const ready = await (await page.request.get(`/api/syncs/${sync.id}`)).json();
-  expect(ready.tree.run.processed_entries).toBe(ready.items.length); expect(ready.tree.run.metrics.length).toBeGreaterThan(1);
+  expect(ready.tree.run.processed_entries).toBe(ready.item_count); expect(ready.tree.run.metrics.length).toBeGreaterThan(1);
   await page.goto(`/syncs/${sync.id}`); await page.getByText('Evidence & preparation details', { exact: true }).click();
   await page.getByText('Model request timing', { exact: true }).click();
   await expect(page.locator('.tree-card')).toContainText('not billed usage');
-  await expect(page.locator('.tree-card')).toContainText(`${ready.items.length} / ${ready.items.length} entries processed`);
+  await expect(page.locator('.tree-card')).toContainText(`${ready.item_count} / ${ready.item_count} entries processed`);
   expect(await page.evaluate(() => (window as any).__captures)).toBe(0); await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const after = await (await page.request.get(`/api/syncs/${sync.id}`)).json(); expect(after.status).toBe('open'); expect(after.decisions).toBe('');

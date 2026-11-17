@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, MessageSquare, Mic, MicOff, Phone, PhoneOff, Square, X } from 'lucide-react';
 import type { CallReadiness, SyncDetail } from '../types';
-import { CitedText } from './EvidenceList';
+import { CitedText, SnapshotSource } from './EvidenceList';
 import { ConversationInfo } from './ConversationInfo';
 import { HistorySource } from './HistorySource';
 import { HistoryProgress } from './HistoryProgress';
@@ -43,8 +43,6 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
   const mounted = useRef(true);
   const closing = useRef(false), starting = useRef(false);
   const [checking, setChecking] = useState(false);
-  const evidence = [...sync.items, ...sync.context];
-  const selected = evidence.find(item => item.ref === source);
   const conversationEnded = Boolean(sync.conversation?.ended_at);
   const prepared = readiness?.ready === true && !conversationEnded;
   const secure = window.isSecureContext;
@@ -176,7 +174,7 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
           {item.turns.map(turn => <div className="voice-history-turn" key={turn.id}>
             {turn.question && <><strong className="message-author">You</strong><p className="prose">{turn.question}</p></>}
             {(turn.answer || !turn.question || item.mode !== 'native') && <><strong className="message-author">Draken · {turn.status}</strong>
-            <CitedText text={`${turn.answer || turn.error || 'No reply generated.'} ${JSON.parse(turn.evidence_json).map((ref: string) => `[${ref}]`).join(' ')}`} evidence={evidence} />
+            <CitedText text={`${turn.answer || turn.error || 'No reply generated.'} ${JSON.parse(turn.evidence_json).map((ref: string) => `[${ref}]`).join(' ')}`} />
             {turn.status !== 'completed' && <p className="small muted">Generated text is shown above. {turn.heard_text ? `Confirmed played: ${turn.heard_text}` : 'Playback was not confirmed.'}</p>}</>}
           </div>)}
         </details>)}
@@ -229,7 +227,7 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
           <p className="small muted">Live generated transcripts, not word-timed subtitles. Exact playback and agreement are not confirmed. Full text is retained here even when the scene shows only its latest lines.</p>
           {call.evidence.length > 0 && <details className="voice-history"><summary>Sources supplied ({call.evidence.length})</summary><p className="small muted">Context available to the voice model, not verified citations for every spoken claim.</p><div className="voice-sources">{call.evidence.map(ref => <button className="citation" key={ref} onClick={event => { const list = event.currentTarget.closest('details'); if (list) list.open = false; setSource(source === ref ? '' : ref); }}>{ref.startsWith('H') ? `History ${ref.slice(-6)}` : `Source ${ref}`}</button>)}</div></details>}
           {open && /^H[a-f0-9]{24}$/.test(source) && <section className="voice-source" ref={sourcePanel}><button className="btn btn-secondary" onClick={() => setSource('')}>Close historical source</button><HistorySource reference={source} /></section>}
-          {open && selected && <section className="voice-source" ref={sourcePanel}><div className="section-heading"><strong>{selected.ref} · {selected.session_name || selected.cwd}</strong><button className="icon-button" aria-label="Close source" onClick={() => setSource('')}><X size={16} /></button></div><pre>{selected.text}</pre></section>}
+          {open && /^[EC]\d+$/.test(source) && <section className="voice-source" ref={sourcePanel}><button className="icon-button" aria-label="Close source" onClick={() => setSource('')}><X size={16} /></button><SnapshotSource key={source} syncId={sync.id} reference={source} /></section>}
         </div>
       </details>
       <div className="voice-footer"><AudioLines size={14} /><span>Experimental live audio to OpenAI · Generated, not verified · 30-minute limit</span></div>

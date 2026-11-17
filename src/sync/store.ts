@@ -3,6 +3,7 @@ import { Evidence, HomeOverview, ObservedSession, Overview, SyncDetail, SyncMode
 import { EntryReader } from './source-files';
 import { getSessionRoot } from './jsonl';
 import { EvidenceReader } from '../db/evidence';
+import { EvidenceScope } from './evidence-scope';
 import { cleanText, sourceKey, sourceRepresentatives } from './normalize';
 import { aggregationCost } from './cost';
 import { recapInput, invalidateRecap, type RecapInput } from './recap';
@@ -126,6 +127,40 @@ export function getSync(id: number, evidence: boolean | readonly string[] = true
   } finally { reader.close(); }
 }
 
+const EVIDENCE_PAGE_SIZE = 25;
+export function evidencePage(id: number, group: 'items' | 'context', offset: number, query: string) {
+  const db = getDb();
+  if (!db.prepare('SELECT 1 FROM syncs WHERE id=?').get(id)) throw new HttpError(404, 'Sync not found');
+  const from = group === 'items' ? 'SELECT evidence_json AS j,rowid AS ordinal FROM sync_items WHERE sync_id=?' : 'SELECT value AS j,CAST(json_each.key AS INTEGER) AS ordinal FROM syncs,json_each(context_json) WHERE syncs.id=?';
+  const filter = query ? "WHERE instr(lower(COALESCE(json_extract(j,'$.ref'),'') || ' ' || COALESCE(json_extract(j,'$.session_name'),'') || ' ' || COALESCE(json_extract(j,'$.cwd'),'')),lower(?))>0" : '';
+  const args = query ? [id, query] : [id];
+  const total = (db.prepare(`SELECT count(*) n FROM (${from}) ${filter}`).get(...args) as { n: number }).n;
+  const rows = db.prepare(`SELECT j FROM (${from}) ${filter} ORDER BY ordinal LIMIT ? OFFSET ?`).all(...args, EVIDENCE_PAGE_SIZE, offset) as { j: string }[];
+  // Metadata only. Listing a page must neither open originals nor expose copied text/pointers.
+  const items = rows.map(({ j }) => {
+    const item = JSON.parse(j);
+    return { ref: item.ref, agent: item.agent, role: cleanText(item.role || '', 40), session_name: cleanText(item.session_name || '', 200),
+      cwd: cleanText(item.cwd || '', 500), timestamp: item.timestamp };
+  });
+  return { items, total };
+}
+export function evidenceExcerpt(id: number, ref: string, offset: number) {
+  const db = getDb();
+  const row = db.prepare(`SELECT j FROM (SELECT evidence_json j FROM sync_items WHERE sync_id=?
+    UNION ALL SELECT value j FROM syncs,json_each(context_json) WHERE syncs.id=?) WHERE json_extract(j,'$.ref')=? LIMIT 1`).get(id, id, ref) as { j: string } | undefined;
+  if (!row) throw new HttpError(404, 'Snapshot reference not found');
+  const metadata = JSON.parse(row.j);
+  try { new EvidenceScope(db, [metadata]).assert(metadata); }
+  catch { throw new HttpError(403, 'Original source is excluded or unavailable.'); }
+  const reader = new EvidenceReader(db);
+  try {
+    const item = reader.read(metadata, true), total = item.text.length;
+    return { item: { ref: item.ref, agent: item.agent, event_key: item.event_key, role: item.role, session_name: cleanText(item.session_name || '', 200), cwd: cleanText(item.cwd || '', 500),
+      session_id: item.session_id, entry_id: item.entry_id, timestamp: item.timestamp, source_path: cleanText(item.source_path || '', 1000),
+      text: item.text.slice(offset, offset + 4000), unavailable: item.unavailable }, total, offset };
+  } finally { reader.close(); }
+}
+
 export function assertEvidenceAvailable(sync: Pick<SyncDetail, 'items' | 'context'>): void {
   if ([...sync.items, ...sync.context].some(item => item.unavailable)) throw new HttpError(409, 'Original session evidence is unavailable or changed. Restore the session files before summarizing, calling or marking this snapshot reviewed. Conversation and notes remain accessible.');
 }
@@ -227,15 +262,15 @@ export function startSync(since?: string | null): SyncDetail {
 
 /** New one-click workflow: reserve previously unassigned entries, never review them.
  * Repeated transport requests reuse the same immutable snapshot. */
-export function startConversationSync(requestId: string): SyncDetail {
+export function startConversationSync(requestId: string, evidence = true): SyncDetail {
   expireConversations();
   const db = getDb();
   return db.transaction(() => {
     const existing = db.prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
-    if (existing) return getSync(existing.sync_id);
+    if (existing) return getSync(existing.sync_id, evidence);
     if (activity.callActive || activity.busy) throw new HttpError(409, 'End the active call or wait for preparation before starting another sync.');
     db.prepare("INSERT OR IGNORE INTO sync_settings(key,value) VALUES ('history_since','')").run();
-    const prior = (db.prepare("SELECT id FROM syncs WHERE status != 'discarded' ORDER BY id DESC LIMIT 3").all() as { id: number }[]).map(row => getSync(row.id));
+    const prior = (db.prepare("SELECT id FROM syncs WHERE status != 'discarded' ORDER BY id DESC LIMIT 3").all() as { id: number }[]).map(row => getSync(row.id, false));
     const inputs: RecapInput[] = prior.map(recapInput);
     const memory = prior.map(item => ({ sync_id: item.id, status: item.status, snapshot_at: item.snapshot_at, decisions: item.decisions, carry_forward: item.carry_forward, recap: item.recap }));
     const { items, context } = snapshot(), now = new Date().toISOString();
@@ -243,7 +278,7 @@ export function startConversationSync(requestId: string): SyncDetail {
       VALUES (?,?,2,?,?,?,?)`).run(now, now, frozenContext(db, context), JSON.stringify(memory), memory[0]?.carry_forward || '', JSON.stringify(defaultModels()));
     const id = Number(result.lastInsertRowid); persistItems(id, items);
     db.prepare('INSERT INTO sync_presentations(sync_id,request_id,memory_inputs_json) VALUES (?,?,?)').run(id, requestId, JSON.stringify(inputs));
-    return getSync(id);
+    return getSync(id, evidence);
   })();
 }
 
@@ -272,7 +307,7 @@ export function expandSnapshot(id: number): SyncDetail {
 
 export function configureModels(id: number, models: SyncModels): SyncDetail {
   assertConversationActive(id);
-  const sync = requireOpen(id);
+  const sync = requireOpen(id, false, false);
   for (const model of [models.summary, models.final]) {
     if (typeof model !== 'string' || (model !== '' && !/^[a-zA-Z0-9][a-zA-Z0-9._/:+@-]{0,199}$/.test(model))) throw new HttpError(400, 'Use a pi provider/model selector, not a shell command');
   }
@@ -306,10 +341,10 @@ export function recoverInterruptedRuns(): void {
 }
 
 export function saveNotes(id: number, decisions: string, carryForward: string): SyncDetail {
-  requireOpen(id);
+  requireOpen(id, false, false);
   invalidateRecap(id);
   getDb().prepare('UPDATE syncs SET decisions = ?, carry_forward = ? WHERE id = ?').run(decisions, carryForward, id);
-  return getSync(id);
+  return getSync(id, false);
 }
 
 export function completeSync(id: number, decisions: string, carryForward: string, reviewed: boolean): SyncDetail {
@@ -328,7 +363,7 @@ export function completeSync(id: number, decisions: string, carryForward: string
 }
 
 export function discardSync(id: number): SyncDetail {
-  requireOpen(id);
+  requireOpen(id, false, false);
   getDb().prepare("UPDATE syncs SET status = 'discarded', completed_at = ? WHERE id = ?").run(new Date().toISOString(), id);
-  return getSync(id);
+  return getSync(id, false);
 }

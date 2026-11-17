@@ -96,6 +96,8 @@ The main request is `POST /api/syncs/start-call`. The browser sends a unique req
 
 The server returns **HTTP 202** once preparation has started. That means “work accepted,” not “briefing finished.” The browser asks for progress while the server works. The final call setup is a separate browser action; the start-call request itself does not open a microphone.
 
+Sync HTTP responses contain briefing, conversation, notes, counts and progress, but empty `items`/`context` arrays. This applies to initial GETs, startup, transport retries, preparation completion and mutation results; no full-archive query flag is available. `GET /syncs/:id/evidence` lists 25 metadata records with `group`, `offset` and an optional metadata filter `q`. With `ref=E…` or `ref=C…`, it checks current source permission and reads that frozen original only, returning at most 4,000 text characters from `offset`. Opening a sync never resolves originals; citations and explicit evidence browsing load independently. Internal preparation/review retains its evidence checks. This removes oversized browser transfers, not all initial preparation work.
+
 The intent to start that call lives only in browser memory, not in the URL. Opening or reloading `/syncs/123` therefore cannot turn the microphone on. A failed preparation, hidden page or denied permission requires explicit recovery.
 
 **Why:** preparation may take minutes, but an HTTP request should not need to stay open for that long. Repeated requests should not create duplicate snapshots, and an old link should never act as microphone permission.

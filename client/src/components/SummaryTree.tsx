@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import * as api from '../api';
-import type { Evidence, NodeSummary, TopicGroups, TreeNode, TreeProgress } from '../types';
+import type { NodeSummary, TopicGroups, TreeNode, TreeProgress } from '../types';
 import { CitedText } from './EvidenceList';
 
-export function SummaryTree({ syncId, progress, evidence, onCancel, onResume, resumeEnabled }: {
-  syncId: number; progress: TreeProgress; evidence: Evidence[]; onCancel: () => void;
+export function SummaryTree({ syncId, progress, onCancel, onResume, resumeEnabled }: {
+  syncId: number; progress: TreeProgress; onCancel: () => void;
   onResume?: () => void; resumeEnabled: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -70,7 +70,7 @@ export function SummaryTree({ syncId, progress, evidence, onCancel, onResume, re
       {'observations' in selected.output ? <>
         {selected.output.observations.map((observation, index) => <div className="node-observation" key={index}>
           <strong>{observation.topic}</strong> <span className="status">{observation.state}</span>
-          <CitedText text={`${observation.summary} ${observation.evidence.map(key => selected.refs[key] ? `[${selected.refs[key]}]` : '[source unavailable]').join(' ')}`} evidence={evidence} />
+          <CitedText text={`${observation.summary} ${observation.evidence.map(key => selected.refs[key] ? `[${selected.refs[key]}]` : '[source unavailable]').join(' ')}`} />
         </div>)}
         {selected.output.limitations.map((limitation, index) => <p className="muted small" key={index}>{limitation}</p>)}
       </> : selected.output.groups.map((group, index) => <p className="small" key={index}>{group.topic} · {group.members.length} related observations</p>)}

@@ -5,7 +5,7 @@ import { getDb } from '../db/schema';
 import { getDataDir } from '../data-dir';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
+import { evidencePage, evidenceExcerpt, completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, setAutoSummary, yieldBackgroundIndexing } from '../sync/background';
 import { callReadiness, prepareCall } from '../sync/preparation';
@@ -15,6 +15,8 @@ import { activity } from '../sync/activity';
 import { conversationStatus } from '../sync/conversation';
 
 const router = Router();
+// Mutation helpers may need originals internally; HTTP responses never ship them.
+const metadata = (sync: ReturnType<typeof getSync>) => ({ ...sync, items: [], context: [] });
 function id(req: Request): number {
   const value = Number(req.params.id);
   if (!Number.isSafeInteger(value) || value < 1) throw new HttpError(400, 'Invalid sync ID');
@@ -60,19 +62,19 @@ router.post(['/syncs/start-call', '/syncs/start-chat'], route(async (req, res) =
   if (typeof requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestId)) throw new HttpError(400, 'A request ID is required');
   if (activity.starting) throw new HttpError(409, 'A sync is already being prepared');
   const prior = getDb().prepare('SELECT sync_id FROM sync_presentations WHERE request_id=?').get(requestId) as { sync_id: number } | undefined;
-  if (prior) { res.status(202).json({ sync: getSync(prior.sync_id), scan: { files: 0, added: 0, warnings: [] } }); return; }
+  if (prior) { res.status(202).json({ sync: getSync(prior.sync_id, false), scan: { files: 0, added: 0, warnings: [] } }); return; }
   const releaseStart = activity.beginStart();
   try {
     const setup = await piSetupStatus(true);
     if (setup.state !== 'configured') throw new HttpError(503, setup.message);
     const scan = await completeScan();
     releaseStart();
-    const sync = startConversationSync(requestId);
+    const sync = startConversationSync(requestId, false);
     const ready = callReadiness(sync.id, req.path.endsWith('/start-chat')).ready;
-    res.status(202).json({ sync: ready ? sync : launchReply(sync.id), scan });
+    res.status(202).json({ sync: metadata(ready ? sync : launchReply(sync.id)), scan });
   } finally { releaseStart(); }
 }));
-router.post('/syncs/:id/recap', route((req, res) => res.status(202).json(launchRecap(id(req)))));
+router.post('/syncs/:id/recap', route((req, res) => res.status(202).json(metadata(launchRecap(id(req))))));
 router.get('/overview', route((_req, res) => res.json(overview())));
 router.patch('/agents/:agent', route((req, res) => {
   if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 || typeof req.body.enabled !== 'boolean') throw new HttpError(400, 'Only boolean enabled is accepted');
@@ -88,52 +90,64 @@ router.post('/syncs', route(async (req, res) => {
   const since = req.body?.history_since;
   if (since !== undefined && since !== null && typeof since !== 'string') throw new HttpError(400, 'history_since must be a date string or null');
   const scan = await completeScan();
-  res.json({ sync: startSync(since), scan });
+  res.json({ sync: metadata(startSync(since)), scan });
 }));
-router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req), req.query.evidence !== 'false'))));
+router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req), false))));
+router.get('/syncs/:id/evidence', route((req, res) => {
+  const offset = Number(req.query.offset ?? 0);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10_000_000) throw new HttpError(400, 'Invalid evidence offset');
+  if (req.query.ref !== undefined) {
+    if (typeof req.query.ref !== 'string' || !/^[EC]\d{1,10}$/.test(req.query.ref)) throw new HttpError(400, 'Invalid snapshot reference');
+    res.json(evidenceExcerpt(id(req), req.query.ref, offset));
+  } else {
+    const group = req.query.group ?? 'items';
+    if (group !== 'items' && group !== 'context') throw new HttpError(400, 'Invalid evidence group');
+    res.json(evidencePage(id(req), group, offset, text(req.query.q ?? '', 'Evidence filter', 200)));
+  }
+}));
 router.get('/syncs/:id/conversation', route((req, res) => res.json(conversationStatus(id(req)))));
 router.get('/syncs/:id/progress', route((req, res) => res.json(getProgress(id(req)))));
 router.get('/syncs/:id/call-readiness', route((req, res) => res.json(callReadiness(id(req)))));
 router.get('/syncs/:id/chat-readiness', route((req, res) => { res.json(callReadiness(id(req), true)); }));
-router.post('/syncs/:id/prepare-call', route((req, res) => res.status(202).json(prepareCall(id(req)))));
+router.post('/syncs/:id/prepare-call', route((req, res) => res.status(202).json(metadata(prepareCall(id(req))))));
 router.get('/syncs/:id/tree/:key', route((req, res) => res.json(getTreeNode(id(req), String(req.params.key)))));
 router.post('/syncs/:id/expand', route(async (req, res) => {
   const scan = await completeScan();
-  res.json({ sync: expandSnapshot(id(req)), scan });
+  res.json({ sync: metadata(expandSnapshot(id(req))), scan });
 }));
 router.patch('/syncs/:id/models', route((req, res) => {
-  res.json(configureModels(id(req), {
+  res.json(metadata(configureModels(id(req), {
     summary: text(req.body?.summary, 'Summary model', 200),
     final: text(req.body?.final, 'Final model', 200),
     max_invocations: req.body?.max_invocations,
-  }));
+  })));
 }));
 router.post('/syncs/:id/cancel', route((req, res) => {
   cancelReply(id(req));
   res.status(202).json(getProgress(id(req)));
 }));
 router.patch('/syncs/:id/notes', route((req, res) => {
-  res.json(saveNotes(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward')));
+  res.json(metadata(saveNotes(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward'))));
 }));
 router.post('/syncs/:id/briefing', route((req, res) => {
   const sync = launchReply(id(req));
-  res.status(202).json(sync);
+  res.status(202).json(metadata(sync));
 }));
 router.post('/syncs/:id/messages', route((req, res) => {
   const question = text(req.body?.message, 'Message');
   if (!question) throw new HttpError(400, 'Message cannot be empty');
   if (Object.keys(req.body).some(key => key !== 'message')) throw new HttpError(400, 'Unknown discussion option. Refresh the page.');
-  res.status(202).json(launchReply(id(req), question));
+  res.status(202).json(metadata(launchReply(id(req), question)));
 }));
 router.post('/syncs/:id/chat/messages', route((req, res) => {
   const question = text(req.body?.message, 'Message');
   if (!question) throw new HttpError(400, 'Message cannot be empty');
   if (Object.keys(req.body).some(key => !['message', 'request_id'].includes(key)) || typeof req.body.request_id !== 'string') throw new HttpError(400, 'Only a message and chat request ID are accepted');
-  res.status(202).json(launchChat(id(req), question, req.body.request_id));
+  res.status(202).json(metadata(launchChat(id(req), question, req.body.request_id)));
 }));
 router.post('/syncs/:id/complete', route((req, res) => {
-  res.json(completeSync(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward'), req.body?.reviewed === true));
+  res.json(metadata(completeSync(id(req), text(req.body?.decisions, 'Decisions'), text(req.body?.carry_forward, 'Carry forward'), req.body?.reviewed === true)));
 }));
-router.post('/syncs/:id/discard', route((req, res) => res.json(discardSync(id(req)))));
+router.post('/syncs/:id/discard', route((req, res) => res.json(metadata(discardSync(id(req))))));
 
 export default router;

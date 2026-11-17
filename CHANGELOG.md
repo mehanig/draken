@@ -1,11 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.8.7
+
+### Small sync responses and scoped prepared chat
+
+- Opening a sync, starting chat and mutation/retry responses never transfer the frozen evidence archive. Briefings, conversations, notes, counts and progress remain available without loading original source bodies.
+- Explicit evidence browsing lists 25 metadata records per page; citation clicks read only the selected frozen original in 4,000-character pages, with current source permissions and original-byte verification. Missing originals remain visible as unavailable; no cached text substitution.
+- Prior recaps, note updates and discard checks use metadata rather than repeatedly hydrating whole snapshots. Initial briefing preparation still needs work; this is not an instant-start guarantee.
 
 - Prepared text chat uses the saved briefing, conversation and prepared search; it no longer rebuilds the summary tree or repeatedly reads/verifies the full snapshot and archive receipt.
 - Rank prepared search candidates before resolving selected originals. Preserve source permissions, original-byte checks for supplied evidence, explicit frozen-reference reads and invocation/cancellation accounting.
 - Remove the checkpoint-citation veto and its model retry. Invalid citation labels still receive at most one correction; heuristic citation combinations no longer discard an answer.
-- Return metadata-only chat updates without discarding the browser's loaded evidence. Remove obsolete chat-wide verification and prompt-wording tests; retain preparation-cache tests at preparation boundaries.
+- Keep evidence inspection separate from sync polling and chat updates. Remove obsolete chat-wide verification and prompt-wording tests; retain preparation-cache tests at preparation boundaries.
+- Preserve histories, frozen evidence, embeddings, summary caches, notes, cancellation, idempotency and explicit review. Background indexing and summarization settings/failure pauses are unchanged in this release; unifying that pipeline is separate work.
 
 ## 0.8.6
 

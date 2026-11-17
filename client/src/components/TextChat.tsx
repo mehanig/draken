@@ -17,7 +17,6 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
   const stage = sending ? 'Sending your message…' : run?.stage.includes('Searching') ? 'Searching your prepared history…' : run?.stage.includes('Checking evidence') ? 'Checking source references…' : run?.stage.includes('Thinking') ? 'Draken is thinking…' : 'Reading the snapshot context…';
   const thread = useRef<HTMLDivElement>(null), bottom = useRef(true);
   useEffect(() => { if (bottom.current && thread.current) thread.current.scrollTop = thread.current.scrollHeight; }, [sync.messages.length, question, thinking, stage]);
-  const evidence = [...sync.items, ...sync.context];
   const prepared = Boolean(sync.briefing && sync.tree.complete && (sync.conversation?.history_before || readiness?.ready));
   const sendDisabled = disabled || !open || !prepared;
   return <section className="card text-chat" aria-label="Chat with Draken">
@@ -29,7 +28,7 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
       {!sync.messages.length && !question && <div className="chat-welcome"><h3>What would you like to pick up?</h3><p>Ask about a project, a decision, or what still needs your attention. Draken will use the snapshot and prepared original history.</p></div>}
       {sync.messages.map(message => <article className={`chat-message ${message.role}`} key={message.id}>
         {message.role === 'assistant' && <img className="chat-avatar" src="/persona/chat-avatar.webp" alt="" width="36" height="36" />}
-        <div className="chat-bubble"><div className="chat-author"><strong>{message.role === 'user' ? 'You' : 'Draken'}</strong><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time></div><CitedText text={message.content} evidence={evidence} /></div>
+        <div className="chat-bubble"><div className="chat-author"><strong>{message.role === 'user' ? 'You' : 'Draken'}</strong><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time></div><CitedText text={message.content} /></div>
       </article>)}
       {question && !(run?.request_id && (pending || (failed && !sending))) && <article className="chat-message user"><div className="chat-bubble"><strong>You</strong><p className="prose">{question}</p></div></article>}
       {thinking && <div className="chat-message assistant"><img className="chat-avatar" src="/persona/chat-avatar.webp" alt="" width="36" height="36" /><div className="chat-bubble chat-thinking" role="status" aria-label="Chat status" aria-live="polite"><span className="spinner" aria-hidden="true" />{stage}<span className="small muted">Your answer will appear here when it’s ready.</span></div></div>}

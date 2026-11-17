@@ -29,7 +29,8 @@ async function prepare(page: Page) {
   expect((await page.request.post(`/api/syncs/${syncId}/briefing`)).status()).toBe(202);
   await expect.poll(async () => (await (await page.request.get(`/api/syncs/${syncId}/progress`)).json()).complete).toBe(true);
   const sync = await (await page.request.get(`/api/syncs/${syncId}`)).json();
-  const testRef = sync.items.find((item: any) => item.cwd === '/demo/voice-export' && item.role === 'toolResult').ref;
+  const evidence = await (await page.request.get(`/api/syncs/${sync.id}/evidence?q=${encodeURIComponent('/demo/voice-export')}`)).json();
+  const testRef = evidence.items.find((item: any) => item.role === 'toolResult').ref;
   return { syncId, root, testRef, piLog: () => fs.readFileSync(path.join(root, 'pi-calls.jsonl'), 'utf8') };
 }
 async function pendingHistory(page: Page, root: string) {
