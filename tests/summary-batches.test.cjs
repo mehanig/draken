@@ -65,7 +65,7 @@ test('aggregate citation compaction preserves all claims, uses one targeted repa
       let next = 0;
       return JSON.stringify({ observations: claims.map((claim, i) => ({ ...claim, evidence: request.allowed_source_ids.slice(next, next += i < 7 ? 7 : 6) })), limitations: ['All deployment claims remain unverified.'] });
     }
-    assert.equal(request.input.goal, 'compact_for_final');
+    assert.equal(request.input.goal, 'current_project_briefing');
     return JSON.stringify(request.input.children[0].summary); // Reproduce an otherwise valid result still citing 151 sources.
   });
   await assert.rejects(generateReply(sync.id), /Synthetic final-provider interruption/);
@@ -78,6 +78,35 @@ test('aggregate citation compaction preserves all claims, uses one targeted repa
   const count = requests.length; assert.ok((await generateReply(sync.id)).briefing);
   assert.deepEqual(requests.slice(count).map(r => r.task), ['final_verdict'], 'Completed leaf and repaired compact parent are reused');
   unchanged(sync, 151);
+});
+
+test('oversized history selects recent project state with few citations while retaining the historical cache', async t => {
+  session(151, { width: 20, skew: true }); const sync = await start(), requests = [];
+  t.mock.method(require('../dist/sync/pi'), 'invokePi', async prompt => {
+    const r = JSON.parse(prompt); requests.push(r);
+    if (r.task === 'final_verdict') {
+      assert.match(r.instruction, /CURRENT-STATE.*not a historical timeline/);
+      assert.equal(r.verification_evidence.length, 2);
+      assert.equal(r.summary_tree[0].observations.length, 2);
+      assert.doesNotMatch(JSON.stringify(r.summary_tree), /Superseded plan/);
+      return `Latest reported state; deployment unverified [${r.verification_evidence[0].ref}].`;
+    }
+    if (r.stage === 'chunk') {
+      let n = 0;
+      return JSON.stringify({ observations: Array.from({ length: 24 }, (_, i) => ({ topic: i === 0 ? 'Other project' : 'Draken', state: i === 0 ? 'blocked' : i === 23 ? 'reported_done' : 'superseded', summary: i === 0 ? 'Older unresolved blocker; newer activity does not resolve it.' : i === 23 ? 'Latest implementation reported; deployment NOT verified.' : `Superseded plan ${i}`, evidence: r.allowed_source_ids.slice(n, n += i < 7 ? 7 : 6) })), limitations: ['Reports are not proof of deployment.'] });
+    }
+    assert.equal(r.input.goal, 'current_project_briefing');
+    assert.match(r.input.briefing_policy, /ONE recent.*Older evidence|Older evidence.*ONE recent/);
+    assert.match(r.input.briefing_policy, /session sequence before timestamps/);
+    const observations = r.input.children[0].summary.observations;
+    assert.ok(observations.every(o => o.source_positions.length === o.evidence.length));
+    return JSON.stringify({ observations: [observations[0], observations.at(-1)].map(o => ({ ...o, evidence: [o.evidence.at(-1)] })), limitations: ['Reports are not proof of deployment.'] });
+  });
+  const result = await generateReply(sync.id); assert.ok(result.briefing);
+  assert.deepEqual(requests.map(r => r.task), ['summarize', 'summarize', 'final_verdict']);
+  const leaf = getDb().prepare("SELECT output_json FROM summary_cache WHERE kind='chunk'").get();
+  assert.equal(JSON.parse(leaf.output_json).observations.length, 24, 'Historical observations remain cached for follow-up');
+  assert.equal(result.tree.run.processed_entries, 151); unchanged(sync, 151);
 });
 
 test('aggregate citation repair cannot drop claims, use unsupported refs or exceed the unchanged total cap', () => {

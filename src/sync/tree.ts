@@ -81,6 +81,7 @@ function boundedString(value: unknown, max: number, field: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`Invalid ${field}`);
   return cleanText(value.trim(), max);
 }
+const BRIEFING_POLICY = 'Select the latest meaningful CURRENT STATE per project/workstream across sessions, not an exhaustive history. Use source_positions (session sequence before timestamps) to distinguish newer outcomes from superseded plans. Omit obsolete plans, resolved issues and repetitive history; keep current blockers, unresolved decisions, meaningful recent changes and next actions. Older evidence belongs only when a still-unresolved constraint or contradiction needs it. Aim for ONE recent directly supporting citation per project/session, adding one or two only for distinct claims or unresolved contradictions. Citation limits are ceilings, never targets. Preserve uncertainty and negative qualifications for the selected current-state claims; a newer report alone is not proof of validation or resolution. Historical details remain available for follow-up, not mandatory briefing content. If current work must be omitted for space, disclose that in limitations.';
 const MAX_EVIDENCE = 16;
 class CitationLimitError extends Error {
   constructor(readonly candidate: NodeSummary, readonly maxSources = Infinity) {
@@ -460,7 +461,7 @@ export class SummaryTree {
             [spec.kind === 'topics' ? 'allowed_observation_ids' : 'allowed_source_ids']: [...wire.allowed],
             ...(validationError ? { repair: { validation_error: validationError, ...(spec.batch && citationRepair ? {} : { previous_output: previousOutput }),
               instruction: citationRepair ? 'Return only selections for citation_repairs. Keep claims unchanged; select only sufficient supporting references from each observation’s candidates, at most 16 each. If max_distinct_sources is supplied, the UNION across all selections must also fit that total; repeated references count once. Never drop support for distinct claims or qualifications to meet the limit.' : 'Correct the previous output against the original input and allowed IDs. Do not invent or guess source references.' } } : {}) },
-          citationRepair ? citationRepairSystem : spec.kind === 'topics' ? groupingSystem : spec.batch ? batchSummarySystem : summarySystem);
+          citationRepair ? citationRepairSystem : spec.kind === 'topics' ? groupingSystem : spec.batch ? batchSummarySystem + ((spec.payload as { goal?: string }).goal === 'current_project_briefing' ? `\nFor this final briefing selection, the exhaustive-history instructions above do not apply: ${BRIEFING_POLICY}` : '') : summarySystem);
           // A provider may yield to inclusion, agent, effective-record or file
           // changes. Never persist its result (or attempt repair) on stale proof.
           verify();
@@ -1104,8 +1105,8 @@ export class SummaryTree {
   private reconciliationSpec(nodes: SummaryNode[], label: string, requireCompact = false, register = true): Spec {
     const sources = [...new Set(nodes.flatMap(node => node.sources))];
     const allowed = new Set(nodes.flatMap(node => node.summary.observations.flatMap(item => item.evidence)));
-    const spec = this.spec('overview', label, { goal: 'compact_for_final',
-      ...(requireCompact ? { output_budget: { tokens_with_provenance: LUNA_BATCH.rootTokens, distinct_sources: LUNA_BATCH.rootReferences } } : {}),
+    const spec = this.spec('overview', label, { goal: requireCompact ? 'current_project_briefing' : 'compact_for_final',
+      ...(requireCompact ? { briefing_policy: BRIEFING_POLICY, output_budget: { tokens_with_provenance: LUNA_BATCH.rootTokens, distinct_sources: LUNA_BATCH.rootReferences } } : {}),
       ...this.mergePayload(nodes, true) }, allowed, sources, nodes.map(node => node.key), true, register);
     return spec;
   }
@@ -1155,6 +1156,9 @@ export class SummaryTree {
         const complete = children as Candidate[];
         const leaves = complete.flatMap(child => [...child.leaves]);
         if (new Set(leaves).size !== leaves.length) continue;
+        // A selective briefing is reusable only for the exact complete input,
+        // never as historical coverage when new work needs reconciliation.
+        if (row.compact && leaves.length !== nodes.length) continue;
         const spec = this.reconciliationSpec(complete.map(child => child.node), row.label, Boolean(row.compact), false);
         if (spec.key !== row.key || !this.cached(spec)) continue;
         const cache = this.db.prepare('SELECT output_json FROM summary_cache WHERE key=?').get(key) as { output_json: string };
@@ -1224,10 +1228,9 @@ export class SummaryTree {
       for (const [index, group] of groups.entries()) next.push(group.length === 1 ? group[0] : await this.reconcileBatch(group, `Global reconciliation ${depth + 1} · part ${index + 1}`));
       nodes = next;
     }
-    // Do not dump a large leaf into the 100x-priced final model. At most one
-    // additional compacting node (with the usual one repair). Unfit results are
-    // not cached as final-ready, so an explicit retry can actually retry them.
-    if (nodes.length && !this.compactRoots(nodes)) nodes = [await this.reconcileBatch(nodes, 'Compact final input', true)];
+    // Oversized history needs current-state selection, not exhaustive compression.
+    // Small/cached roots go straight to the final model's current-state briefing.
+    if (nodes.length && !this.compactRoots(nodes)) nodes = [await this.reconcileBatch(nodes, 'Current project briefing', true)];
     if (!this.compactRoots(nodes)) throw new HttpError(400, 'The reconciled summary cannot fit the compact final budget. Cached results remain inspectable; no evidence was marked reviewed.');
     this.db.prepare('INSERT OR REPLACE INTO summary_leaf_plans(identity,keys_json) VALUES (?,?)')
       .run(this.parentPlanIdentity(), JSON.stringify(nodes.map(node => node.key)));

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.6
+
+### Brief current project state, not exhaustive history
+
+- Opening briefings prioritize the latest meaningful state per project/workstream: recent outcomes, current blockers, unresolved decisions and next actions. Prefer one recent supporting citation per project/session, adding a few only when distinct claims or contradictions require them. Citation limits are safety ceilings, not targets.
+- Oversized roots use the existing final-summary step to select current-state content instead of preserving every historical observation. Superseded plans, resolved issues and repetition can be omitted; older unresolved constraints, contradictions and uncertainty must remain qualified. Already-small roots go directly to the final model with the same current-state instruction, without an extra call.
+- Preserve historical leaves and broad reconciliation caches for follow-up. A selective briefing is reusable only for its complete input, never as historical coverage when new activity arrives. No history, snapshot membership or review coverage is removed or changed.
+- Retain evidence verification, cancellation, bounded repairs and existing token/reference/invocation limits. No new worker, endpoint, schema or preparation system.
+
 ## 0.8.5
 
 ### Repair aggregate citation overflow within the existing final budget

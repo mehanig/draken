@@ -66,7 +66,7 @@ function finalInput(sync: SyncDetail, tree: SummaryTree, roots: SummaryNode[], q
     allowedRefs,
     payload: {
       task: 'final_verdict',
-      instruction: question ? 'Answer the user question briefly by default, expanding only when the user asks for detail. Reconcile supplied summaries, original evidence and later follow-ups before writing. Retrieval is bounded, not an exhaustive archive audit.' : 'Give the opening engineering sync briefing. End with one useful question.',
+      instruction: question ? 'Answer the user question briefly by default, expanding only when the user asks for detail. Reconcile supplied summaries, original evidence and later follow-ups before writing. Retrieval is bounded, not an exhaustive archive audit.' : 'Give a concise CURRENT-STATE briefing grouped by project, not a historical timeline. Prioritize latest meaningful outcomes, current blockers and next actions. Omit superseded plans and resolved issues. Use one recent supporting citation per project/session where sufficient, adding only a few for distinct claims or unresolved contradictions. Preserve uncertainty; older unresolved constraints still matter. End with one useful question.',
       snapshot: { snapshot_at: sync.snapshot_at, history_since: sync.history_since, new_entries: sync.items.length,
         processed_entries: sync.items.length, complete_snapshot: true },
       summary_tree: canonical.map(node => ({ ...node, observations: node.observations.map(observation => ({
