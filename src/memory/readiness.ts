@@ -149,7 +149,7 @@ export function saveHistoryReadiness(db: Database.Database, source: Database.Dat
   db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(KEY, JSON.stringify({ version: VERSION, before, stamp, model }));
 }
 
-export function indexReadiness(db: Database.Database, source: Database.Database, capturedOnly = false): HistoryReadiness {
+export function indexReadiness(db: Database.Database, source: Database.Database | null, capturedOnly = false): HistoryReadiness {
   const absent = { ready: false, before: null };
   try {
     if ((db.prepare("SELECT value FROM meta WHERE key='schema'").get() as { value: string } | undefined)?.value !== 'history-index-v3-contentless') return absent;
@@ -159,6 +159,8 @@ export function indexReadiness(db: Database.Database, source: Database.Database,
     if (marker.version !== VERSION || typeof marker.before !== 'string' || !Number.isFinite(Date.parse(marker.before)) || new Date(marker.before).toISOString() !== marker.before || marker.before > new Date().toISOString()
       || typeof marker.stamp !== 'string' || !/^[a-f0-9]{64}$/.test(marker.stamp)
       || marker.model !== (db.prepare("SELECT value FROM meta WHERE key='model'").get() as { value: string } | undefined)?.value) return absent;
+    // Status polling reports the recorded checkpoint, not verified admission.
+    if (source === null) return { ready: true, before: marker.before };
     // Start with incomplete physical passages, not every occurrence/alias. The
     // correlated lookup uses links_passage; new caches also have a tiny partial
     // passages index. Older read-only schemas need no migration to run this.
@@ -174,7 +176,7 @@ export function indexReadiness(db: Database.Database, source: Database.Database,
 
 /** Read-only metadata. Never creates a cache, scans source logs, starts a worker,
  * downloads weights or infers. Missing/older receipts need explicit preparation. */
-export function storedHistoryReadiness(directory: string, source: Database.Database, capturedOnly = false): HistoryReadiness {
+export function storedHistoryReadiness(directory: string, source: Database.Database | null, capturedOnly = false): HistoryReadiness {
   const file = path.join(directory, 'memory', 'index.sqlite');
   if (!fs.existsSync(file)) return { ready: false, before: null };
   let db: Database.Database | undefined;

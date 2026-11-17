@@ -143,6 +143,8 @@ export function validateHistoryQuery(value: unknown): HistoryQuery {
   return { ...query, question: query.question.trim() } as HistoryQuery;
 }
 export const historyReadiness = (capturedOnly = false) => storedHistoryReadiness(getDataDir(), getDb(), capturedOnly);
+/** Historical completion only; never use this status for chat/voice admission. */
+export const historyPreparationStatus = () => storedHistoryReadiness(getDataDir(), null);
 export async function prepareHistory(before: string, signal: AbortSignal, background = false) {
   if (!background) {
     const scan = await scanSessions(signal);
