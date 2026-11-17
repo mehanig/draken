@@ -127,23 +127,6 @@ export function getSync(id: number, evidence: boolean | readonly string[] = true
   } finally { reader.close(); }
 }
 
-const EVIDENCE_PAGE_SIZE = 25;
-export function evidencePage(id: number, group: 'items' | 'context', offset: number, query: string) {
-  const db = getDb();
-  if (!db.prepare('SELECT 1 FROM syncs WHERE id=?').get(id)) throw new HttpError(404, 'Sync not found');
-  const from = group === 'items' ? 'SELECT evidence_json AS j,rowid AS ordinal FROM sync_items WHERE sync_id=?' : 'SELECT value AS j,CAST(json_each.key AS INTEGER) AS ordinal FROM syncs,json_each(context_json) WHERE syncs.id=?';
-  const filter = query ? "WHERE instr(lower(COALESCE(json_extract(j,'$.ref'),'') || ' ' || COALESCE(json_extract(j,'$.session_name'),'') || ' ' || COALESCE(json_extract(j,'$.cwd'),'')),lower(?))>0" : '';
-  const args = query ? [id, query] : [id];
-  const total = (db.prepare(`SELECT count(*) n FROM (${from}) ${filter}`).get(...args) as { n: number }).n;
-  const rows = db.prepare(`SELECT j FROM (${from}) ${filter} ORDER BY ordinal LIMIT ? OFFSET ?`).all(...args, EVIDENCE_PAGE_SIZE, offset) as { j: string }[];
-  // Metadata only. Listing a page must neither open originals nor expose copied text/pointers.
-  const items = rows.map(({ j }) => {
-    const item = JSON.parse(j);
-    return { ref: item.ref, agent: item.agent, role: cleanText(item.role || '', 40), session_name: cleanText(item.session_name || '', 200),
-      cwd: cleanText(item.cwd || '', 500), timestamp: cleanText(item.timestamp || '', 40) };
-  });
-  return { items, total };
-}
 export function evidenceExcerpt(id: number, ref: string, offset: number) {
   const db = getDb();
   const row = db.prepare(`SELECT j FROM (SELECT evidence_json j FROM sync_items WHERE sync_id=?

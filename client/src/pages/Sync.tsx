@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check } from 'lucide-react';
 import * as api from '../api';
 import type { CallReadiness, ConversationState, SyncDetail } from '../types';
-import { CitedText, EvidenceList } from '../components/EvidenceList';
+import { CitedText, SourceInspector } from '../components/EvidenceList';
 import { SummaryTree } from '../components/SummaryTree';
 import { VoiceCall } from '../components/VoiceCall';
 import { TextChat } from '../components/TextChat';
@@ -15,7 +15,6 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
   id: number; chat?: boolean; callIntent: boolean; consumeIntent: () => void; navigate: Navigate; setGuard: (guard: (() => boolean) | null) => void;
 }) {
   const [loadedSync, setSync] = useState<SyncDetail | null>(null);
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [conversation, setConversation] = useState<{ id: number; state: ConversationState } | null>(null);
   // Metadata may arrive before the full snapshot. Retain it independently, and
   // never let an older full response erase an observed terminal idle ending.
@@ -172,9 +171,9 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
         <button className="btn btn-secondary" disabled={voiceActive} onClick={() => { consume(); navigate(`/syncs/${id}/chat`); }}>Open chat</button>
       </section></details>}
       <details className="detail-section"><summary>Decisions &amp; carry-forward{dirty ? ' · unsaved' : ''}</summary><section className="notes-card"><div className="notes-grid"><div><label htmlFor="decisions">Decisions</label><textarea id="decisions" rows={4} maxLength={4000} disabled={!open || disabled} value={decisions} onChange={event => setDecisions(event.target.value)} /></div><div><label htmlFor="carry-forward">Carry into the next sync</label><textarea id="carry-forward" rows={4} maxLength={4000} disabled={!open || disabled} value={carry} onChange={event => setCarry(event.target.value)} /></div></div><p className="small muted">Only these explicitly saved notes are decisions. A call or its automatic recap does not mark anything agreed or reviewed.</p>{open && <button className="btn btn-secondary" disabled={disabled || !dirty} onClick={() => void run('Saving notes…', async () => show(await api.notes(id, decisions, carry)))}>Save notes</button>}</section></details>
-      <details className="detail-section" onToggle={event => { if (event.target === event.currentTarget) setEvidenceOpen(event.currentTarget.open); }}><summary>Evidence &amp; preparation details</summary>
+      <SourceInspector key={`source-${id}`} syncId={id} />
+      <details className="detail-section"><summary>Preparation details</summary>
         <SummaryTree syncId={id} progress={sync.tree} onResume={conversationOpen ? resume : undefined} resumeEnabled={!disabled} onCancel={cancel} />
-        <EvidenceList key={id} syncId={id} active={evidenceOpen} />
       </details>
       {open && <div className="detail-footer"><p className="small muted">Included does not mean reviewed. You can return to this sync at this URL, or start a separate one for new activity.</p><button className="btn btn-ghost" disabled={disabled} onClick={() => {
         if (window.confirm('Discard this sync and release its unreviewed entries? Its history is retained.')) void run('Discarding sync…', async () => show(await api.discard(id)));

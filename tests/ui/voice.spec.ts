@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import fs from 'node:fs';
+import Database from 'better-sqlite3';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { nativePeer } from './native-fixture';
@@ -28,9 +29,8 @@ async function prepare(page: Page) {
   const syncId = result.sync.id;
   expect((await page.request.post(`/api/syncs/${syncId}/briefing`)).status()).toBe(202);
   await expect.poll(async () => (await (await page.request.get(`/api/syncs/${syncId}/progress`)).json()).complete).toBe(true);
-  const sync = await (await page.request.get(`/api/syncs/${syncId}`)).json();
-  const evidence = await (await page.request.get(`/api/syncs/${sync.id}/evidence?q=${encodeURIComponent('/demo/voice-export')}`)).json();
-  const testRef = evidence.items.find((item: any) => item.role === 'toolResult').ref;
+  const db = new Database(path.join(root, 'state/draken.db'), { readonly: true });
+  const { ref: testRef } = db.prepare("SELECT json_extract(evidence_json,'$.ref') ref FROM sync_items WHERE sync_id=? AND json_extract(evidence_json,'$.cwd')='/demo/voice-export' AND json_extract(evidence_json,'$.role')='toolResult' ORDER BY rowid LIMIT 1").get(syncId) as { ref: string }; db.close();
   return { syncId, root, testRef, piLog: () => fs.readFileSync(path.join(root, 'pi-calls.jsonl'), 'utf8') };
 }
 async function pendingHistory(page: Page, root: string) {

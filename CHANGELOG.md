@@ -5,7 +5,7 @@
 ### Small sync responses and scoped prepared chat
 
 - Opening a sync, starting chat and mutation/retry responses never transfer the frozen evidence archive. Briefings, conversations, notes, counts and progress remain available without loading original source bodies.
-- Explicit evidence browsing lists 25 metadata records per page; citation clicks read only the selected frozen original in 4,000-character pages, with current source permissions and original-byte verification. Missing originals remain visible as unavailable; no cached text substitution.
+- Remove bulk evidence browsing; citation clicks read only the selected frozen original in 4,000-character pages, with current source permissions and original-byte verification. Missing originals remain visible as unavailable; no cached text substitution.
 - Prior recaps, note updates and discard checks use metadata rather than repeatedly hydrating whole snapshots. Initial briefing preparation still needs work; this is not an instant-start guarantee.
 
 - Prepared text chat uses the saved briefing, conversation and prepared search; it no longer rebuilds the summary tree or repeatedly reads/verifies the full snapshot and archive receipt.

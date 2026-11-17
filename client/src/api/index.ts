@@ -36,7 +36,6 @@ export const scan = () => request<ScanResult>('/scan', 'POST');
 export const enableAgent = (agent: string, enabled: boolean) => request<Overview>(`/agents/${encodeURIComponent(agent)}`, 'PATCH', { enabled });
 export const include = (id: string, included: boolean) => request<Overview>(`/sessions/${encodeURIComponent(id)}`, 'PATCH', { included });
 export const sync = (id: number) => request<SyncDetail>(`/syncs/${id}`);
-export const evidencePage = (id: number, group: string, offset: number, q: string, signal?: AbortSignal) => request<{ items: Pick<Evidence, 'ref' | 'agent' | 'role' | 'session_name' | 'cwd' | 'timestamp'>[]; total: number }>(`/syncs/${id}/evidence?${new URLSearchParams({ group, offset: String(offset), q })}`, 'GET', undefined, signal);
 export const evidenceExcerpt = (id: number, ref: string, offset: number, signal?: AbortSignal) => request<{ item: Evidence; total: number; offset: number }>(`/syncs/${id}/evidence?${new URLSearchParams({ ref, offset: String(offset) })}`, 'GET', undefined, signal);
 export const conversationStatus = (id: number, signal?: AbortSignal) => request<ConversationState>(`/syncs/${id}/conversation`, 'GET', undefined, signal);
 export const progress = (id: number) => request<TreeProgress>(`/syncs/${id}/progress`);

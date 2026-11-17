@@ -6,7 +6,7 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { EvidenceReader } = require('../dist/db/evidence');
 const { frozenEvidence } = require('./fixtures/source-entry.cjs');
 
-test('48 MB of frozen originals never enter sync responses; evidence browsing and reads are bounded and permission checked', async t => {
+test('48 MB of frozen originals never enter sync responses; citation reads are bounded and permission checked', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-evidence-http-'));
   t.after(() => { closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
   process.env.DRAKEN_DATA_DIR = root; process.env.DRAKEN_PI_SESSIONS_DIR = path.join(root, 'sessions');
@@ -38,13 +38,7 @@ test('48 MB of frozen originals never enter sync responses; evidence browsing an
       assert.ok(Buffer.byteLength(wire) < 20_000); assert.equal(body.item_count, 8000);
       assert.deepEqual(body.items, []); assert.deepEqual(body.context, []); assert.equal(reads, 0);
     }
-    const page = await json(base + '/evidence'); assert.equal(page.items.length, 25); assert.equal(page.total, 8000);
-    assert.ok(page.items.every(item => !('text' in item) && !('source_pointer' in item)));
-    const next = await json(base + '/evidence?offset=25'); assert.equal(next.items.length, 25);
-    assert.ok(next.items.every(item => !page.items.some(old => old.ref === item.ref)));
-    assert.equal((await json(base + '/evidence?offset=7990')).items.length, 10);
-    assert.equal((await json(base + '/evidence?group=context')).total, 1);
-    assert.equal((await json(base + '/evidence?q=E8000')).total, 1); assert.equal(reads, 0);
+    assert.equal((await fetch(base + '/evidence')).status, 400, 'there is no bulk listing endpoint');
     const retry = await fetch(base.replace(`/syncs/${id}`, '/syncs/start-chat'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: requestId }) });
     assert.equal(retry.status, 202); assert.deepEqual((await retry.json()).sync.items, []); assert.equal(reads, 0);
     for (const ref of ['E1', 'C1']) {
@@ -55,7 +49,7 @@ test('48 MB of frozen originals never enter sync responses; evidence browsing an
     assert.equal(reads, 2);
     assert.equal((await json(base + '/evidence?ref=E1&offset=4000')).item.text, sourceText.slice(4000, 8000));
     assert.equal(reads, 3); assert.equal(db.prepare('SELECT total_changes() n').get().n, changes);
-    for (const query of ['offset=-1', 'offset=NaN', 'offset=1.5', 'offset=10000001', 'group=all', 'ref=E1,E2', 'ref=../../x', 'q=' + 'x'.repeat(201)]) {
+    for (const query of ['ref=E1&offset=-1', 'ref=E1&offset=NaN', 'ref=E1&offset=1.5', 'ref=E1&offset=10000001', 'ref=E1,E2', 'ref=../../x']) {
       assert.equal((await fetch(base + '/evidence?' + query)).status, 400);
     }
     assert.equal((await fetch(base + '/evidence?ref=E99999')).status, 404); assert.equal(reads, 3);

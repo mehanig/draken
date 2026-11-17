@@ -24,44 +24,19 @@ export function SnapshotSource({ syncId, reference }: { syncId: number; referenc
   </article>;
 }
 
-export function EvidenceList({ syncId, active }: { syncId: number; active: boolean }) {
-  const root = useRef<HTMLElement>(null);
-  const [group, setGroup] = useState('items'), [offset, setOffset] = useState(0), [query, setQuery] = useState('');
-  const [selection, setSelection] = useState({ ref: '', revision: 0 });
-  const [page, setPage] = useState<Awaited<ReturnType<typeof api.evidencePage>> | null>(null);
-  const [error, setError] = useState('');
-  const select = (ref: string) => setSelection(old => ({ ref, revision: old.revision + 1 }));
+export function SourceInspector({ syncId }: { syncId: number }) {
+  const root = useRef<HTMLDetailsElement>(null), [reference, setReference] = useState('');
   useEffect(() => {
     const reveal = (event: Event) => {
-      select((event as CustomEvent<string>).detail);
-      const details = root.current?.closest('details');
-      if (details) details.open = true;
-      root.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setReference((event as CustomEvent<string>).detail);
+      if (root.current) { root.current.open = true; root.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     };
     window.addEventListener('draken:evidence', reveal);
     return () => window.removeEventListener('draken:evidence', reveal);
   }, []);
-  useEffect(() => {
-    if (!active || selection.ref) return;
-    const controller = new AbortController(); setError(''); setPage(null);
-    void api.evidencePage(syncId, group, offset, query, controller.signal).then(value => { if (!controller.signal.aborted) setPage(value); }).catch(error => { if (!controller.signal.aborted) setError(error.message); });
-    return () => controller.abort();
-  }, [active, syncId, group, offset, query, selection.ref]);
-  return <section ref={root} className="evidence-section" aria-label="Snapshot evidence">
-    <h3>Snapshot evidence</h3>
-    {selection.ref ? <>
-      <button className="btn btn-secondary" onClick={() => select('')}>Back to evidence list</button>
-      {active && <SnapshotSource key={selection.revision} syncId={syncId} reference={selection.ref} />}
-    </> : <>
-      {error && <p role="alert">{error}</p>}
-      <div className="evidence-controls"><select className="input" aria-label="Evidence group" value={group} onChange={event => { setPage(null); setGroup(event.target.value); setOffset(0); }}><option value="items">New evidence in this snapshot</option><option value="context">Earlier context — not new progress</option></select>
-        <input className="input" aria-label="Filter evidence metadata" placeholder="Find a workspace, session, or evidence ID…" maxLength={200} value={query} onChange={event => { setPage(null); setQuery(event.target.value); setOffset(0); }} /></div>
-      {!page && !error && active && <p role="status">Loading evidence list…</p>}
-      {page && <><div className="pagination"><button className="btn btn-secondary" disabled={!offset} onClick={() => { setPage(null); setOffset(Math.max(0, offset - 25)); }}>Previous</button><span>{Math.floor(offset / 25) + 1} / {Math.max(1, Math.ceil(page.total / 25))} · {page.total} entries</span><button className="btn btn-secondary" disabled={offset + 25 >= page.total} onClick={() => { setPage(null); setOffset(offset + 25); }}>Next</button></div>
-        <div className="evidence-list">{page.items.map(item => <button className="btn btn-secondary" key={item.ref} onClick={() => select(item.ref)} aria-label={`Read evidence ${item.ref}`}><span className="reference">{item.ref}</span> {item.session_name || item.cwd} · {item.role}</button>)}</div>
-      </>}
-    </>}
-  </section>;
+  return <details ref={root} className="detail-section"><summary>Cited source</summary>
+    {reference ? <SnapshotSource key={reference} syncId={syncId} reference={reference} /> : <p>Click a citation to inspect its original source.</p>}
+  </details>;
 }
 
 export function CitedText({ text }: { text: string }) {

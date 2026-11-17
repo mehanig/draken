@@ -5,7 +5,7 @@ import { getDb } from '../db/schema';
 import { getDataDir } from '../data-dir';
 import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
-import { evidencePage, evidenceExcerpt, completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
+import { evidenceExcerpt, completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
 import { autoIndexSettings, setAutoIndex, setAutoSummary, yieldBackgroundIndexing } from '../sync/background';
 import { callReadiness, prepareCall } from '../sync/preparation';
@@ -96,14 +96,8 @@ router.get('/syncs/:id', route((req, res) => res.json(getSync(id(req), false))))
 router.get('/syncs/:id/evidence', route((req, res) => {
   const offset = Number(req.query.offset ?? 0);
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10_000_000) throw new HttpError(400, 'Invalid evidence offset');
-  if (req.query.ref !== undefined) {
-    if (typeof req.query.ref !== 'string' || !/^[EC]\d{1,10}$/.test(req.query.ref)) throw new HttpError(400, 'Invalid snapshot reference');
-    res.json(evidenceExcerpt(id(req), req.query.ref, offset));
-  } else {
-    const group = req.query.group ?? 'items';
-    if (group !== 'items' && group !== 'context') throw new HttpError(400, 'Invalid evidence group');
-    res.json(evidencePage(id(req), group, offset, text(req.query.q ?? '', 'Evidence filter', 200)));
-  }
+  if (typeof req.query.ref !== 'string' || !/^[EC]\d{1,10}$/.test(req.query.ref)) throw new HttpError(400, 'A snapshot reference is required');
+  res.json(evidenceExcerpt(id(req), req.query.ref, offset));
 }));
 router.get('/syncs/:id/conversation', route((req, res) => res.json(conversationStatus(id(req)))));
 router.get('/syncs/:id/progress', route((req, res) => res.json(getProgress(id(req)))));

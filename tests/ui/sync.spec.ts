@@ -100,11 +100,12 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
   await microphone(page);const { sessions,control }=await fixtures(page);addActivity(sessions);fs.writeFileSync(control,JSON.stringify({delay:20}));
   const {sync}=await(await page.request.post('/api/syncs/start-call',{data:{request_id:randomUUID()}})).json();
   await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).run?.status,{timeout:30000}).toBe('completed');
-  const original=await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=E1`)).json(),file=original.item.source_path;
+  const { briefing }=await(await page.request.get(`/api/syncs/${sync.id}`)).json(),reference=briefing.match(/\[([EC]\d+)\]/)[1];
+  const original=await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=${reference}`)).json(),file=original.item.source_path;
   expect(path.dirname(file)).toBe(sessions);fs.renameSync(file,file+'.hidden');
   try {
     await page.goto(`/syncs/${sync.id}`);await expect(page.getByRole('heading',{name:`Sync #${sync.id}`,exact:true})).toBeVisible();
-    await page.getByText('Evidence & preparation details',{exact:true}).click();await page.getByRole('button',{name:'Read evidence E1',exact:true}).click();
+    await page.getByRole('button',{name:`Inspect evidence ${reference}`,exact:true}).first().click();
     await expect(page.locator('.evidence-body').filter({hasText:'Draken does not keep a text copy'})).toBeVisible();
     await page.getByText('Decisions & carry-forward',{exact:true}).click();await page.getByLabel('Decisions',{exact:true}).fill('Explicit note while source is offline.');await page.getByRole('button',{name:'Save notes',exact:true}).click();
     await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${sync.id}`)).json()).decisions).toBe('Explicit note while source is offline.');
@@ -116,7 +117,7 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
   // The exact captured file was restored, not replaced or rewritten. Its
   // verified receipt can be reused without another preparation or capture.
   await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});await expect(page.getByRole('alert')).not.toBeVisible();
-  expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=E1`)).json()).item).toEqual(original.item);
+  expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=${reference}`)).json()).item).toEqual(original.item);
 });
 
 test('settings persist local-only indexing without sync creation, browser capture or automatic review', async ({ page }) => {
@@ -173,14 +174,14 @@ test('Luna batch preparation exposes qualified timing without starting a call or
       message: { role: 'assistant', content: [{ type: 'text', text: index === 599 ? 'LATEST: implementation reported; deployment NOT checked.' : `Earlier plan ${index}. ${'x'.repeat(900)}` }] } })),
   ].map(JSON.stringify).join('\n') + '\n');
   const { sync } = await (await page.request.post('/api/syncs/start-call', { data: { request_id: randomUUID() } })).json();
-  expect((await (await page.request.get(`/api/syncs/${sync.id}/evidence?q=${encodeURIComponent('/synthetic/batch-ui')}`)).json()).total).toBe(600);
+  expect(sync.item_count).toBeGreaterThanOrEqual(600);
   await expect.poll(async () => (await (await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).run?.status, { timeout: 30000 }).toBe('completed');
   expect((await page.request.patch(`/api/syncs/${sync.id}/models`, { data: { summary: 'openai/gpt-6-luna', final: 'openai/gpt-6-astra', max_invocations: 120 } })).ok()).toBe(true);
   expect((await page.request.post(`/api/syncs/${sync.id}/briefing`)).status()).toBe(202);
   await expect.poll(async () => (await (await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).run?.status, { timeout: 15000 }).toBe('completed');
   const ready = await (await page.request.get(`/api/syncs/${sync.id}`)).json();
   expect(ready.tree.run.processed_entries).toBe(ready.item_count); expect(ready.tree.run.metrics.length).toBeGreaterThan(1);
-  await page.goto(`/syncs/${sync.id}`); await page.getByText('Evidence & preparation details', { exact: true }).click();
+  await page.goto(`/syncs/${sync.id}`); await page.getByText('Preparation details', { exact: true }).click();
   await page.getByText('Model request timing', { exact: true }).click();
   await expect(page.locator('.tree-card')).toContainText('not billed usage');
   await expect(page.locator('.tree-card')).toContainText(`${ready.item_count} / ${ready.item_count} entries processed`);
