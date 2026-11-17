@@ -29,11 +29,30 @@ test('summary consent HTTP rejects malformed and cross-origin writes, persists s
   assert.equal((await (await patch({ enabled: true })).json()).enabled, true);
   await background.stopBackgroundIndexing(); closeDb();
   assert.equal((await (await fetch(url)).json()).enabled, true, 'explicit paid preference survives restart');
-  background.setAutoIndex(false); assert.equal((await (await fetch(url)).json()).status, 'paused');
+  background.setAutoIndex(false); assert.equal((await (await fetch(url)).json()).status, 'off');
   assert.equal((await (await patch({ enabled: false })).json()).enabled, false, 'opt-out works while indexing is off');
   for (const table of ['background_runs', 'summary_cache', 'agent_sessions', 'syncs', 'sync_items', 'sync_runs', 'sync_messages', 'sync_coverage']) {
     assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, table);
   }
+});
+
+test('combined consent enables both stages and retries explicitly; old tabs cannot grant new paid consent', async () => {
+  url = url.replace('auto-summary', 'auto-index'); background.setAutoSummary(false);
+  let state = await (await patch({ enabled: true })).json();
+  assert.equal(state.enabled, true); assert.equal(state.summary.enabled, false);
+  assert.equal((await patch({ enabled: true, summaries: 'true' })).status, 400);
+  assert.equal((await patch({ enabled: true, summaries: true }, { Origin: 'https://other.invalid' })).status, 403);
+  state = await (await patch({ enabled: true, summaries: true })).json();
+  assert.equal(state.enabled, true); assert.equal(state.summary.enabled, true);
+  getDb().prepare("INSERT OR REPLACE INTO sync_settings(key,value) VALUES ('auto_summary_error','Saved paid failure')").run();
+  state = await (await patch({ enabled: true })).json();
+  assert.equal(state.phase, 'error'); assert.equal(state.error, 'Saved paid failure');
+  state = await (await patch({ enabled: true, summaries: true })).json();
+  assert.equal(state.summary.error, ''); assert.equal(state.error, '');
+  state = await (await patch({ enabled: false, summaries: true })).json();
+  assert.equal(state.enabled, false); assert.equal(state.summary.enabled, false);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM background_runs').get().n, 0);
+  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM syncs').get().n, 0);
 });
 
 test('summary progress GET reads historical accounting only, never opens originals to claim live readiness', async () => {

@@ -2,21 +2,22 @@ import { useEffect, useState } from 'react';
 import { autoIndexSettings } from '../api';
 import type { AutoIndexSettings } from '../types';
 import { HistoryProgress } from './HistoryProgress';
-import { SummaryPreparation } from './SummaryPreparation';
 
 export function AutomaticProgress({ settings }: { settings: AutoIndexSettings }) {
   const phase = {
-    off: 'Automatic indexing is off.',
-    waiting: 'Waiting for the next indexing batch.',
+    off: 'Automatic preparation is off.',
+    waiting: 'Waiting for the next preparation batch.',
     scanning: 'Checking history for changes…', indexing: 'Indexing searchable history…',
     summarizing: 'Preparing reusable summary cache…',
     paused: 'Paused for your conversation or foreground work.',
-    stopping: 'Stopping automatic indexing…', error: 'Automatic indexing needs attention.',
+    stopping: 'Stopping automatic preparation…', error: 'Automatic preparation needs attention.',
   }[settings.phase];
-  return <section className="history-progress" aria-label="Automatic indexing">
+  return <section className="history-progress" aria-label="Automatic preparation">
     <p role="status"><strong>{phase}</strong></p>
     {settings.enabled && <>
       <p className="small muted">{settings.pending_records.toLocaleString()} source changes waiting for local indexing. {settings.last_completed_at && `Last completed indexing batch: ${new Date(settings.last_completed_at).toLocaleString()}.`}</p>
+      {!settings.summary_enabled && <p role="status">Indexing only: summary preparation is off. Enable automatic preparation in Settings to run both.</p>}
+      {settings.summary?.last_completed_at && <p className="small muted">Last successful summary pass: {settings.summary.prepared_entries.toLocaleString()} entries, {new Date(settings.summary.last_completed_at).toLocaleString()}. Later changes may still need preparation.</p>}
       <p className="small muted">History accumulates without creating snapshots or briefings.</p>
     </>}
     {settings.error && <p role="alert">{settings.error}</p>}
@@ -33,7 +34,6 @@ export function AutomaticPreparation() {
     void poll(); const timer = setInterval(() => void poll(), 4000);
     return () => { alive = false; clearInterval(timer); };
   }, []);
-  if (error) return <p role="status" className="small muted">Automatic indexing status is temporarily unavailable.</p>;
-  return settings?.enabled ? <><AutomaticProgress settings={settings} />
-    {settings.summary_enabled && <SummaryPreparation active indexing={settings.enabled} />}</> : null;
+  if (error) return <p role="status" className="small muted">Automatic preparation status is temporarily unavailable.</p>;
+  return settings?.enabled ? <AutomaticProgress settings={settings} /> : null;
 }

@@ -9,7 +9,7 @@ import { historyProgress, historyReadiness, prepareHistory } from '../memory/ser
 import { expireConversations } from './conversation';
 import { registerUpdateStatus } from './update-status';
 import type { AutoIndexSettings } from '../types';
-import { cancelSummaryPreparation, configureAutoSummary, summaryPreparationEnabled, summaryPreparationSettings, warmSummaryCache } from './summary-preparation';
+import { cancelSummaryPreparation, configureAutoSummary, summaryPreparationSettings, warmSummaryCache } from './summary-preparation';
 
 const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 1;
 type State = Pick<AutoIndexSettings, 'phase' | 'pending_records' | 'last_completed_at' | 'error'>;
@@ -78,17 +78,15 @@ class AutoIndexer {
       if (signal.aborted || !this.ops.enabled()) return;
       if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
       this.state.phase = 'waiting';
-      // Summary backlog is independent of the embedding checkpoint. Its helper
-      // owns durable failure/retry state; provider failures never roll back or
-      // misreport successful local indexing.
-      try { await this.ops.prepareSummaries?.(signal); } catch { /* separate paid-work failure domain */ }
+      // Paid failures retain their durable retry block and completed local work.
+      await this.ops.prepareSummaries?.(signal);
       if (!signal.aborted) this.state.phase = 'waiting';
     } catch (error) {
       if (!signal.aborted && error instanceof HttpError && error.status === 409) {
         this.state.phase = 'paused'; this.retryAt = this.ops.now() + CHECK_MS;
       } else if (!signal.aborted) {
         this.state.phase = 'error';
-        this.state.error = 'Automatic indexing could not finish. Check session sources and local model availability. Completed work is retained; indexing retries in five minutes.';
+        this.state.error = 'Background preparation could not finish. Check session sources, storage and local model availability. Completed work is retained; local preparation retries in five minutes.';
         this.retryAt = this.ops.now() + RETRY_MS;
       }
     } finally {
@@ -125,15 +123,20 @@ export async function stopBackgroundIndexing() {
 }
 export async function yieldBackgroundIndexing() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }
 export function autoIndexSettings(): AutoIndexSettings {
-  const on = enabled();
+  const on = enabled(), summary = summaryPreparationSettings();
+  const failure = on && summary.enabled && summary.error;
   const last = getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_last_completed'").get() as { value: string } | undefined;
-  return { enabled: on, summary_enabled: summaryPreparationEnabled(), check_seconds: CHECK_MS / 1000, batch_records: BATCH, pending_entries: availableCount(),
+  return { enabled: on, summary_enabled: summary.enabled, summary, check_seconds: CHECK_MS / 1000, batch_records: BATCH, pending_entries: availableCount(),
     ...(worker?.state || initial()), last_completed_at: worker?.state.last_completed_at || last?.value || null, ...(!on && worker?.state.phase !== 'stopping' ? { phase: 'off' as const }
-      : on && (!worker || worker.state.phase === 'off') ? { phase: 'waiting' as const } : {}) };
+      : on && (!worker || worker.state.phase === 'off') ? { phase: 'waiting' as const } : {}),
+    ...(failure ? { phase: 'error' as const, error: failure } : {}) };
 }
-export function setAutoIndex(value: unknown): AutoIndexSettings {
+export function setAutoIndex(value: unknown, withSummaries = true): AutoIndexSettings {
   if (typeof value !== 'boolean') throw new HttpError(400, 'enabled must be a boolean');
-  getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_index',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(value));
+  getDb().transaction(() => {
+    getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('auto_index',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(value));
+    if (withSummaries) configureAutoSummary(value);
+  })();
   startBackgroundIndexing();
   if (!value) { worker!.pause(); void cancelSummaryPreparation(); } else worker!.retry();
   return autoIndexSettings();

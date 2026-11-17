@@ -300,7 +300,7 @@ export function configureModels(id: number, models: SyncModels): SyncDetail {
     if (sync.models.summary !== models.summary || sync.models.final !== models.final) archiveBriefing(sync, 'model selection changed');
     getDb().prepare('UPDATE syncs SET model_config_json = ? WHERE id = ?').run(JSON.stringify(models), id);
   })();
-  return getSync(id);
+  return getSync(id, false);
 }
 
 export function getTreeNode(id: number, key: string) {

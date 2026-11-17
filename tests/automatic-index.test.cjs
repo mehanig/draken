@@ -82,10 +82,10 @@ test('cancellation preserves the last successful baseline; retry is bounded and 
 });
 test('summary backlog is independent of local embedding changes and paid failures do not erase local progress',async()=>{
  const f=fixture(1);let summaries=0;f.ops.prepareSummaries=async()=>{summaries++;throw Error('PRIVATE_PROVIDER_FAILURE');};
- await f.worker.tick();assert.equal(summaries,1);assert.equal(f.prepares,1);assert.equal(f.worker.state.phase,'waiting');assert.equal(f.worker.state.error,'');
- for(let n=1;n<64;n++)f.rows.set(String(n),'v1');await f.worker.tick();assert.equal(f.prepares,2);assert.equal(summaries,2);assert.equal(f.worker.state.pending_records,0);assert.ok(f.worker.state.last_completed_at);
+ await f.worker.tick();assert.equal(summaries,1);assert.equal(f.prepares,1);assert.equal(f.worker.state.phase,'error');assert.doesNotMatch(f.worker.state.error,/PRIVATE/);
+ f.now=300000;for(let n=1;n<64;n++)f.rows.set(String(n),'v1');await f.worker.tick();assert.equal(f.prepares,2);assert.equal(summaries,2);assert.equal(f.worker.state.pending_records,0);assert.ok(f.worker.state.last_completed_at);
  f.idle=false;await f.worker.tick();assert.equal(summaries,2);f.idle=true;
- f.ops.prepare=async()=>{f.idle=false;};for(let n=0;n<64;n++)f.rows.set(String(n),'v2');await f.worker.tick();assert.equal(summaries,2,'idle admission rechecked after indexing');
+ f.now=600000;f.ops.prepare=async()=>{f.idle=false;};for(let n=0;n<64;n++)f.rows.set(String(n),'v2');await f.worker.tick();assert.equal(summaries,2,'idle admission rechecked after indexing');
 });
 test('a single owner drains summary work and cancellation cannot be undone by rapid enable',async()=>{
  const f=fixture(0);let signal,release,done=false,calls=0;

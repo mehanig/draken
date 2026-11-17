@@ -111,18 +111,16 @@ export async function generateReply(id: number, question?: string, requestId?: s
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand this legacy partial snapshot before generating a new briefing. Your notes and previous discussion are preserved.');
   if (!question && sync.briefing) return options.deferHistory || sync.conversation.history_before ? sync : prepareCallAndWait(id);
   if (question && (!sync.briefing || !sync.tree.complete || !sync.conversation.history_before)) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
-  if (!question) sync = configureModels(id, sync.models);
+  if (!question) configureModels(id, sync.models);
   const db = getDb(), controller = new AbortController();
   const release = activity.beginJob(id, controller);
   const abort = () => controller.abort();
   options.signal?.addEventListener('abort', abort, { once: true });
   let runId = 0, currentUserId = -1, historyBefore: string | null = null;
-  const verifiedSnapshot = () => {
+  const checkOpen = () => {
     controller.signal.throwIfAborted();
-    if (question) { assertConversationActive(id); return sync; }
-    const fresh = requireOpen(id, true);
-    assertEvidenceAvailable(fresh);
-    return fresh;
+    assertConversationActive(id);
+    requireOpen(id, true, false);
   };
   try {
     runId = db.transaction(() => {
@@ -159,11 +157,10 @@ export async function generateReply(id: number, question?: string, requestId?: s
           if (recapHash(recapInput(getSync(prior.sync_id, false)), sync.models.summary) === recapHash(prior, sync.models.summary)) saveRecap(prior, sync.models.summary, recap);
         }
         db.prepare('UPDATE syncs SET memory_json=? WHERE id=?').run(JSON.stringify(memory), id);
-        sync = getSync(id);
+        sync.memory = memory;
       }
     }
     const roots = question ? [] : await tree.build();
-    sync = verifiedSnapshot();
     if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Searching earlier history', runId);
     const query = question ? discussionHistory(sync, question, currentUserId) : undefined;
     let archive: Awaited<ReturnType<typeof historyContext>> | undefined;
@@ -182,8 +179,8 @@ export async function generateReply(id: number, question?: string, requestId?: s
           limitations: 'Prepared historical evidence is temporarily unavailable or updating. No archive search results are supplied for this answer. Use only the frozen snapshot and supplied conversation; do not claim newly arrived history was searched or that missing records prove absence.' }), refs: [] };
       }
     }
-    // Chat checks lifecycle only; retrieval verifies the originals it supplies.
-    sync = verifiedSnapshot();
+    // Tree admission/commit checks verify originals; lifecycle checks need no bodies.
+    checkOpen();
     const requested = [...new Set(question?.match(/\b[EC]\d+\b/g) || [])].slice(0, 3);
     if (requested.length) {
       sync = getSync(id, requested);
@@ -201,30 +198,28 @@ export async function generateReply(id: number, question?: string, requestId?: s
       reference_labels: references.labels };
     const prompt = `${systemPrompt}\n${question ? chatStyle : briefingStyle}`;
     if (!question) await tree.beforeFinal();
-    verifiedSnapshot();
+    checkOpen();
     let draft = cleanText(await tree.call(payload, prompt, true), 60000);
-    if (!question) tree.verifyFinal();
-    verifiedSnapshot();
+    checkOpen();
     let answer = references.decode(draft);
     const issue = verdictReferenceIssue(answer, input.allowedRefs);
     if (issue) {
       controller.signal.throwIfAborted();
       db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Checking evidence references', runId);
       if (!question) await tree.beforeFinal();
-      verifiedSnapshot();
+      checkOpen();
       draft = cleanText(await tree.call({ ...payload, repair: true, citation_repair: {
         instruction: 'Correct citation labels using only reference_labels, exactly as supplied. Keep the same response style and user-requested level of detail. Return only the corrected answer.',
         citation_issue: issue, draft,
       } }, prompt, true), 60000);
-      if (!question) tree.verifyFinal();
-      verifiedSnapshot();
+      checkOpen();
       answer = references.decode(draft);
     }
     validateVerdict(answer, input.allowedRefs);
     if (controller.signal.aborted) throw new HttpError(409, 'Generation cancelled');
     db.transaction(() => {
       if (!question) tree.verifyFinal();
-      verifiedSnapshot();
+      checkOpen();
       invalidateRecap(id);
       if (question) {
         const insert = db.prepare('INSERT INTO sync_messages(sync_id, role, content, created_at) VALUES (?, ?, ?, ?)');

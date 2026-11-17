@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test('Home shows accumulated local history without automatic sync links, summaries or capture', async ({ page }) => {
   test.setTimeout(60_000);
-  let state = { enabled: true, check_seconds: 60, batch_records: 64, phase: 'indexing', pending_records: 64, pending_entries: 64, last_completed_at: null as string | null, error: '' };
+  let state = { enabled: true, summary_enabled: true, check_seconds: 60, batch_records: 64, phase: 'indexing', pending_records: 64, pending_entries: 64, last_completed_at: null as string | null, error: '' };
   let unavailable = false, mutations = 0;
   const home = await (await page.request.get('/api/home')).json();
   page.on('request', req => { if (new URL(req.url()).pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method())) mutations++; });
@@ -14,7 +14,7 @@ test('Home shows accumulated local history without automatic sync links, summari
   await page.route('**/api/settings/auto-index', route => unavailable ? route.abort() : route.fulfill({ json: state }));
   await page.route('**/api/memory/progress', route => route.fulfill({ json: { active: true, background: true, queued: 0, elapsed_ms: 2000, updated_at: Date.now(), work: { stage: 'indexing', completed: 30, total: 64, reused: 128, remaining_seconds: 3, parallelism: { workers: 2, threads: 6 } } } }));
   await page.goto('/');
-  const progress = page.getByRole('region', { name: 'Automatic indexing', exact: true });
+  const progress = page.getByRole('region', { name: 'Automatic preparation', exact: true });
   const history = page.getByRole('region', { name: 'Sync history' });
   await expect(progress).toBeVisible(); await expect(progress).toContainText('Indexing searchable history');
   await expect(progress.getByRole('progressbar', { name: 'History indexing' })).toHaveAttribute('value', '30');
@@ -29,7 +29,7 @@ test('Home shows accumulated local history without automatic sync links, summari
   for (const entries of [64, 128, 131]) {
     state = { ...state, phase: 'waiting', pending_records: entries === 131 ? 3 : 0, pending_entries: entries, last_completed_at: new Date().toISOString() };
     await expect(page.getByLabel('New activity')).toContainText(`${entries} new entries to prepare`, { timeout: 8000 });
-    await expect(progress).toContainText('Waiting for the next indexing batch', { timeout: 8000 });
+    await expect(progress).toContainText('Waiting for the next preparation batch', { timeout: 8000 });
     await expect(progress).toContainText('Last completed indexing batch:');
     await expect(page.getByLabel('Sync tracking')).toContainText(`${entries} available for a new sync`, { timeout: 8000 });
     await expect(progress.getByRole('link')).toHaveCount(0);
@@ -47,12 +47,12 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(progress).not.toContainText('entries available for your next sync');
   await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
-  await expect(dialog.getByRole('switch', { name: /Automatically index history/ })).toBeChecked();
-  await expect(dialog.getByRole('button', { name: 'Retry automatic indexing' })).toBeVisible();
-  await expect(dialog).toContainText('Indexing makes no provider model calls');
+  await expect(dialog.getByRole('switch', { name: /Automatically prepare history/ })).toBeChecked();
+  await expect(dialog.getByRole('button', { name: 'Retry automatic preparation' })).toBeVisible();
+  await expect(dialog).toContainText('quota or API billing');
   await expect(dialog).toContainText('Local embeddings use CPU, memory and disk');
-  await expect(dialog).toContainText('Replies, voice turns and foreground work take priority');
+  await expect(dialog).toContainText('Foreground work takes priority');
   await page.keyboard.press('Escape');
-  unavailable = true; await expect(page.getByRole('status').filter({ hasText: 'Automatic indexing status is temporarily unavailable' })).toBeVisible({ timeout: 8000 });
+  unavailable = true; await expect(page.getByRole('status').filter({ hasText: 'Automatic preparation status is temporarily unavailable' })).toBeVisible({ timeout: 8000 });
   expect(mutations).toBe(0); expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
 });
