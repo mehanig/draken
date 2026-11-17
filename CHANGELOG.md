@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.4
+
+### Keep UI status polling from blocking preparation
+
+- Conversation and chat-readiness status reads report the recorded preparation checkpoint and scheduler progress instead of recomputing full-history readiness fingerprints. Full verification remains at actual preparation, history adoption and use boundaries.
+- During initial foreground preparation, show preparing rather than advertising new information before the conversation has its prepared cutoff.
+- No new worker, database copy, schema, endpoint or timer cache. Preserve source validation, existing histories, cached summaries, embedding bytes and explicit review behavior.
+- This release does **not** fix the separate `Compact final input` / compact-final-budget failure. Recorded progress is not a guarantee of successful briefing preparation or current evidence validity.
+
 ## 0.8.3
 
 ### Prepare summaries and embeddings ahead by default
