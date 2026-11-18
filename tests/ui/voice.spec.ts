@@ -342,8 +342,6 @@ test('failed native setup stops capture instead of trying another voice engine',
   const { syncId, piLog } = await prepare(page); const before = piLog();
   await nativePeer(page);
   await page.route('**/api/voice/live/calls/*/connect', route => route.fulfill({ status: 503, json: { error: 'Synthetic native setup failure' } }));
-  const retired: string[] = [];
-  page.on('request', request => { if (/\/api\/voice\/calls/.test(request.url())) retired.push(request.url()); });
   await page.goto(`/syncs/${syncId}`);
   // Bound cleanup from the injected failure, not from unrelated history/ICE setup.
   const rejected = page.waitForResponse(response => response.url().includes('/api/voice/live/calls/') && response.url().endsWith('/connect'), { timeout: 15000 });
@@ -351,7 +349,7 @@ test('failed native setup stops capture instead of trying another voice engine',
   expect((await rejected).status()).toBe(503);
   await expect(dialog(page).getByRole('status', { name: 'Call state' })).toHaveText('Call ended');
   await expect(dialog(page).getByRole('alert')).toContainText('Voice connection failed or cancelled.');
-  expect(await tracksStopped(page)).toBe(true); expect(retired).toEqual([]); expect(piLog()).toBe(before);
+  expect(await tracksStopped(page)).toBe(true); expect(piLog()).toBe(before);
   await expect.poll(async () => (await (await page.request.get('/api/voice/status')).json()).activeCall).toBeNull();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
 });

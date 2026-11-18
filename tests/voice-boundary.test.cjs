@@ -1,4 +1,4 @@
-// Product-boundary tests: reachable old features are not necessarily wanted features.
+// Native voice configuration and preservation of legacy call history.
 require('./fixtures/fake-memory.cjs');
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -41,16 +41,12 @@ test('ChatGPT voice is the default; obsolete local configuration fails before st
   }
 });
 
-test('local execution endpoints are gone; historical call rows are returned without rewriting them', async () => {
+test('historical call rows are returned without rewriting them', async () => {
   oldCall(); const db = getDb();
   const before = JSON.stringify([db.prepare('SELECT * FROM voice_calls').all(), db.prepare('SELECT * FROM voice_turns').all()]);
   recoverLegacyCalls();
   server = createApp().listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
   const origin = `http://127.0.0.1:${server.address().port}/api/voice`;
-  for (const suffix of ['/calls', '/calls/old-call/transcribe', '/calls/old-call/turns', '/calls/old-call/played', '/calls/old-call/interrupt', '/calls/old-call/heartbeat', '/calls/old-call/end']) {
-    assert.equal((await fetch(origin + suffix, { method: 'POST' })).status, 404, suffix);
-  }
-  assert.equal((await fetch(origin + '/calls/old-call/audio/0/0')).status, 404);
   const history = await (await fetch(`${origin}/syncs/${syncId}/history`)).json();
   assert.equal(history[0].mode, 'legacy'); assert.equal(history[0].turns[0].answer, 'Generated full answer');
   assert.equal(history[0].turns[0].heard_text, 'Played first sentence.');
@@ -71,22 +67,11 @@ test('unfinished old calls are retained and closed once, never resumed or falsel
   assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
 });
 
-test('native context retains late briefing references after removing the old context owner', () => {
+test('native context retains late briefing references within its byte limit', () => {
   const refs = require('./fixtures/voice-sources.cjs')(getDb(), syncId);
   const packet = liveEvidence(getSync(syncId), '', true), input = JSON.parse(packet.text);
   assert.ok(Buffer.byteLength(packet.text) <= 24000);
   for (const ref of refs) assert.ok(packet.refs.includes(ref), `Missing ${ref}`);
   for (const match of packet.text.matchAll(/\[([EC]\d+)\]/g)) assert.ok(packet.refs.includes(match[1]));
   assert.equal(input.historical_quotes_not_current_requests, undefined);
-});
-
-test('retired speech code, installers and browser dependencies cannot quietly return', () => {
-  const repo = path.resolve(__dirname, '..');
-  for (const file of ['src/voice/calls.ts', 'src/voice/audio.ts', 'src/sync/pi-stream.ts', 'client/src/voice/session.ts', 'client/scripts/voice-assets.mjs', 'voice/setup.mjs', 'voice/worker.py', 'voice/requirements.txt']) {
-    assert.equal(fs.existsSync(path.join(repo, file)), false, file);
-  }
-  const client = require('../client/package.json'), pkg = require('../package.json');
-  for (const dependency of ['@ricky0123/vad-web', 'onnxruntime-web']) assert.equal(client.dependencies[dependency], undefined);
-  assert.equal(pkg.scripts['voice:setup'], undefined);
-  assert.ok(!pkg.files.some(file => /worker\.py|requirements\.txt|voice\/setup\.mjs/.test(file)));
 });

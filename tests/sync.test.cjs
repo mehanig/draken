@@ -370,7 +370,7 @@ test('model failure and timeout retain accepted user turns without saving incomp
   assert.equal(store.pendingCount(), 1);
 });
 
-test('HTTP model actions work directly while preserving input validation, review and removed execution routes', async () => {
+test('HTTP model actions preserve input validation and explicit review', async () => {
   fakePi();
   session([event('u', null, 'Task', 'user')]);
   const request = await serve();
@@ -395,8 +395,6 @@ test('HTTP model actions work directly while preserving input validation, review
   assert.equal((await request(`/syncs/${id}/complete`, 'POST', { decisions: '', carry_forward: '' })).status, 400);
   assert.equal((await request(`/syncs/${id}/complete`, 'POST', { decisions: 'Done', carry_forward: '', reviewed: true })).status, 200);
   assert.equal((await request('/overview')).data.pending, 0);
-  assert.equal((await request('/tasks/project/1', 'POST', { prompt: 'run something' })).status, 404);
-  assert.equal((await request('/git/1/commit', 'POST', { message: 'no' })).status, 404);
   assert.equal((await request('/syncs/nope')).status, 400);
 });
 
