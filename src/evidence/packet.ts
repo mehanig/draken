@@ -1,5 +1,5 @@
 import { cleanText } from '../sync/normalize';
-import type { HistoryResults } from './types';
+import type { HistoryResults } from '../memory/types';
 
 export const DISCUSSION_HISTORY_BYTES = 32000;
 

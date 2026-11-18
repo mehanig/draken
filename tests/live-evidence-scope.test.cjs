@@ -15,6 +15,8 @@ const { LUNA_BATCH } = require('../dist/sync/summary-budget');
 const { sourceKey } = require('../dist/sync/normalize');
 const { activity } = require('../dist/sync/activity');
 const live = require('../dist/voice/live');
+const calls = require('../dist/sync/model-call');
+let originalModelCall;
 let root, file, syncId, bg, native, requests, statusHook, openHook, contextHook, closeHook, finalCalls, originalCall, originalLoad;
 const signal = () => new AbortController().signal;
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -43,11 +45,13 @@ beforeEach(() => {
     if (name.endsWith('/voice/realtime/native.mjs')) return { NativeVoice: SyntheticNative, nativeStatus: async () => { await statusHook?.(); return { readyForProbe: true }; } };
     return originalLoad.call(this, name, ...args);
   };
+  originalModelCall = calls.modelCall;
+  calls.modelCall = async payload => { assert.equal(payload.task, 'select_evidence'); return '{"scope":"project","selected":[]}'; };
   originalCall = SummaryTree.prototype.call;
   SummaryTree.prototype.call = async payload => { assert.equal(payload.task, 'final_verdict', 'no new summary/model preparation'); finalCalls++; return 'Still unverified [R1].'; };
 });
 afterEach(async () => {
-  await live.stopLiveCalls(); Module._load = originalLoad; SummaryTree.prototype.call = originalCall;
+  await live.stopLiveCalls(); Module._load = originalLoad; SummaryTree.prototype.call = originalCall; calls.modelCall = originalModelCall;
   closeDb(); fs.rmSync(root, { recursive: true, force: true }); delete process.env.DRAKEN_VOICE_MODE;
 });
 async function prepared(initial = false) {

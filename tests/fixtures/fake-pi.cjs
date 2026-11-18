@@ -43,7 +43,7 @@ process.stdin.on('end', () => {
     } else console.log(text);
   }, control.delay || 20);
   if (control.hugeOutput) return emit('界'.repeat(24000));
-  if (value.task === 'select_evidence') return emit(control.badSelection ? { selected: ['S9999'] } : { selected: value.candidates.slice(0, 8).map(item => item.id) });
+  if (value.task === 'select_evidence') return emit(control.badSelection ? { scope: 'project', selected: ['S9999'] } : { scope: control.evidenceScope || 'project', selected: control.evidenceScope && control.evidenceScope !== 'project' ? [] : value.candidates.slice(0, 8).map(item => item.id) });
   if (value.task === 'sync_recap') {
     if (control.badRecap) return emit('Invalid recap');
     return emit({ lines: ['Export checks were reported; deployment remains unverified.', 'Discussion covered the dashboard choice; no new saved agreement.'] });
