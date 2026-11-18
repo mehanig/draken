@@ -1,13 +1,20 @@
 import { readHistory, searchHistory, searchPreparedHistory } from './service';
 import { cleanText } from '../sync/normalize';
 import type { HistoryQuery } from './types';
-import { statusQuestion } from './reconcile';
+import { statusQuestion } from './focus';
 import { historyPacket } from './packet';
+import { selectHistory } from './selection';
 
 export async function historyContext(question: string, before: string, signal?: AbortSignal, maxBytes = 3500, preparedOnly = false,
-  selection: Pick<HistoryQuery, 'session_ids' | 'kind' | 'recent' | 'topics' | 'reconcile'> = {}) {
+  selection: Pick<HistoryQuery, 'session_ids' | 'kind' | 'recent' | 'topics'> = {},
+  ask?: (payload: unknown, system: string) => Promise<string>, previousQuestions: string[] = []) {
+  if (ask) {
+    const query = { ...selection, question: cleanText(question, 2000), before, limit: 64 };
+    const found = await searchPreparedHistory(query, signal);
+    return selectHistory(found, query, before, ask, signal || new AbortController().signal, previousQuestions);
+  }
   const explicit = [...new Set(question.match(/\bH[a-f0-9]{24}\b/g) || [])].slice(0, 3);
-  if (explicit.length && !(selection.reconcile && selection.kind === 'sources' && statusQuestion(question) && !/\boffset[ :=]+\d/i.test(question))) {
+  if (explicit.length && !(selection.kind === 'sources' && statusQuestion(question) && !/\boffset[ :=]+\d/i.test(question))) {
     const sources = [];
     for (const ref of explicit) {
       const requested = question.match(new RegExp(`\\b${ref}\\s+(?:at\\s+)?offset[ :=]+(\\d{1,7})\\b`, 'i'));

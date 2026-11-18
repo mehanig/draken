@@ -5,28 +5,13 @@ import { getSourceRoots, type RootInput } from '../sources/registry';
 import { NormalizationCache } from '../sync/jsonl';
 import { initHistoryStorage } from './storage';
 import { validEmbedding } from './embedding-contract';
-import { reconcileHistory } from './reconcile';
 import { sourceStamps, saveSourceCheckpoint } from './stamps';
 import { historyStamp, saveHistoryReadiness } from './readiness';
 import { historySources, type SourceRecord } from './sources';
-import { passage, passages, PASSAGE_CHARACTERS } from './passages';
+import { passage, passages } from './passages';
 import { historyUpdate, HISTORY_PAGE_CHARACTERS, type Embedder, type HistoryPage, type HistoryQuery, type HistoryResults, type ReportHistory } from './types';
 
 type Chunk = { id: number; ref: string; offset: number };
-function proximity(text: string, terms: string[]): number {
-  if (terms.length < 2 || terms.length > 5) return 1;
-  const positions = [...text.toLowerCase().matchAll(/[\p{L}\p{N}_]+/gu)].flatMap(match => terms.flatMap((term, i) => match[0].startsWith(term) ? [{ term: i, at: match.index! }] : []));
-  const counts = new Map<number, number>(); let left = 0, span = Infinity;
-  for (let right = 0; right < positions.length; right++) {
-    const item = positions[right]; counts.set(item.term, (counts.get(item.term) || 0) + 1);
-    while (counts.size === terms.length) {
-      span = Math.min(span, item.at - positions[left].at);
-      const term = positions[left++].term, count = counts.get(term)! - 1;
-      if (count) counts.set(term, count); else counts.delete(term);
-    }
-  }
-  return 1 + 2 * Math.exp(-span / 80);
-}
 const LIMITATIONS = 'Search of retained, currently admitted history, not exhaustive recall or independent verification. Excluded/missing sessions, pre-baseline session evidence and discarded sync discussions are omitted. Original logs may contain material not retained here. Summaries are not indexed as primary evidence. No review, decisions or execution changed.';
 
 export class HistoryIndex {
@@ -217,87 +202,45 @@ export class HistoryIndex {
       }
       return metadata.get(ref);
     };
-    const narratives = preparedOnly ? (this.db.prepare(`SELECT r.ref FROM records r WHERE json_extract(r.json,'$.kind')='session'
-      AND json_extract(r.json,'$.role')='assistant' ${filter.sql} ORDER BY r.at DESC LIMIT 1024`).all(...filter.args) as { ref: string }[]).map(row => row.ref)
-      : [...this.current.values()].filter(record => this.admitted(record, query) && record.kind === 'session'
-        && record.role === 'assistant' && record.text.length >= 40 && !/^Tool requested:/.test(record.text))
-        .sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 1024).map(record => record.ref);
-    const scoresByQuery: Map<string, { score: number; chunk: Chunk }>[] = [], termSets: string[][] = [];
-    for (const [search, embedding] of searches.map((text, i) => [text, embeddings[i]] as const)) {
-    const scores = new Map<string, { score: number; chunk: Chunk }>(); scoresByQuery.push(scores);
-    const add = (rows: Chunk[], weight = 1) => {
-      const distinct = new Set<string>();
-      for (const row of rows) {
-        const item = record(row.ref);
-        if (!item || !this.admitted(item, query)) continue;
-        const identity = item.identity;
-        if (distinct.has(identity)) continue; distinct.add(identity);
-        const old = scores.get(identity), score = weight / (60 + distinct.size);
-        scores.set(identity, { score: (old?.score || 0) + score, chunk: weight > 1 ? row : old?.chunk || row });
-      }
-    };
-    const stop = new Set('the a an and or of to in on is it we i you our my what why how did do does was were have has had this that with for from about remember recall previous earlier history please are those here exactly mean meant can could check hello still agent trying moment question call'.split(' '));
-    const terms = [...new Set(search.toLowerCase().match(/[\p{L}\p{N}_]+/gu) || [])].filter(term => !stop.has(term)).slice(0, 32);
-    const stems = [...new Set(terms.map(term => query.kind === 'sources' && term.length >= 5 ? term.slice(0, 4) : term))];
-    termSets.push(stems);
-    const lexical = stems.map(term => `"${term}"${query.kind === 'sources' ? '*' : ''}`);
-    if (terms.length) add(this.keywords(lexical.join(' OR '), filter.sql, filter.args));
-    add(this.db.prepare(`SELECT c.id,c.ref,c.offset,MAX(r.at) FROM passage_vectors v JOIN chunk_links c ON c.passage_id=v.rowid JOIN records r ON r.ref=c.ref
-      WHERE v.embedding MATCH ? AND k=80 AND v.rowid IN (SELECT c.passage_id FROM chunk_links c JOIN passages p ON p.id=c.passage_id JOIN records r ON r.ref=c.ref WHERE p.embedded=1 ${filter.sql})
-      AND v.distance<=0.25 ${filter.sql} GROUP BY c.passage_id ORDER BY v.distance,c.id LIMIT 80`).all(Buffer.from(embedding.buffer), ...filter.args, ...filter.args) as Chunk[]);
-    if (query.kind === 'sources') {
-      // Agent explanations are a separate retrieval lane, not buried under the
-      // many near-identical tool reads/edits in a coding session. Existing vectors
-      // and original record identities are reused; no new corpus work in calls.
-      if (narratives.length) {
-        const selected = narratives.map(() => '?').join(',');
-        if (terms.length) add(this.keywords(lexical.join(' OR '), `AND c.offset=0 AND c.ref IN (${selected})`, narratives), 2);
-        add(this.db.prepare(`SELECT c.id,c.ref,c.offset,MAX(r.at) FROM passage_vectors v JOIN chunk_links c ON c.passage_id=v.rowid JOIN records r ON r.ref=c.ref
-          WHERE v.embedding MATCH ? AND k=80 AND v.rowid IN (SELECT passage_id FROM chunk_links WHERE offset=0 AND ref IN (${selected}))
-          AND v.distance<=0.25 AND c.offset=0 AND c.ref IN (${selected}) GROUP BY c.passage_id ORDER BY v.distance,c.id LIMIT 80`)
-          .all(Buffer.from(embedding.buffer), ...narratives, ...narratives) as Chunk[], 2);
-      }
+    const lists: Chunk[][] = [];
+    for (const [i, search] of searches.entries()) {
+      const stop = new Set('the a an and or of to in on is it we i you our my what why how did do does was were have has had this that with for from about please are can could'.split(' '));
+      const terms = [...new Set(search.toLowerCase().match(/[\p{L}\p{N}_]+/gu) || [])].filter(term => !stop.has(term)).slice(0, 32);
+      if (terms.length) lists.push(this.keywords(terms.map(term => `"${term}"`).join(' OR '), filter.sql, filter.args));
+      lists.push(this.db.prepare(`SELECT c.id,c.ref,c.offset FROM passage_vectors v JOIN chunk_links c ON c.passage_id=v.rowid JOIN records r ON r.ref=c.ref
+        WHERE v.embedding MATCH ? AND k=80 AND v.rowid IN (SELECT c.passage_id FROM chunk_links c JOIN passages p ON p.id=c.passage_id JOIN records r ON r.ref=c.ref WHERE p.embedded=1 ${filter.sql})
+        AND v.distance<=0.25 ${filter.sql} GROUP BY c.passage_id ORDER BY v.distance,c.id LIMIT 80`)
+        .all(Buffer.from(embeddings[i].buffer), ...filter.args, ...filter.args) as Chunk[]);
     }
-    if (query.kind === 'sources' && terms.length >= 2 && terms.length <= 5) add(this.keywords(lexical.join(' AND '), filter.sql, filter.args, 40), 5);
-    }
-    const rank = (value: { score: number; chunk: Chunk }, terms: string[]) => {
-      if (query.kind !== 'sources') return value.score;
-      const item = record(value.chunk.ref)!;
-      const age = Math.max(0, (Date.parse(query.before || new Date().toISOString()) - Date.parse(item.at || '')) / 86400000);
-      const role = item.role === 'user' ? 0.25 : /^Tool requested:/.test(item.text) ? 0.5 : 1;
-      const detail = item.role === 'assistant' && /\n(?:[-*] |### |\|)/.test(item.text) ? 1.5 : 1;
-      return value.score * role * detail * (query.recent ? 1 + 2 * Math.exp(-age / 0.5) : 1 + 0.4 * Math.exp(-age / 3))
-        * (preparedOnly ? 1 : proximity(item.text.slice(value.chunk.offset, value.chunk.offset + PASSAGE_CHARACTERS), terms));
-    };
-    const rankings = scoresByQuery.map((scores, i) => [...scores.values()].sort((a, b) => rank(b, termSets[i]) - rank(a, termSets[i]) || a.chunk.id - b.chunk.id));
-    const ranked = rankings.flat(), topicLeaders = [0, 1].flatMap(i => rankings.slice(1).flatMap(rows => rows[i] ? [rows[i]] : []));
-    const recent: { score: number; chunk: Chunk }[] = [];
-    if (query.recent && (query.session_id || query.session_ids)) {
-      if (preparedOnly && narratives[0]) record(narratives[0]);
-      const latest = [...(preparedOnly ? metadata : this.current).values()].filter(record => this.admitted(record, query) && record.kind === 'session'
-        && record.role === 'assistant' && (preparedOnly || record.text.length >= 40) && !/^Tool requested:/.test(record.text))
-        .sort((a, b) => (b.at || '').localeCompare(a.at || '') || b.position - a.position).slice(0, 1);
-      for (const record of latest) {
-        const chunk = this.db.prepare('SELECT id,ref,offset FROM chunks WHERE ref=? AND embedded=1 ORDER BY offset LIMIT 1').get(record.ref) as Chunk | undefined;
-        if (chunk) recent.push({ score: 1, chunk });
-      }
-    }
-    const explicit = query.kind === 'sources' ? [...new Set(query.question.match(/\bH[a-f0-9]{24}\b/g) || [])].slice(0, 3).map(ref => {
-      const item = record(ref);
-      if (!item || !this.admitted(item, query)) throw new Error('Historical reference is outside this lookup scope or cutoff.');
-      const chunk = this.db.prepare('SELECT id,ref,offset FROM chunks WHERE ref=? AND embedded=1 ORDER BY offset LIMIT 1').get(ref) as Chunk | undefined;
-      if (!chunk) throw new Error('Historical reference has not been prepared.');
-      return { score: 1, chunk };
-    }) : [];
-    const selected = [...explicit, ...recent, ...topicLeaders, ...ranked].filter((value, i, all) => all.findIndex(other => record(other.chunk.ref)!.identity === record(value.chunk.ref)!.identity) === i);
-    const results = [];
-    for (const { chunk, score } of selected) {
-      if (preparedOnly && !this.loadPrepared(chunk.ref, query)) continue;
+    const limit = query.limit ?? 8;
+    const firstChunk = (ref: string) => this.db.prepare('SELECT id,ref,offset FROM chunks WHERE ref=? AND embedded=1 ORDER BY offset LIMIT 1').get(ref) as Chunk | undefined;
+    if (query.recent) lists.push((this.db.prepare(`SELECT r.ref FROM records r WHERE 1=1 ${filter.sql}
+      ORDER BY r.at DESC,r.position DESC LIMIT 80`).all(...filter.args) as { ref: string }[])
+      .flatMap(row => { const chunk = firstChunk(row.ref); return chunk ? [chunk] : []; }));
+    const results: HistoryResults['results'] = [], seen = new Set<string>();
+    const add = (chunk: Chunk) => {
+      const item = record(chunk.ref);
+      if (!item || !this.admitted(item, query) || seen.has(item.identity) || results.length >= limit) return;
+      if (preparedOnly && !this.loadPrepared(chunk.ref, query)) return;
       const original = this.record(chunk.ref);
-      results.push({ ...original, sequence: original.position, text: original.text.slice(chunk.offset, chunk.offset + (query.kind === 'sources' ? 1600 : 800)), offset: chunk.offset, score, ...(query.kind === 'sources' && chunk.offset > 0 ? { lead: original.text.slice(0, 400) } : {}) });
-      if (results.length === 8) break;
+      seen.add(item.identity);
+      results.push({ ...original, sequence: original.position, text: original.text.slice(chunk.offset, chunk.offset + 1600),
+        offset: chunk.offset, score: 1, ...(chunk.offset ? { lead: original.text.slice(0, 400) } : {}) });
+    };
+    for (const ref of [...new Set(query.question.match(/\bH[a-f0-9]{24}\b/g) || [])].slice(0, 3)) {
+      const item = record(ref), chunk = firstChunk(ref);
+      if (!item || !this.admitted(item, query) || !chunk) throw new Error('Historical reference is outside this lookup scope or is not prepared.');
+      add(chunk);
     }
-    return { mode: 'hybrid', ...reconcileHistory([...this.current.values()].filter(record => this.admitted(record, query)), results, query), limitations: LIMITATIONS + (preparedOnly ? ' Only selected ranked records were read; other originals were not checked.' : '') + ' Records arriving or changing during this lookup are considered by the next lookup.' };
+    // Alternate search lists instead of assigning role, age or keyword bonuses.
+    while (results.length < limit && lists.some(list => list.length)) {
+      for (const list of lists) {
+        const count = results.length;
+        while (list.length && results.length === count) add(list.shift()!);
+        if (results.length >= limit) break;
+      }
+    }
+    return { mode: 'hybrid', results, limitations: LIMITATIONS + ' Search returns a selection of original records, not the entire archive.' };
   }
   private record(ref: string): SourceRecord {
     const record = this.current.get(ref);
@@ -321,7 +264,7 @@ export class HistoryIndex {
     const records = rows.filter(row => this.current.has(row.ref)).map(row => this.record(row.ref)), at = records.findIndex(row => row.ref === ref);
     const before = records.slice(0, at).reverse().find(row => row.identity !== item.identity);
     const after = records.slice(at + 1).find(row => row.identity !== item.identity && row.identity !== before?.identity);
-    const neighbors = [before, after].filter((row): row is SourceRecord => Boolean(row)).map(row => ({ ...row, text: row.text.slice(0, 600) }));
-    return { record: { ...item, text: item.text.slice(offset, offset + HISTORY_PAGE_CHARACTERS) }, offset, total: item.text.length, neighbors };
+    const neighbors = [before, after].filter((row): row is SourceRecord => Boolean(row)).map(row => ({ ...row, sequence: row.position, text: row.text.slice(0, 600) }));
+    return { record: { ...item, sequence: item.position, text: item.text.slice(offset, offset + HISTORY_PAGE_CHARACTERS) }, offset, total: item.text.length, neighbors };
   }
 }

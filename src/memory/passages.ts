@@ -3,7 +3,7 @@ import type { HistoryRecord } from './types';
 
 // Persisted passage offsets/hashes depend on this recipe. A format change needs
 // an index migration, not just a new display excerpt length.
-export const PASSAGE_CHARACTERS = 800;
+const PASSAGE_CHARACTERS = 800;
 const STRIDE = 700;
 type PassageSource = Pick<HistoryRecord, 'title' | 'role' | 'text'>;
 

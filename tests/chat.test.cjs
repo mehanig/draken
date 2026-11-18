@@ -11,7 +11,7 @@ beforeEach(()=>{
  const fake=path.join(root,'pi');fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),fake);fs.chmodSync(fake,0o700);
  control=path.join(root,'control.json');log=path.join(root,'calls.jsonl');fs.writeFileSync(control,'{}');
  Object.assign(process.env,{DRAKEN_DATA_DIR:path.join(root,'state'),DRAKEN_PI_SESSIONS_DIR:path.join(root,'sessions'),DRAKEN_PI_BIN:fake,DRAKEN_PI_SUMMARY_MODEL:'test/cheap',DRAKEN_PI_FINAL_MODEL:'test/strong',DRAKEN_FAKE_CONTROL:control,DRAKEN_TEST_CALL_LOG:log,DRAKEN_HOST:'127.0.0.1',DRAKEN_NO_AUTH:'true',DRAKEN_CODEX_BIN:path.join(root,'no-native-helper'),DRAKEN_CODEX_HOME:path.join(root,'no-native-account')});
- originals={historyReadiness:memory.historyReadiness,searchPreparedHistory:memory.searchPreparedHistory,searchHistory:memory.searchHistory,prepareHistory:memory.prepareHistory};
+ originals={readHistory:memory.readHistory,historyReadiness:memory.historyReadiness,searchPreparedHistory:memory.searchPreparedHistory,searchHistory:memory.searchHistory,prepareHistory:memory.prepareHistory};
 });
 afterEach(async()=>{for(const id of activity.busyIds)cancelReply(id);await idle();if(server)await new Promise(r=>server.close(r));server=null;Object.assign(memory,originals);closeDb();fs.rmSync(root,{recursive:true,force:true});});
 async function idle(){const until=Date.now()+15000;while(activity.busy){assert.ok(Date.now()<until,'Job did not finish');await new Promise(r=>setTimeout(r,10));}}
@@ -188,32 +188,57 @@ test('searching and thinking are real durable stages; cancellation retains the u
 });
 function reconciliationFixture(session){
  const ids=['a','b','c'].map(letter=>'H'+letter.repeat(24));
- memory.searchPreparedHistory=async query=>{assert.equal(query.reconcile,true);return {mode:'hybrid',limitations:'Synthetic original reports, not independently verified.',results:ids.map((ref,i)=>({ref,kind:'session',session_id:session,sync_id:null,origin_ref:null,title:'Trailboard',workspace:'/demo/Trailboard',role:'assistant',at:`2026-01-0${i+1}T00:00:00.000Z`,sequence:i+1,offset:0,score:1,qualification:'Agent report.',text:['Client wiring and durable jobs remain unfinished.','Client wiring implemented; delivery disabled.','Durable job foundations implemented; delivery remains disabled.'][i]})),reconciliation:{checked_narratives:3,omitted_narratives:0,omitted_threads:0,threads:[{earlier_ref:ids[0],later_refs:ids.slice(1),matched_terms:['wiring','jobs'],other_candidates:0}],qualification:'Candidates, not automatic proof of completion.'}};};
+ const records=ids.map((ref,i)=>({ref,kind:'session',session_id:session,sync_id:null,origin_ref:null,title:'Trailboard',workspace:'/demo/Trailboard',role:'assistant',at:`2026-01-0${i+1}T00:00:00.000Z`,sequence:i+1,offset:0,score:1,qualification:'Agent report.',text:['Client wiring and durable jobs remain unfinished.','Client wiring implemented; delivery disabled.','Durable job foundations implemented; delivery remains disabled.'][i]}));
+ memory.searchPreparedHistory=async()=>({mode:'hybrid',limitations:'Synthetic originals.',results:records});
+ memory.readHistory=async ref=>({record:records.find(item=>item.ref===ref),offset:0,total:100,neighbors:[]});
  return ids;
 }
-test('checkpoint citation heuristics neither veto answers nor trigger a second paid call',async()=>{
- const {id,trail}=await ready(),refs=reconciliationFixture(trail),before=calls().length;
- fs.writeFileSync(control,JSON.stringify({staleCheckpoint:true}));
- launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
- const sync=store.getSync(id);assert.equal(sync.tree.run.status,'completed');assert.equal(calls().length-before,1);
- assert.ok(sync.messages.at(-1).content.includes(refs[0]));assert.ok(!sync.messages.at(-1).content.includes(refs[1]));
- // This verifies removal of the veto, not the synthetic answer's factual quality.
+test('chat uses the configured summary model to select evidence and the final model to answer',async()=>{
+ const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
+ launchChat(id,'What remains in Trailboard?',randomUUID());await idle();
+ const used=calls().slice(before),sync=store.getSync(id);
+ assert.deepEqual(used.map(call=>[call.task,call.model]),[['select_evidence','test/cheap'],['final_verdict','test/strong']]);
+ assert.equal(sync.tree.run.invocations,2);assert.equal(sync.tree.run.metrics.length,2);
+ assert.equal(used[1].historical_evidence.sources.length,3);
+ assert.ok(sync.messages.at(-1).content.includes('H'));assert.equal(store.homeOverview().covered,0);
 });
-test('bad or missing first-draft citations get the same single bounded correction',async()=>{
+
+test('invalid selection fails the message without an answer call or automatic retry',async()=>{
+ const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length,key=randomUUID();
+ fs.writeFileSync(control,JSON.stringify({badSelection:true}));launchChat(id,'What remains?',key);await idle();
+ const sync=store.getSync(id);assert.equal(sync.tree.run.status,'failed');assert.match(sync.tree.run.error,/Evidence selection/);
+ assert.equal(sync.tree.run.invocations,1);assert.equal(calls().length-before,1);assert.equal(sync.messages.length,1);
+ launchChat(id,'What remains?',key);assert.equal(calls().length-before,1);
+});
+
+test('selection reserves the answer call and cancellation never publishes a partial reply',async()=>{
+ const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:1});
+ launchChat(id,'What remains?',randomUUID());await idle();
+ assert.equal(store.getProgress(id).run.invocations,0);assert.equal(calls().length,before);assert.match(store.getProgress(id).run.error,/Invocation budget/);
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:3});fs.writeFileSync(control,JSON.stringify({delay:1000}));
+ launchChat(id,'What remains?',randomUUID());
+ const until=Date.now()+5000;while(store.getProgress(id).run.invocations!==1){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
+ assert.equal(store.getProgress(id).run.stage,'Selecting evidence');cancelReply(id);await idle();
+ assert.equal(store.getProgress(id).run.status,'cancelled');assert.equal(store.getProgress(id).run.invocations,1);
+ assert.ok(store.getSync(id).messages.every(message=>message.role==='user'));
+});
+
+test('bad or missing first-draft citations get one correction after evidence selection',async()=>{
  const {id,trail}=await ready();reconciliationFixture(trail);
  for(const controlValue of [{invalidFinalOnce:true},{missingFinalOnce:true}]){
   fs.writeFileSync(control,JSON.stringify(controlValue));const before=calls().length;
   launchChat(id,'What remains in Trailboard?',randomUUID());await idle();const sync=store.getSync(id),attempts=calls().slice(before);
-  assert.equal(sync.tree.run.status,'completed');assert.equal(attempts.length,2);assert.ok(attempts[1].citation_repair.citation_issue);assert.match(sync.messages.at(-1).content,/\[[ECH]/);assert.doesNotMatch(sync.messages.at(-1).content,/R999999|Unsupported draft/);
+  assert.equal(sync.tree.run.status,'completed');assert.equal(attempts.length,3);assert.equal(attempts[0].task,'select_evidence');assert.ok(attempts[2].citation_repair.citation_issue);assert.match(sync.messages.at(-1).content,/\[[ECH]/);assert.doesNotMatch(sync.messages.at(-1).content,/R999999|Unsupported draft/);
  }
- const before=calls().length,key=randomUUID();launchChat(id,'INVALID_CITATION',key);await idle();assert.equal(calls().length-before,2);assert.match(store.getSync(id).tree.run.error,/outside the supplied evidence/);assert.equal(store.getSync(id).messages.at(-1).role,'user');launchChat(id,'INVALID_CITATION',key);assert.equal(calls().length-before,2);
+ const before=calls().length,key=randomUUID();launchChat(id,'INVALID_CITATION',key);await idle();assert.equal(calls().length-before,3);assert.match(store.getSync(id).tree.run.error,/outside the supplied evidence/);assert.equal(store.getSync(id).messages.at(-1).role,'user');launchChat(id,'INVALID_CITATION',key);assert.equal(calls().length-before,3);
 });
 
 test('citation correction cannot exceed the invocation ceiling or publish a draft after cancellation',async()=>{
  const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
- store.configureModels(id,{...store.getSync(id).models,max_invocations:1});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true}));
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:2});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
- assert.equal(calls().length-before,1);assert.equal(store.getSync(id).tree.run.status,'failed');assert.match(store.getSync(id).tree.run.error,/Invocation budget/);assert.equal(store.getSync(id).messages.length,1);
+ assert.equal(calls().length-before,2);assert.equal(store.getSync(id).tree.run.status,'failed');assert.match(store.getSync(id).tree.run.error,/Invocation budget/);assert.equal(store.getSync(id).messages.length,1);
  store.configureModels(id,{...store.getSync(id).models,max_invocations:10});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true,delay:300}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());
  const until=Date.now()+5000;while(store.getProgress(id).run.stage!=='Checking evidence references'){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}

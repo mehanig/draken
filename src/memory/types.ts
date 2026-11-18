@@ -19,8 +19,8 @@ export interface HistoryQuery {
   session_ids?: string[];
   kind?: 'sources' | 'conversation';
   recent?: boolean;
-  /** Include later related records for status reconciliation, independent of packet size. */
-  reconcile?: boolean;
+  /** Number of original records to retrieve, at most 40. */
+  limit?: number;
   topics?: string[];
   sync_id?: number;
   before?: string;
@@ -29,13 +29,6 @@ export interface HistoryResults {
   mode: 'hybrid';
   results: (HistoryRecord & { offset: number; score: number; lead?: string })[];
   limitations: string;
-  reconciliation?: {
-    checked_narratives: number;
-    omitted_narratives: number;
-    omitted_threads: number;
-    threads: { earlier_ref: string; later_refs: string[]; matched_terms: string[]; other_candidates: number }[];
-    qualification: string;
-  };
 }
 export const HISTORY_PAGE_CHARACTERS = 4000;
 export interface HistoryPage {

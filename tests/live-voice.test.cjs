@@ -196,7 +196,81 @@ test('explicit typed and spoken recall supplies bounded context without waiting 
 const requests = () => fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
 const until = async check => { for (let i = 0; i < 100; i++) { if (check()) return; await wait(20); } assert.fail('Synthetic voice condition timed out'); };
 
-test('native refinement reaches source search, is bounded and deduplicated, and source IDs do not accumulate across answers',async()=>{
+async function withVoiceSelector(run) {
+  const memory=require('../dist/memory/service'),original={searchPreparedHistory:memory.searchPreparedHistory,readHistory:memory.readHistory};
+  const keys=['DRAKEN_PI_BIN','DRAKEN_PI_SUMMARY_MODEL','DRAKEN_TEST_CALL_LOG','DRAKEN_FAKE_CONTROL'],env=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+  const pi=path.join(root,'pi'),control=path.join(root,'selector-control.json'),log=path.join(root,'selector-calls.jsonl');
+  fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),pi);fs.chmodSync(pi,0o700);fs.writeFileSync(control,'{}');
+  Object.assign(process.env,{DRAKEN_PI_BIN:pi,DRAKEN_PI_SUMMARY_MODEL:'test/cheap',DRAKEN_TEST_CALL_LOG:log,DRAKEN_FAKE_CONTROL:control});
+  const record={ref:'H'+'a'.repeat(24),kind:'session',session_id:'synthetic',role:'toolResult',at:'2000-01-01T00:00:00.000Z',workspace:'/demo/export',title:'Export',qualification:'Original result.',text:'Export tests passed. Device acceptance remains unverified.',offset:0,score:1};
+  memory.searchPreparedHistory=async query=>{assert.equal(query.limit,64);return {mode:'hybrid',results:[record],limitations:''};};
+  memory.readHistory=async()=>({record,offset:0,total:record.text.length,neighbors:[]});
+  const runs=()=>getDb().prepare("SELECT * FROM sync_runs WHERE request_id LIKE 'voice:%' ORDER BY id").all();
+  try { await run({control,runs,ref:record.ref,calls:()=>fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse):[]}); }
+  finally { await live.stopLiveCalls();Object.assign(memory,original);for(const key of keys)if(env[key]===undefined)delete process.env[key];else process.env[key]=env[key]; }
+}
+
+test('voice selects original evidence with the summary model, records spending, and leaves the answer to native voice',async()=>{
+  evidence();await withVoiceSelector(async({runs,calls,ref})=>{
+    const call=await connected();
+    await live.sendLiveText(call.id,'What remains in Export?',randomUUID());
+    assert.deepEqual(calls().map(item=>[item.task,item.model]),[['select_evidence','test/cheap']]);
+    assert.equal(runs()[0].invocations,1);assert.equal(runs()[0].status,'completed');
+    assert.equal(JSON.parse(runs()[0].metrics_json)[0].accounting.cost_usd,0.0031);
+    assert.equal(store.getSync(syncId).tree.run,null,'Voice selection is not a text-chat retry or briefing run');
+    assert.ok(requests().some(item=>item.params?.role==='developer'&&item.params.text.includes(ref)&&item.params.text.includes('Device acceptance')));
+    assert.equal(getDb().prepare("SELECT COUNT(*) n FROM sync_messages WHERE role='user'").get().n,1);
+    assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n,0);
+  });
+});
+
+test('spoken questions use the same selector and continue after selection without another user turn',async()=>{
+  evidence();await withVoiceSelector(async({control,runs,calls,ref})=>{
+    fs.writeFileSync(control,JSON.stringify({delay:200}));
+    fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'scenario.txt'),'spoken-ack');
+    await connected();await until(()=>live.liveHistory(syncId)[0].turns.some(row=>row.answer==='The targeted export tests passed. Deployment remains unverified.'));
+    assert.equal(calls().length,1);assert.equal(runs()[0].status,'completed');
+    assert.ok(requests().some(item=>item.params?.role==='developer'&&item.params.text.includes(ref)));
+    assert.equal(getDb().prepare("SELECT COUNT(*) n FROM live_messages WHERE role='user'").get().n,1);
+  });
+});
+
+for(const action of ['stop','end','new turn'])test(`voice ${action} cancels a running selector without delivering its evidence`,async()=>{
+  evidence();await withVoiceSelector(async({control,runs,ref})=>{
+    fs.writeFileSync(control,JSON.stringify({delay:30000}));const call=await connected();
+    const pending=live.sendLiveText(call.id,'What remains in Export?',randomUUID()).catch(()=>{});
+    await until(()=>runs()[0]?.invocations===1);
+    if(action==='end')await live.endLiveCall(call.id);
+    else if(action==='stop')await live.sendLiveText(call.id,'Stop speaking. Wait for my next question.',randomUUID());
+    else {fs.writeFileSync(control,'{}');await live.sendLiveText(call.id,'What tests passed in Export?',randomUUID());}
+    await pending;assert.equal(runs()[0].status,'cancelled');assert.equal(runs()[0].invocations,1);
+    if(action!=='new turn')assert.ok(!requests().some(item=>item.params?.role==='developer'&&item.params.text.includes(ref)));
+    else {assert.equal(runs().length,2);assert.equal(runs()[1].status,'completed');assert.equal(runs()[1].invocations,1);}
+  });
+});
+
+test('invalid voice selection supplies a failure instead of stale evidence, without retrying the selector',async()=>{
+  evidence();await withVoiceSelector(async({control,runs,calls,ref})=>{
+    fs.writeFileSync(control,JSON.stringify({badSelection:true}));const call=await connected();
+    await live.sendLiveText(call.id,'What remains in Export?',randomUUID());
+    assert.equal(runs()[0].status,'failed');assert.equal(calls().length,1);
+    const data=requests().filter(item=>item.params?.role==='developer').map(item=>item.params.text).join('\n');
+    assert.match(data,/Archive lookup failed/);assert.ok(!data.includes(ref));
+  });
+});
+
+test('voice refinements share the turn invocation allowance and cannot use the final text model',async()=>{
+  evidence();await withVoiceSelector(async({runs,calls})=>{
+    getDb().prepare('UPDATE syncs SET model_config_json=? WHERE id=?').run(JSON.stringify({summary:'test/cheap',final:'test/strong',max_invocations:1}),syncId);
+    fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'scenario.txt'),'refinement');
+    const call=await connected();await live.sendLiveText(call.id,'What remains in Export?',randomUUID());
+    await until(()=>runs()[0]?.status==='failed');
+    assert.equal(runs().length,1);assert.equal(runs()[0].invocations,1);assert.match(runs()[0].error,/Invocation budget/);
+    assert.deepEqual(calls().map(item=>item.task),['select_evidence']);
+  });
+});
+
+test('native refinement reaches source search, is deduplicated, and source IDs do not accumulate across answers',async()=>{
   evidence();fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'scenario.txt'),'refinement');
   const context=require('../dist/memory/context'),original=context.historyContext,lookups=[];
   context.historyContext=async(...args)=>{lookups.push(args);const ref=`Hturn${lookups.length}`;return {text:JSON.stringify({sources:[{ref,text:'Recorded GPS implementation; device acceptance unverified. '.repeat(200)}]}),refs:[ref]};};

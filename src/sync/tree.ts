@@ -1,10 +1,10 @@
 import { getDb } from '../db/schema';
-import { Evidence, ModelCallMetric, NodeKind, NodeSummary, SyncDetail, TopicGroups } from '../types';
+import { Evidence, NodeKind, NodeSummary, SyncDetail, TopicGroups } from '../types';
 import { cleanText, digest, sourceKey, sourceRepresentatives } from './normalize';
 import { assertEvidenceAvailable } from './store';
 import { evidenceIdentities, planningContext } from './evidence-scope';
 import { HttpError } from '../errors';
-import { invokePi } from './pi';
+import { modelCall } from './model-call';
 import { prepareModelInput } from './references';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens, summaryTokens } from './summary-budget';
 import { ReusableLeaves, HistoricalLeafReplay, checkpointIdentity, checkpointContent, type LeafInput } from './reusable-leaves';
@@ -318,40 +318,8 @@ export class SummaryTree {
 
   async call(payload: unknown, system: string, final = false): Promise<string> {
     if (this.background && final) throw new HttpError(409, 'Background preparation cannot call the final provider');
-    if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
-    const model = final ? this.sync.models.final : this.sync.models.summary;
-    const large = !final && isBatchSummaryModel(model);
-    const prompt = JSON.stringify(payload);
-    const estimatedTokens = promptTokens(prompt, system);
-    if (large && estimatedTokens > LUNA_BATCH.requestTokens) throw new HttpError(400, 'Summary request exceeds its token safety budget; cached work is intact.');
-    if (final && isBatchSummaryModel(this.sync.models.summary) && estimatedTokens > LUNA_BATCH.finalTokens) throw new HttpError(400, 'The final input exceeds its compact token budget; no larger or more expensive request was substituted. Cached summaries are intact.');
-    const limit = this.sync.models.max_invocations - (final || this.background ? 0 : 1);
-    const started = Date.now(), request = payload as { task?: string; stage?: string; repair?: unknown };
-    const pending: ModelCallMetric = { started_at: new Date(started).toISOString(), task: request.task || 'unknown', stage: request.stage || null,
-      repair: Boolean(request.repair), model, elapsed_ms: 0, input_characters: prompt.length, input_tokens_estimate: estimatedTokens,
-      output_characters: null, output_tokens_estimate: null, status: 'running' };
-    // Reserve budget and the timestamped metadata slot atomically. An interrupted
-    // request remains explicitly unpriced rather than disappearing from usage.
-    const claimed = this.db.prepare(`UPDATE ${this.runTable} SET invocations=invocations+1,
-      metrics_json=json_insert(metrics_json,'$[#]',json(?)) WHERE id=? AND invocations<?
-      RETURNING json_array_length(metrics_json)-1 AS metric_index`).get(JSON.stringify(pending), this.runId, limit) as { metric_index: number } | undefined;
-    if (!claimed) throw new HttpError(409, 'Invocation budget reached. Completed summaries are cached. Raise the limit and retry; nothing was marked covered.');
-    let response: string | undefined;
-    let accounting: ModelCallMetric['accounting'];
-    try {
-      response = await invokePi(prompt, { model, system, signal: this.signal, thinking: final ? 'medium' : 'off', largeSummary: large,
-        onAccounting: this.accountAggregation ? value => { accounting = value; } : undefined });
-      if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
-      return response;
-    } finally {
-      const metric: ModelCallMetric = { ...pending, finished_at: new Date().toISOString(), ...(accounting ? { accounting } : {}),
-        elapsed_ms: Date.now() - started, input_characters: prompt.length,
-        input_tokens_estimate: estimatedTokens, output_characters: response?.length ?? null,
-        output_tokens_estimate: response === undefined ? null : summaryTokens(response),
-        status: this.signal.aborted ? 'cancelled' : response !== undefined ? 'completed' : 'failed' };
-      // Metadata only: no prompts, rejected prose, source text, paths or credentials.
-      this.db.prepare(`UPDATE ${this.runTable} SET metrics_json=json_set(metrics_json,?,json(?)) WHERE id=?`).run(`$[${claimed.metric_index}]`, JSON.stringify(metric), this.runId);
-    }
+    return modelCall(payload, system, { models: this.sync.models, runId: this.runId, signal: this.signal,
+      table: this.runTable, final, reserveAnswer: !final && !this.background, accounting: this.accountAggregation });
   }
 
   private register(spec: Spec) {

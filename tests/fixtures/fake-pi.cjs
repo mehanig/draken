@@ -21,7 +21,7 @@ process.stdin.on('end', () => {
   const model = args[args.indexOf('--model') + 1];
   const control = process.env.DRAKEN_FAKE_CONTROL ? JSON.parse(fs.readFileSync(process.env.DRAKEN_FAKE_CONTROL, 'utf8')) : {};
   if (process.env.DRAKEN_TEST_CALL_LOG) fs.appendFileSync(process.env.DRAKEN_TEST_CALL_LOG, JSON.stringify({
-    task: value.task, stage: value.stage, model, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree, opening_briefing: value.opening_briefing,
+    task: value.task, stage: value.stage, model, candidates: value.candidates, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree, opening_briefing: value.opening_briefing,
     input_characters: input.length, input_bytes: Buffer.byteLength(input), system: args[args.indexOf('--system-prompt') + 1],
     verification_evidence: value.verification_evidence, retrieved_evidence: value.retrieved_evidence, historical_evidence: value.historical_evidence,
     recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, citation_repair: value.citation_repair, reference_labels: value.reference_labels,
@@ -43,6 +43,7 @@ process.stdin.on('end', () => {
     } else console.log(text);
   }, control.delay || 20);
   if (control.hugeOutput) return emit('界'.repeat(24000));
+  if (value.task === 'select_evidence') return emit(control.badSelection ? { selected: ['S9999'] } : { selected: value.candidates.slice(0, 8).map(item => item.id) });
   if (value.task === 'sync_recap') {
     if (control.badRecap) return emit('Invalid recap');
     return emit({ lines: ['Export checks were reported; deployment remains unverified.', 'Discussion covered the dashboard choice; no new saved agreement.'] });
@@ -89,9 +90,8 @@ process.stdin.on('end', () => {
   } else if (value.task === 'final_verdict') {
     if (value.user_question === 'SHOW MEMORY') return emit(JSON.stringify(value.previous_sync_memory));
     if (value.user_question === 'INVALID_CITATION') return emit('Invented outcome [E9999999]');
-    if (control.invalidFinalOnce && !value.repair) return emit('Unsupported draft [R999999]' + (value.historical_evidence?.reconciliation?.threads?.[0] ? ` [${value.historical_evidence.reconciliation.threads[0].earlier_ref}]` : ''));
+    if (control.invalidFinalOnce && !value.repair) return emit('Unsupported draft [R999999]');
     if (control.missingFinalOnce && !value.repair) return emit('Draft missing its evidence links.');
-    if (control.staleCheckpoint && value.historical_evidence?.reconciliation?.threads?.length) return emit(`The old client wiring is still blocked. [${value.historical_evidence.reconciliation.threads[0].earlier_ref}]`);
     if (value.historical_evidence?.sources?.length) return emit(`Historical source reports a speech-path change; not proof of deployment. [${value.historical_evidence.sources[0].ref}]`);
     const refs = [...(value.verification_evidence || []), ...(value.retrieved_evidence || [])];
     const reference = refs[0] ? ` [${refs[0].ref}]` : '';

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0
+
+### Let the summarization model select text and voice evidence
+
+- Text chat and voice gather up to 64 original-source candidates using the existing keyword and local embedding indexes. The configured summarization model selects up to eight source IDs; the final model answers from reread originals and nearby request/result context. There is no generated intermediate answer.
+- Remove weighted role, age and keyword bonuses and the hand-written later-report graph. Candidate collection alternates search lists and skips duplicate originals before taking another list's turn. Standalone local search keeps its direct lookup. Voice uses the same selector as text, then its existing native voice model answers—no extra text-answer call.
+- A normal text turn now uses two model calls. The existing citation correction can add one more. All calls count toward the existing invocation allowance; selection leaves room for the answer. Invalid selections fail without calling the answer model or automatically retrying.
+- Voice refinements share the turn's invocation allowance and reuse duplicate lookups. Stop, a new question or ending the call cancels selection and prevents delivery of old evidence. Selection calls use the existing durable run/usage records, without becoming text-chat retry jobs.
+- Preserve source permissions, original-byte checks, the conversation's history cutoff, cancellation, citations, embeddings, summary caches, histories, notes and explicit review. No archive rebuild or database migration is required.
+- Tests cover source selection, neighboring results, conflicting evidence, empty results, malformed IDs, changed/excluded originals, cancellation, call accounting and keeping closing qualifications when excerpts are shortened. Model selection can still miss relevant evidence, especially if local search does not find it.
+
 ## 0.8.9
 
 - Treat session records as append-only during summary preparation. Reuse completed receipts and compact roots across appends instead of repeatedly reconstructing prompts and verifying all original bytes. Preserve source opt-outs, cancellation, invocation accounting and selected-original citation/retrieval checks.

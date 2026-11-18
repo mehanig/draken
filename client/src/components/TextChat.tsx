@@ -14,7 +14,7 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
   const failed = !sync.busy && Boolean(run?.question) && ['failed', 'cancelled', 'interrupted'].includes(run?.status || '');
   const question = sending ? draft : pending || failed ? run?.question : null;
   const thinking = pending || sending;
-  const stage = sending ? 'Sending your message…' : run?.stage.includes('Searching') ? 'Searching your prepared history…' : run?.stage.includes('Checking evidence') ? 'Checking source references…' : run?.stage.includes('Thinking') ? 'Draken is thinking…' : 'Reading the snapshot context…';
+  const stage = sending ? 'Sending your message…' : run?.stage.includes('Searching') ? 'Searching your prepared history…' : run?.stage.includes('Selecting evidence') ? 'Selecting relevant evidence…' : run?.stage.includes('Checking evidence') ? 'Checking source references…' : run?.stage.includes('Thinking') ? 'Draken is thinking…' : 'Reading the snapshot context…';
   const thread = useRef<HTMLDivElement>(null), bottom = useRef(true);
   useEffect(() => { if (bottom.current && thread.current) thread.current.scrollTop = thread.current.scrollHeight; }, [sync.messages.length, question, thinking, stage]);
   const prepared = Boolean(sync.briefing && sync.tree.complete && (sync.conversation?.history_before || readiness?.ready));
