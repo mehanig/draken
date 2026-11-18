@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { HistoryQuery } from './types';
-import { statusQuestion } from './reconcile';
+export const statusQuestion = (text: string) => /\b(?:status|current|latest|blocked|blockers?|unfinished|unconfirmed|remaining|finished|completed?|still|how (?:long|much longer)|where (?:are we|we are)|what(?:'s| is) left)\b/i.test(text);
 
 export interface HistoryFocus { sessions: string[]; question: string; topics?: string[] }
 const common = new Set('hello hi hey can could would please check tell about what whats happening going latest current now doing working work trying achieve project repo repository called have with from this that those these here there where which when your our app application ios native rewrite version status update progress mean meant exactly does how the and for are was were has had you it its into written make want thinking using upload uploading safety missing links visual parity screens screen functional original remains tests testing tested implementation implemented images photos profile navigation blocked blocker blockers unfinished unconfirmed remaining finished completed completion left long longer'.split(' '));
@@ -49,6 +49,6 @@ export function historyQuery(db: Database.Database, question: string, previous?:
   const topics = namedTopics || (same && /\b(?:here|those|that|exactly)\b/i.test(question) ? previous?.topics : undefined);
   return { focus: { sessions, question: question.slice(0, 2000), topics }, query: {
     question: queryText.slice(0, 2000), ...(sessions.length && !recall ? { session_ids: sessions } : {}),
-    kind: recall ? 'conversation' : 'sources', ...(!recall ? { reconcile: true } : {}), recent, ...(topics && !recall ? { topics } : {}),
+    kind: recall ? 'conversation' : 'sources', recent, ...(topics && !recall ? { topics } : {}),
   } };
 }

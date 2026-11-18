@@ -98,7 +98,7 @@ export function getProgress(id: number): TreeProgress {
   if (!sync) throw new HttpError(404, 'Sync not found');
   const run = db.prepare(`SELECT id, status, stage, summary_model, final_model, invocations, max_invocations,
     processed_entries, total_entries, cache_hits, error, question, request_id, started_at, completed_at, metrics_json
-    FROM sync_runs WHERE sync_id = ? ORDER BY id DESC LIMIT 1`).get(id) as (Omit<TreeRun, 'metrics'> & { metrics_json: string }) | undefined;
+    FROM sync_runs WHERE sync_id = ? AND (request_id IS NULL OR request_id NOT LIKE 'voice:%') ORDER BY id DESC LIMIT 1`).get(id) as (Omit<TreeRun, 'metrics'> & { metrics_json: string }) | undefined;
   const nodes = (db.prepare('SELECT key, kind, label, status, children_json, source_count, error FROM sync_tree_nodes WHERE sync_id = ? AND last_run_id IS ? ORDER BY rowid').all(id, run?.id ?? null) as any[])
     .map(({ children_json, ...node }) => ({ ...node, children: JSON.parse(children_json) })) as TreeNode[];
   const { metrics_json, ...fields } = run || { metrics_json: '[]' };

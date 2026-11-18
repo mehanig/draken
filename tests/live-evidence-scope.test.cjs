@@ -104,7 +104,7 @@ test('native setup await cannot deliver stale adopted BG in the initial realtime
 test('revocation during a native context append cannot return a ready handoff receipt', async () => {
   await prepared(); const call = await connected(); await live.sendLiveText(call.id, 'Explain C1', randomUUID());
   contextHook = async () => { contextHook = undefined; await edit(); };
-  await assert.rejects(native.options.answer('C1', signal()), /unavailable|changed|excluded/);
+  await assert.rejects(native.options.answer([{ role: 'user', content: 'Read C1 in more detail' }], signal()), /unavailable|changed|excluded/);
   await live.endLiveCall(call.id); assert.equal(activity.callActive, false);
 });
 

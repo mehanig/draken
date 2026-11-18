@@ -49,11 +49,11 @@ test('project scope follows generic follow-ups, changes on an explicit switch, a
   assert.equal(recall.query.kind, 'conversation'); assert.equal(recall.query.session_ids, undefined);
   assert.deepEqual(voiceHistoryQuery(db, 'Switch to a different project.', next.focus).focus.sessions, []);
 });
-test('original project evidence and latest work displace identical old questions and acknowledgements', async () => {
+test('project candidates include recent work and exclude other projects, discussions and future records', async () => {
   fixture(); await index.prepare({ before: cutoff });
   const plan = voiceHistoryQuery(db, "Hello, can you check what's happening with iOS Trailboard rewrite");
   const found = await index.search({ ...plan.query, before: cutoff }, undefined, true);
-  assert.match(found.results[0].text, /Profile-first journal navigation/);
+  assert.ok(found.results.some(item => /Profile-first journal navigation/.test(item.text)));
   assert.ok(found.results.every(record => record.session_id === 'trailboard' && record.at <= cutoff));
   assert.ok(!found.results.some(record => record.kind === 'discussion' || /only a small SwiftUI|future record must/.test(record.text)));
   const packet = historyPacket(found, 7000, 1200); assert.ok(Buffer.byteLength(packet.text) <= 7000);
@@ -83,13 +83,13 @@ test('repeated passages cannot crowd distinct evidence out of top-k before ranki
   assert.ok(found.results.some(record => /GPS coordinates/.test(record.text)));
   assert.equal(found.results.filter(record => /checks have been requested/.test(record.text)).length, 1);
 });
-test('voice source excerpts keep the explanatory paragraph rather than cutting its middle in favor of tool commands', () => {
-  const text = 'Recorded state. '.repeat(12) + 'Uploads contain GPS points and events; retries retain stable IDs.\nTool requested: read ' + 'x'.repeat(1000);
+test('source excerpts keep explanatory text, command context and closing qualifications', () => {
+  const text = 'Recorded state. '.repeat(12) + 'Uploads contain GPS points and events; retries retain stable IDs.\nTool requested: read ' + 'x'.repeat(1000) + '\nDevice acceptance has NOT been performed.';
   const packet = historyPacket({ mode: 'hybrid', limitations: 'Synthetic source, not independently verified.', results: [
     { ref: 'H' + 'a'.repeat(24), kind: 'session', role: 'assistant', text, offset: 0, qualification: 'Agent report.', at: cutoff },
   ] }, 7000, 1200);
-  assert.match(packet.text, /GPS points and events/); assert.doesNotMatch(packet.text, /Tool requested: read/);
-  assert.match(packet.text, /tool requests omitted/);
+  assert.match(packet.text, /GPS points and events/); assert.match(packet.text, /Tool requested: read/);
+  assert.match(packet.text, /Device acceptance has NOT been performed/);
 });
 test('explicit source requests support deeper prepared-only readback without corpus writes', async () => {
   entry('Earlier context. '.repeat(160) + 'GPS points and recording events are the payload.'); await index.prepare({ before: cutoff });

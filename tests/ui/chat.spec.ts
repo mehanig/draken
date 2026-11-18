@@ -57,7 +57,7 @@ test('citation correction shows its real stage and never displays rejected draft
   await expect(chat).not.toContainText('Unsupported draft');
   await expect(page.getByRole('textbox', { name: 'Message Draken' })).toBeEnabled({ timeout: 15000 });
   const sync = await (await page.request.get(`/api/syncs/${id}`)).json();
-  expect(sync.tree.run.status).toBe('completed'); expect(sync.tree.run.invocations).toBe(2);
+  expect(sync.tree.run.status).toBe('completed'); expect(sync.tree.run.invocations).toBe(3);
   expect(sync.messages.at(-1).content).toMatch(/\[[ECH]/); expect(sync.messages.at(-1).content).not.toMatch(/\[R\d+\]/);
   expect(await page.evaluate(() => (window as any).__chatMedia)).toEqual({ microphone: 0, audio: 0, peers: 0 });
 });
@@ -72,7 +72,8 @@ test('chat works without voice setup or secure-context APIs, shows thinking and 
   fs.writeFileSync(control, JSON.stringify({ delay: 4000 }));
   await page.getByRole('textbox', { name: 'Message Draken' }).fill('What is happening with Trailboard?');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Draken is thinking');
+  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Selecting relevant evidence');
+  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Draken is thinking', { timeout: 10000 });
   await chat.screenshot({ path: '.test-artifacts/chat-thinking-desktop.png' });
   await expect(chat.locator('.chat-message.assistant').filter({ hasNot: page.getByRole('status') })).toHaveCount(1, { timeout: 15000 });
   await expect(chat.getByRole('link', { name: /Inspect historical source/ }).first()).toHaveAttribute('rel', 'noopener noreferrer');
@@ -91,8 +92,8 @@ test('chat works without voice setup or secure-context APIs, shows thinking and 
 test('reload keeps an active reply, stop preserves the question, and retry does not review the sync', async ({ page }) => {
   await noAudio(page); const id = await start(page); fs.writeFileSync(control, JSON.stringify({ delay: 30000 }));
   await page.getByRole('textbox', { name: 'Message Draken' }).fill('What remains in Trailboard?'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Draken is thinking'); await page.reload();
-  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Draken is thinking'); await expect(page.locator('.chat-message.user')).toHaveCount(1);
+  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Selecting relevant evidence'); await page.reload();
+  await expect(page.getByRole('status', { name: 'Chat status' })).toContainText('Selecting relevant evidence'); await expect(page.locator('.chat-message.user')).toHaveCount(1);
   await page.getByRole('button', { name: 'Stop reply', exact: true }).click(); await expect(page.getByText('Reply stopped.', { exact: true })).toBeVisible();
   expect((await (await page.request.get(`/api/syncs/${id}`)).json()).messages).toHaveLength(1);
   fs.writeFileSync(control, '{}'); await page.getByRole('button', { name: 'Retry chat reply', exact: true }).click();

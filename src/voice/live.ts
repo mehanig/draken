@@ -12,6 +12,7 @@ import { invalidateRecap } from '../sync/recap';
 import { LIVE_PROMPT, liveEvidence, liveRetrievalQuestion } from './live-context';
 import { historyContext } from '../memory/context';
 import { DISCUSSION_HISTORY_BYTES } from '../memory/packet';
+import { modelCall } from '../sync/model-call';
 import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyProgress, stopHistory } from '../memory/service';
 import { ReplyContinuation } from './continuation';
@@ -28,7 +29,7 @@ const isStopRequest = (text: string) => text.trim() === STOP_TEXT || /^(?:please
 type Native = { subscribe(fn: (event: any) => void): () => void; open(sdp: string, options: any): Promise<string>; text(text: string): Promise<void>; context(text: string): Promise<void>; continueAnswer(question: string): Promise<void>; close(): Promise<{ helperExited: boolean }> };
 const runtime = () => require('../../voice/realtime/native.mjs') as { nativeStatus(options?: any): Promise<any>; NativeVoice: new (options?: any) => Native };
 interface Message { id: number; role: 'user' | 'assistant'; text: string; final: boolean; interrupted?: boolean; refs: string[]; started: number; turn?: Turn; release?: () => void; completionTimer?: NodeJS.Timeout }
-interface Turn { user: Message; life: AbortController; continuation: ReplyContinuation; historyBefore: string | null; backgroundReady: Promise<void>; drained: boolean; completed: boolean; release?: () => void; query?: HistoryQuery; refs: string[]; lookups: Map<string, Promise<EvidencePacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
+interface Turn { selectionRun?: number; user: Message; life: AbortController; continuation: ReplyContinuation; historyBefore: string | null; backgroundReady: Promise<void>; drained: boolean; completed: boolean; release?: () => void; query?: HistoryQuery; refs: string[]; lookups: Map<string, Promise<EvidencePacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
 interface Call { turn?: Turn; id: string; sync: SyncDetail; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; release: VoiceLease; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; focus?: HistoryFocus; contextDelivery: Promise<void>; drains: Set<Promise<void>>; nativeDrains: Set<Promise<void>> }
 const calls = new Map<string, Call>();
 // End can overtake creation on a second HTTP connection. Retain unknown-ID
@@ -240,13 +241,36 @@ async function lookup(call: Call, question: string, turn: Turn) {
     turn.query = plan.query; call.focus = plan.focus;
   }
   const snapshot = /\b[EC]\d+\b/.test(question) ? liveEvidence(call.sync, question, false, currentQuestion) : undefined;
-  if (snapshot && !turn.query.recent) return snapshot;
   const refined = question !== currentQuestion ? cleanText(question, 2000) : turn.query.question;
   if (!turn.lookups.has(refined)) {
     if (turn.lookups.size >= 3) return { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'This question reached its three-lookup limit. Explain what was found and ask a specific follow-up; do not claim the archive lacks the answer.' }), refs: [] };
-    turn.lookups.set(refined, Promise.resolve().then(() => {
+    const priorLookup = [...turn.lookups.values()].at(-1);
+    turn.lookups.set(refined, Promise.resolve(priorLookup).then(async () => {
+      if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
+      if (turn.selectionRun && (getDb().prepare('SELECT status FROM sync_runs WHERE id=?').get(turn.selectionRun) as { status: string }).status !== 'completed') throw new Error('Evidence selection stopped for this turn');
       if (!turn.historyBefore) throw new Error('Prepared conversation history is unavailable');
-      return historyContext(refined, turn.historyBefore, AbortSignal.any([call.historyLife.signal, turn.life.signal]), DISCUSSION_HISTORY_BYTES, true, turn.query);
+      const signal = AbortSignal.any([call.historyLife.signal, turn.life.signal]);
+      const db = getDb();
+      const previous = (db.prepare("SELECT text FROM live_messages WHERE call_id=? AND role='user' AND id<? ORDER BY id DESC LIMIT 6")
+        .all(call.id, turn.user.id) as { text: string }[]).reverse().map(row => row.text);
+      try {
+        const packet = await historyContext(refined, turn.historyBefore, signal, DISCUSSION_HISTORY_BYTES, true, turn.query, async (payload, system) => {
+          signal.throwIfAborted();
+          if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
+          if (!turn.selectionRun) turn.selectionRun = Number(db.prepare(`INSERT INTO sync_runs
+            (sync_id,summary_model,final_model,max_invocations,total_entries,question,request_id,started_at,stage)
+            VALUES (?,?,?,?,0,?,?,?,'Selecting voice evidence')`).run(call.sync.id, call.sync.models.summary,
+            call.sync.models.final || 'native voice', call.sync.models.max_invocations, currentQuestion, `voice:${call.id}:${turn.user.id}`, new Date().toISOString()).lastInsertRowid);
+          db.prepare("UPDATE sync_runs SET status='running',completed_at=NULL WHERE id=?").run(turn.selectionRun);
+          return modelCall(payload, system, { models: call.sync.models, runId: turn.selectionRun, signal });
+        }, previous);
+        if (turn.selectionRun) db.prepare("UPDATE sync_runs SET status='completed',completed_at=? WHERE id=?").run(new Date().toISOString(), turn.selectionRun);
+        return packet;
+      } catch (error) {
+        if (turn.selectionRun) db.prepare('UPDATE sync_runs SET status=?,error=?,completed_at=? WHERE id=?').run(
+          signal.aborted ? 'cancelled' : 'failed', error instanceof Error ? error.message : 'Evidence selection failed', new Date().toISOString(), turn.selectionRun);
+        throw error;
+      }
     }).then(packet =>
       packet.refs.length ? packet : turn.query?.kind === 'conversation' ? liveEvidence(call.sync, question, false, currentQuestion, 'No dated archive match; the supplied conversation quotes are limited to this sync.') : { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'No matching original records were found for this question in the prepared history. This does not establish that the information is absent. Ask which project or detail is intended; do not substitute an old conversation as current project status.' }), refs: [] }
     ).catch(() => ({
