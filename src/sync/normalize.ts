@@ -6,9 +6,14 @@ export function digest(value: string | Buffer): string {
 }
 
 // Stable across sync-local E/C references, but changes when a context edit changes the excerpt.
+const sourceKeys = new WeakMap<Evidence, { event: string; text: string; key: string }>();
 export function sourceKey(item: Evidence): string {
   if (item.unavailable && /^K[a-f0-9]{20}$/.test(item.source_key || '')) return item.source_key!;
-  return `K${digest(JSON.stringify([item.event_key, item.text])).slice(0, 20)}`;
+  const saved = sourceKeys.get(item);
+  if (saved?.event === item.event_key && saved.text === item.text) return saved.key;
+  const key = `K${digest(JSON.stringify([item.event_key, item.text])).slice(0, 20)}`;
+  sourceKeys.set(item, { event: item.event_key, text: item.text, key });
+  return key;
 }
 
 /** Canonical citations use E first, then the first known C. Extra physical

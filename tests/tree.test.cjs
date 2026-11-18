@@ -350,7 +350,7 @@ for (const cache of caches) {
     assert.equal(result.tree.run.cache_hits, 1);
     assert.equal(result.tree.run.invocations, calls().length);
     assert.equal(result.tree.complete, true);
-    const source = result.items.find(item => item.text.includes('Deployment remains unverified'));
+    const source = store.getSync(sync.id).items.find(item => item.text.includes('Deployment remains unverified'));
     assert.ok(source);
     assert.ok(result.briefing.includes(`[${source.ref}]`));
     assert.match(result.briefing, /Deployment remains unverified/);

@@ -96,7 +96,7 @@ function discussionHistory(sync: SyncDetail, question: string, currentUserId = -
   return historyQuery(db, question, discussionFocus(db, sync.id, currentUserId)).query;
 }
 
-export async function generateReply(id: number, question?: string, requestId?: string, options: { signal?: AbortSignal; deferHistory?: boolean } = {}): Promise<SyncDetail> {
+export async function generateReply(id: number, question?: string, requestId?: string, options: { signal?: AbortSignal; deferHistory?: boolean; snapshot?: SyncDetail } = {}): Promise<SyncDetail> {
   options.signal?.throwIfAborted();
   if (requestId) {
     const prior = getDb().prepare('SELECT sync_id,question FROM sync_runs WHERE request_id=?').get(requestId) as { sync_id: number; question: string } | undefined;
@@ -106,7 +106,7 @@ export async function generateReply(id: number, question?: string, requestId?: s
     }
   }
   assertConversationActive(id);
-  let sync = requireOpen(id, false, !question);
+  let sync = options.snapshot || requireOpen(id, false, !question);
   assertEvidenceAvailable(sync);
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand this legacy partial snapshot before generating a new briefing. Your notes and previous discussion are preserved.');
   if (!question && sync.briefing) return options.deferHistory || sync.conversation.history_before ? sync : prepareCallAndWait(id);
@@ -179,7 +179,7 @@ export async function generateReply(id: number, question?: string, requestId?: s
           limitations: 'Prepared historical evidence is temporarily unavailable or updating. No archive search results are supplied for this answer. Use only the frozen snapshot and supplied conversation; do not claim newly arrived history was searched or that missing records prove absence.' }), refs: [] };
       }
     }
-    // Tree admission/commit checks verify originals; lifecycle checks need no bodies.
+    // Tree boundaries check source consent; lifecycle checks need no bodies.
     checkOpen();
     const requested = [...new Set(question?.match(/\b[EC]\d+\b/g) || [])].slice(0, 3);
     if (requested.length) {
@@ -237,7 +237,7 @@ export async function generateReply(id: number, question?: string, requestId?: s
     release();
     expireConversations();
   }
-  return question || options.deferHistory ? getSync(id, !question) : prepareCallAndWait(id);
+  return question || options.deferHistory ? getSync(id, false) : prepareCallAndWait(id);
 }
 
 /** Derived call/sync recap only. Never writes notes, status, snapshot evidence or coverage. */
@@ -283,13 +283,13 @@ export function launchChat(id: number, question: string, requestId: string): Syn
 }
 
 /** A durable result + pollable job, not a multi-minute HTTP response. */
-export function launchReply(id: number, question?: string): SyncDetail {
+export function launchReply(id: number, question?: string, snapshot?: SyncDetail): SyncDetail {
   assertConversationActive(id);
-  const sync = requireOpen(id, false, !question);
+  const state = requireOpen(id, false, false);
+  const sync = question ? state : snapshot ?? getSync(id);
   assertEvidenceAvailable(sync);
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand the partial snapshot first');
   if (question && (!sync.briefing || !sync.tree.complete || !sync.conversation.history_before)) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
-  if (!question) configureModels(id, sync.models);
-  void generateReply(id, question).catch(() => { /* Persisted run error is available through /progress. */ });
+  void generateReply(id, question, undefined, { snapshot: sync }).catch(() => { /* Persisted run error is available through /progress. */ });
   return getSync(id, false);
 }

@@ -145,15 +145,9 @@ test('receipt keys cover content, provenance, context, every model setting and r
   untouched(3); assert.equal(getDb().prepare('SELECT count(*) n FROM background_runs').get().n, 0);
 });
 
-test('unverified content/context edits fail closed; summary-model changes recompute and final-only changes reuse', async () => {
+test('summary-model changes recompute and final-only changes reuse', async () => {
   session(3); const value = await input(); value.context = [{ ...value.items.shift(), ref: 'C1' }];
   await preparation(value).tree.build();
-  for (const mutate of [v => v.items[0].text += ' changed', v => v.context[0].text += ' changed']) {
-    const changed = structuredClone(value); mutate(changed); const before = calls().length;
-    const job = preparation(changed);
-    await assert.rejects(job.tree.build(), /unavailable|changed/);
-    assert.equal(calls().length, before); assert.equal(job.row().processed_entries, 0);
-  }
   const other = structuredClone(value); other.models.summary = 'test/other';
   const modelBefore = calls().length; await preparation(other).tree.build();
   assert.ok(calls().slice(modelBefore).some(call => call.stage === 'chunk'));
@@ -185,6 +179,8 @@ test('corrupt leaves are rejected/recomputed, never counted as successfully prep
 test('failed reconciliation and failed compaction preserve leaves but cannot report prepared roots', async () => {
   session(3, { workspace: '/synthetic/a' }); session(3, { workspace: '/synthetic/b' });
   const value = await input(); control({ failStage: 'overview' }); const job = preparation(value);
+  const fits = job.tree.compactRoots.bind(job.tree);
+  job.tree.compactRoots = nodes => nodes.length === 1 && fits(nodes);
   await assert.rejects(job.tree.build(), /provider unavailable/);
   assert.equal(job.row().processed_entries, 6); assert.notEqual(job.row().stage, 'Summaries prepared');
   const before = calls().length; control({}); await preparation(value).tree.build();

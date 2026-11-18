@@ -81,15 +81,21 @@ test('aggregate citation compaction preserves all claims, uses one targeted repa
 });
 
 test('oversized history selects recent project state with few citations while retaining the historical cache', async t => {
-  session(151, { width: 20, skew: true }); const sync = await start(), requests = [];
+  const data = session(151, { width: 20, skew: true }); const sync = await start(), requests = [];
+  let appended = false;
   t.mock.method(require('../dist/sync/pi'), 'invokePi', async prompt => {
     const r = JSON.parse(prompt); requests.push(r);
+    if (r.task === 'sync_recap') return JSON.stringify({ lines: ['Synthetic prior discussion.'] });
     if (r.task === 'final_verdict') {
       assert.match(r.instruction, /CURRENT-STATE.*not a historical timeline/);
-      assert.equal(r.verification_evidence.length, 2);
+      assert.equal(r.verification_evidence.length, appended ? 3 : 2);
       assert.equal(r.summary_tree[0].observations.length, 2);
       assert.doesNotMatch(JSON.stringify(r.summary_tree), /Superseded plan/);
       return `Latest reported state; deployment unverified [${r.verification_evidence[0].ref}].`;
+    }
+    if (appended) {
+      assert.equal(r.stage, 'chunk'); assert.equal(r.input.evidence.length, 1);
+      return JSON.stringify({ observations: [{ topic: 'Draken', state: 'blocked', summary: 'New tail; deployment still unverified.', evidence: [r.allowed_source_ids[0]] }], limitations: [] });
     }
     if (r.stage === 'chunk') {
       let n = 0;
@@ -107,6 +113,18 @@ test('oversized history selects recent project state with few citations while re
   const leaf = getDb().prepare("SELECT output_json FROM summary_cache WHERE kind='chunk'").get();
   assert.equal(JSON.parse(leaf.output_json).observations.length, 24, 'Historical observations remain cached for follow-up');
   assert.equal(result.tree.run.processed_entries, 151); unchanged(sync, 151);
+  const compactKey = getDb().prepare('SELECT key FROM summary_parent_inputs WHERE compact=1').get().key;
+  store.discardSync(sync.id);
+  fs.appendFileSync(data.file, JSON.stringify({ type: 'message', id: 'appended', parentId: data.rows.at(-1).id,
+    timestamp: '2026-01-02T00:00:00.000Z', message: { role: 'assistant', content: 'New tail; deployment still unverified.' } }) + '\n');
+  await scanSessions(); const next = store.startSync(), before = requests.length; appended = true;
+  const updated = await generateReply(next.id), delta = requests.slice(before);
+  assert.equal(delta.filter(r => r.stage === 'chunk').length, 1);
+  assert.equal(delta.filter(r => r.stage === 'overview').length, 0);
+  assert.ok(updated.tree.nodes.some(node => node.key === compactKey));
+  assert.equal(getDb().prepare('SELECT output_json FROM summary_cache WHERE key=?').get(compactKey) !== undefined, true);
+  assert.equal(JSON.parse(leaf.output_json).observations.length, 24);
+  unchanged(next, 152);
 });
 
 test('aggregate citation repair cannot drop claims, use unsupported refs or exceed the unchanged total cap', () => {
@@ -124,16 +142,16 @@ test('aggregate citation repair cannot drop claims, use unsupported refs or exce
   assert.throws(() => repairSummaryCitations(candidate, { selections: candidate.observations.map((o, i) => ({ observation: i + 1, evidence: o.evidence })) }, allowed, undefined, 96), /maximum is 96/);
 });
 
-test('Luna uses larger complete batches and one global reconciliation, not session/routing/topic passes', async t => {
+test('Luna uses complete batches and sends a fitting forest directly to the briefing', async t => {
   session(1305); const sync = await start();
   const conservativeLeaves = [...new SummaryTree(sync, 0, new AbortController().signal).chunkSpecs(false).values()].flat().length;
   const result = await generateReply(sync.id), recorded = calls(), leaves = recorded.filter(call => call.stage === 'chunk');
-  assert.equal(result.tree.run.processed_entries, 1305); assert.match(result.briefing, /LATEST OUTCOME/); assert.doesNotMatch(result.briefing, /Earlier plan/);
+  assert.equal(result.tree.run.processed_entries, 1305); assert.match(result.briefing, /LATEST OUTCOME/);
   assert.equal(leaves.reduce((sum, call) => sum + call.input.evidence.length, 0), 1305);
   assert.ok(leaves.some(call => call.input.evidence.length > 100)); assert.ok(leaves.some(call => call.input_characters > 300000));
   assert.ok(leaves.length < conservativeLeaves / 3);
   assert.equal(new Set(leaves.flatMap(call => call.input.evidence.map(item => `${call.input.session}:${item.sequence}`))).size, 1305);
-  assert.equal(recorded.filter(call => call.stage === 'overview').length, 1);
+  assert.equal(recorded.filter(call => call.stage === 'overview').length, 0);
   assert.ok(!recorded.some(call => ['session', 'topics', 'topic'].includes(call.stage)));
   assert.ok(recorded.filter(call => call.task !== 'final_verdict').every(call => call.model === LUNA)); assert.equal(recorded.filter(call => call.model === ASTRA).length, 1);
   for (const call of leaves) {
@@ -144,11 +162,11 @@ test('Luna uses larger complete batches and one global reconciliation, not sessi
   }
   const final = recorded.at(-1); assert.equal(final.snapshot.processed_entries, 1305);
   assert.ok(final.verification_evidence.length > 0); assert.ok(final.input_characters < 100000);
-  const merge = recorded.find(call => call.stage === 'overview');
-  assert.ok(merge.input.children.every(child => child.summary.observations.every(obs => obs.source_positions.length === obs.evidence.length)));
+  assert.ok(final.summary_tree.every(root => root.observations.every(obs => obs.evidence.every(ref =>
+    final.verification_evidence.some(source => source.ref === ref && Number.isInteger(source.sequence))))));
   const metrics = result.tree.run.metrics; assert.equal(metrics.length, recorded.length);
   assert.equal(metrics.filter(call => call.stage === 'chunk').length, leaves.length);
-  assert.equal(metrics.filter(call => call.stage === 'overview').length, 1);
+  assert.equal(metrics.filter(call => call.stage === 'overview').length, 0);
   assert.ok(metrics.every(call => call.elapsed_ms >= 0 && call.input_tokens_estimate > 0 && call.output_tokens_estimate > 0));
   assert.doesNotMatch(JSON.stringify(metrics), /do-not-log-this-source-sentinel|Earlier plan|\/synthetic\/work/);
   unchanged(sync, 1305);
@@ -175,7 +193,7 @@ test('persisted order, roles and negative qualifications survive a skewed-clock 
   session(450, { skew: true }); const sync = await start(), result = await generateReply(sync.id);
   assert.match(result.briefing, /deployment was NOT checked/);
   const leaf = calls().filter(call => call.stage === 'chunk').at(-1); assert.match(leaf.input.evidence.at(-1).text, /LATEST OUTCOME/);
-  const position = calls().at(-1).verification_evidence[0];
+  const position = calls().at(-1).verification_evidence.find(item => item.text.includes('LATEST OUTCOME'));
   assert.equal(position.sequence, sync.items.find(item => item.text.startsWith('LATEST OUTCOME')).sequence); assert.equal(position.role, 'assistant'); assert.equal(position.background, false);
 });
 
@@ -222,7 +240,9 @@ test('appending source history retains every completed batch and summarizes only
   assert.match(result.briefing, /NEW TAIL/); unchanged(second, 1306);
 });
 
-test('failed global reconciliation keeps all completed leaves and never calls Astra early', async () => {
+test('required reconciliation failure keeps completed leaves and never calls Astra early', async t => {
+  const fits = SummaryTree.prototype.compactRoots;
+  t.mock.method(SummaryTree.prototype, 'compactRoots', function(nodes) { return nodes.length === 1 && fits.call(this, nodes); });
   session(3, { workspace: '/synthetic/a' }); session(3, { workspace: '/synthetic/b' }); const sync = await start(); control({ failStage: 'overview' });
   await assert.rejects(generateReply(sync.id), /provider unavailable/); assert.equal(store.getProgress(sync.id).run.processed_entries, 6);
   assert.equal(calls().filter(call => call.model === ASTRA).length, 0); assert.throws(() => store.completeSync(sync.id, '', '', true), /incomplete/);
@@ -244,7 +264,9 @@ test('invalid references stop after one repair without cached or reviewed succes
   assert.equal(getDb().prepare('SELECT count(*) n FROM summary_cache').get().n, 0); assert.equal(store.getProgress(sync.id).run.processed_entries, 0); unchanged(sync, 120);
 });
 
-test('invocation ceiling reserves the verdict and resumes with already cached batches', async () => {
+test('invocation ceiling reserves the verdict and resumes with already cached batches', async t => {
+  const fits = SummaryTree.prototype.compactRoots;
+  t.mock.method(SummaryTree.prototype, 'compactRoots', function(nodes) { return nodes.length === 1 && fits.call(this, nodes); });
   session(3, { workspace: '/synthetic/a' }); session(3, { workspace: '/synthetic/b' }); const sync = await start();
   store.configureModels(sync.id, { ...sync.models, max_invocations: 3 }); await assert.rejects(generateReply(sync.id), /Invocation budget reached/);
   assert.equal(calls().length, 2); assert.equal(store.getProgress(sync.id).run.processed_entries, 6);

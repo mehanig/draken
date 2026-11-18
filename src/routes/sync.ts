@@ -70,9 +70,9 @@ router.post(['/syncs/start-call', '/syncs/start-chat'], route(async (req, res) =
     if (setup.state !== 'configured') throw new HttpError(503, setup.message);
     const scan = await completeScan();
     releaseStart();
-    const sync = startConversationSync(requestId, false);
+    const sync = startConversationSync(requestId);
     const ready = callReadiness(sync.id, req.path.endsWith('/start-chat')).ready;
-    res.status(202).json({ sync: metadata(ready ? sync : launchReply(sync.id)), scan });
+    res.status(202).json({ sync: metadata(ready ? sync : launchReply(sync.id, undefined, sync)), scan });
   } finally { releaseStart(); }
 }));
 router.post('/syncs/:id/recap', route((req, res) => res.status(202).json(metadata(launchRecap(id(req))))));

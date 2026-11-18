@@ -307,14 +307,14 @@ test('late foreground activity blocks subsequent provider calls even without a r
   control({}); await warm(); assert.equal(runs()[0].status, 'completed'); untouched();
 });
 
-test('later arrivals do not discard a completed captured batch; edited originals still block its receipt', async () => {
+test('later arrivals do not discard a captured batch; explicit source opt-out blocks its receipt', async () => {
   background.setAutoIndex(true); await append(1); control({ delay: 150 });
   let running = warm(); await waitFor(() => calls().length === 1);
   await append(1); await running;
   assert.equal(runs()[0].status, 'completed'); assert.equal(runs()[0].total_entries, 1);
   assert.equal(prep.summaryPreparationSettings().prepared_entries, 1);
   running = warm(); await waitFor(() => calls().length === 2);
-  rows[1].message.content += ' changed while provider was running'; writeRows();
+  store.setIncluded('synthetic-background', false);
   await running;
   assert.equal(runs().at(-1).status, 'failed');
   assert.equal(prep.summaryPreparationSettings().prepared_entries, 1);
