@@ -7,8 +7,8 @@ import { HttpError } from '../errors';
 import { SummaryNode, SummaryTree } from './tree';
 import { recapInput, recapHash, summarizeRecap, saveRecap, invalidateRecap, memoryText, type RecapInput } from './recap';
 import { invokePi } from './pi';
-import { searchPreparedHistory } from '../memory/service';
-import { selectHistory } from '../memory/selection';
+import { prepareEvidence, type EvidenceResult } from '../evidence';
+import { evidenceDependencies } from '../evidence-adapter';
 import { answerReferences, verdictReferenceIssue } from './answer-references';
 import { assertConversationActive, captureConversationHistory, expireConversations, touchConversation } from './conversation';
 import { yieldBackgroundIndexing } from './background';
@@ -28,6 +28,7 @@ Prefer the latest relevant original project records to old summaries or assistan
 
 const briefingStyle = `Use concise plain text: Needs your attention, Progress, Unfinished, Suggested discussion. Omit empty headings. No tables/code fences unless requested.`;
 const chatStyle = `This is a conversation reply, not an opening briefing. Answer the current user question directly.
+For advice, opinions, architecture assessments and next-step questions, establish the current situation from supplied evidence and cite those factual premises. Then offer your own reasoning or recommendation, clearly labelled as advice rather than a recorded or agreed decision. The recommendation itself does not need a separate citation. Use the briefing and recent discussion to understand follow-ups, but cite supplied original-source labels for claims about the work. If evidence is missing, explain what cannot be established; do not invent facts.
 Default to one short paragraph OR at most three short bullets, usually 60-100 words excluding citations. This is a target, not a minimum: use fewer words for simple questions. Follow an explicit user request for a shorter answer, a particular format, or a detailed breakdown; only expand when the actual user asks for detail, not because sources or earlier assistant replies are long.
 For a quick status question, lead with the overall status and group the most important remaining work. Do not list every completed task, commit or test, repeat the briefing, add unsolicited recommendations, or append an offer to elaborate. No briefing headings, tables or code fences unless requested.
 Read and reconcile all supplied relevant evidence before composing the short answer. A large evidence packet is not a request for a long reply. Keep essential uncertainty and the distinction between reported implementation and verified acceptance; do not turn missing evidence into a definite blocker or claim of completion just to save words. Cite the claims you include, grouping supporting references where appropriate. Brevity must not remove necessary later-report citations or qualifications.`;
@@ -162,69 +163,69 @@ export async function generateReply(id: number, question?: string, requestId?: s
     }
     const roots = question ? [] : await tree.build();
     if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Searching earlier history', runId);
+    const requested = [...new Set(question?.match(/\b[EC]\d+\b/g) || [])].slice(0, 3);
+    const readRequested = () => {
+      sync = getSync(id, requested);
+      assertEvidenceAvailable(sync);
+      const sources = [...sync.items, ...sync.context], scope = new EvidenceScope(db, sources);
+      for (const source of sources) scope.assert(source);
+    };
+    if (requested.length) readRequested();
     const query = question ? discussionHistory(sync, question, currentUserId) : undefined;
-    let archive: Awaited<ReturnType<typeof selectHistory>> | undefined;
+    let archive: EvidenceResult | undefined;
     if (query) {
       // Cancel and await owned indexing before touching the prepared index. The
       // cutoff was already captured at admission and stays pinned across awaits.
       await yieldBackgroundIndexing();
       controller.signal.throwIfAborted();
-      let found: Awaited<ReturnType<typeof searchPreparedHistory>> | undefined;
-      try {
-        if (!historyBefore) throw new Error('No prepared history cutoff');
-        found = await searchPreparedHistory({ ...query, before: historyBefore, limit: 64 }, controller.signal);
-      } catch (error) {
-        controller.signal.throwIfAborted();
-        if (error instanceof Error && error.name === 'AbortError') throw error;
-        archive = { text: JSON.stringify({ type: 'read_only_history', sources: [],
-          limitations: 'Prepared historical evidence is temporarily unavailable or updating. No archive search results are supplied for this answer. Use only the frozen snapshot and supplied conversation; do not claim newly arrived history was searched or that missing records prove absence.' }), refs: [] };
-      }
-      if (found) {
-        checkOpen();
-        db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Selecting evidence', runId);
-        archive = await selectHistory(found, query, historyBefore!, (payload, system) => {
+      if (!historyBefore) throw new Error('No prepared history cutoff');
+      archive = await prepareEvidence({ question: question!, lookupQuestion: query.question, scope: query, before: historyBefore,
+        signal: controller.signal, briefing: sync.briefing || '',
+        previousQuestions: sync.messages.filter(message => message.role === 'user').map(message => message.content),
+        ask: (payload, system) => {
           checkOpen();
+          db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Selecting evidence', runId);
           return tree.call(payload, system);
-        }, controller.signal, sync.messages.filter(message => message.role === 'user').map(message => message.content));
-      }
+        } }, evidenceDependencies);
     }
     // Tree boundaries check source consent; lifecycle checks need no bodies.
     checkOpen();
-    const requested = [...new Set(question?.match(/\b[EC]\d+\b/g) || [])].slice(0, 3);
-    if (requested.length) {
-      sync = getSync(id, requested);
-      assertEvidenceAvailable(sync);
-      const sources = [...sync.items, ...sync.context], scope = new EvidenceScope(db, sources);
-      for (const source of sources) scope.assert(source);
-    }
-    const input = finalInput(sync, tree, roots, question);
-    for (const ref of archive?.refs || []) input.allowedRefs.add(ref);
-    const calls = question ? db.prepare(`SELECT m.role,m.text,m.status,m.started_at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
-      WHERE c.sync_id=? AND m.text!='' ORDER BY m.id DESC LIMIT 12`).all(id).reverse().map((row: any) => ({ ...row, text: cleanText(row.text, 1500), qualification: 'Call transcript, not proof of hearing or agreement.' })) : undefined;
-    if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Thinking about your question', runId);
-    const references = answerReferences(input.allowedRefs);
-    const payload = { ...references.encode({ ...input.payload, ...(archive ? { historical_evidence: JSON.parse(archive.text), recent_call_transcripts: calls } : {}) }) as Record<string, unknown>,
-      reference_labels: references.labels };
-    const prompt = `${systemPrompt}\n${question ? chatStyle : briefingStyle}`;
-    if (!question) await tree.beforeFinal();
-    checkOpen();
-    let draft = cleanText(await tree.call(payload, prompt, true), 60000);
-    checkOpen();
-    let answer = references.decode(draft);
-    const issue = verdictReferenceIssue(answer, input.allowedRefs);
-    if (issue) {
-      controller.signal.throwIfAborted();
-      db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Checking evidence references', runId);
+    const scopeReply = archive && archive.kind !== 'ready' ? archive.message : undefined;
+    // Selection awaited a provider: do not reuse a frozen-original byte check
+    // across that await. At most three explicitly requested originals are read.
+    if (requested.length && !scopeReply) readRequested();
+    let answer: string;
+    if (scopeReply) answer = scopeReply;
+    else {
+      const input = finalInput(sync, tree, roots, question);
+      for (const ref of archive?.refs || []) input.allowedRefs.add(ref);
+      const calls = question ? db.prepare(`SELECT m.role,m.text,m.status,m.started_at FROM live_messages m JOIN live_calls c ON c.id=m.call_id
+        WHERE c.sync_id=? AND m.text!='' ORDER BY m.id DESC LIMIT 12`).all(id).reverse().map((row: any) => ({ ...row, text: cleanText(row.text, 1500), qualification: 'Call transcript, not proof of hearing or agreement.' })) : undefined;
+      if (question) db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Thinking about your question', runId);
+      const references = answerReferences(input.allowedRefs);
+      const payload = { ...references.encode({ ...input.payload, ...(archive ? { historical_evidence: JSON.parse(archive.text), recent_call_transcripts: calls } : {}) }) as Record<string, unknown>,
+        reference_labels: references.labels };
+      const prompt = `${systemPrompt}\n${question ? chatStyle : briefingStyle}`;
       if (!question) await tree.beforeFinal();
       checkOpen();
-      draft = cleanText(await tree.call({ ...payload, repair: true, citation_repair: {
-        instruction: 'Correct citation labels using only reference_labels, exactly as supplied. Keep the same response style and user-requested level of detail. Return only the corrected answer.',
-        citation_issue: issue, draft,
-      } }, prompt, true), 60000);
+      let draft = cleanText(await tree.call(payload, prompt, true), 60000);
       checkOpen();
       answer = references.decode(draft);
+      const issue = verdictReferenceIssue(answer, input.allowedRefs);
+      if (issue) {
+        controller.signal.throwIfAborted();
+        db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Checking evidence references', runId);
+        if (!question) await tree.beforeFinal();
+        checkOpen();
+        draft = cleanText(await tree.call({ ...payload, repair: true, citation_repair: {
+          instruction: 'Correct citation labels using only reference_labels, exactly as supplied. For advice or opinions, cite the supplied historical facts supporting the recommendation; do not pretend the recommendation itself is a recorded decision. If no citation was present, include the relevant evidence-backed premise with its label. Keep the same response style and user-requested level of detail. Return only the corrected answer.',
+          citation_issue: issue, draft,
+        } }, prompt, true), 60000);
+        checkOpen();
+        answer = references.decode(draft);
+      }
+      validateVerdict(answer, input.allowedRefs);
     }
-    validateVerdict(answer, input.allowedRefs);
     if (controller.signal.aborted) throw new HttpError(409, 'Generation cancelled');
     db.transaction(() => {
       if (!question) tree.verifyFinal();

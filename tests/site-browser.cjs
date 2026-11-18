@@ -6,7 +6,7 @@ const root=path.join(__dirname,'../site');
 const version=require('../package.json').version,anchor=version.replaceAll('.','');
 test('public release copy and documentation match the npm version',()=>{
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
- assert.equal(version,'0.9.0');
+ assert.equal(version,'0.9.1');
  const lock=require('../package-lock.json');assert.equal(lock.version,version);assert.equal(lock.packages[''].version,version);
  require('../scripts/site-release.cjs').validateCopy(version,html);
  assert.ok(html.includes(`Version ${version} / Available on npm`));
@@ -51,6 +51,10 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
+  assert.match(notes,/share one internal evidence-preparation module/);
+  assert.match(notes,/Empty candidate sets still need the relevance call/);
+  assert.match(notes,/text scope messages skip the answer call/);
+  assert.match(notes,/Model decisions and candidate coverage can still be wrong/);
   assert.match(notes,/newly prepared original history between user turns as dated H evidence/);
   assert.match(notes,/Each answer pins one history cutoff/);
   assert.match(notes,/Updates do not interrupt replies or disable already-prepared chat/);

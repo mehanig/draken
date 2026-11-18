@@ -10,8 +10,8 @@ import { cleanText } from '../sync/normalize';
 import { SyncDetail } from '../types';
 import { invalidateRecap } from '../sync/recap';
 import { LIVE_PROMPT, liveEvidence, liveRetrievalQuestion } from './live-context';
-import { historyContext } from '../memory/context';
-import { DISCUSSION_HISTORY_BYTES } from '../memory/packet';
+import { prepareEvidence } from '../evidence';
+import { evidenceDependencies } from '../evidence-adapter';
 import { modelCall } from '../sync/model-call';
 import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyProgress, stopHistory } from '../memory/service';
@@ -254,7 +254,8 @@ async function lookup(call: Call, question: string, turn: Turn) {
       const previous = (db.prepare("SELECT text FROM live_messages WHERE call_id=? AND role='user' AND id<? ORDER BY id DESC LIMIT 6")
         .all(call.id, turn.user.id) as { text: string }[]).reverse().map(row => row.text);
       try {
-        const packet = await historyContext(refined, turn.historyBefore, signal, DISCUSSION_HISTORY_BYTES, true, turn.query, async (payload, system) => {
+        const packet = await prepareEvidence({ question: currentQuestion, lookupQuestion: refined, before: turn.historyBefore, signal, scope: turn.query,
+          briefing: call.sync.briefing || '', previousQuestions: previous, ask: async (payload, system) => {
           signal.throwIfAborted();
           if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
           if (!turn.selectionRun) turn.selectionRun = Number(db.prepare(`INSERT INTO sync_runs
@@ -263,7 +264,7 @@ async function lookup(call: Call, question: string, turn: Turn) {
             call.sync.models.final || 'native voice', call.sync.models.max_invocations, currentQuestion, `voice:${call.id}:${turn.user.id}`, new Date().toISOString()).lastInsertRowid);
           db.prepare("UPDATE sync_runs SET status='running',completed_at=NULL WHERE id=?").run(turn.selectionRun);
           return modelCall(payload, system, { models: call.sync.models, runId: turn.selectionRun, signal });
-        }, previous);
+        } }, evidenceDependencies);
         if (turn.selectionRun) db.prepare("UPDATE sync_runs SET status='completed',completed_at=? WHERE id=?").run(new Date().toISOString(), turn.selectionRun);
         return packet;
       } catch (error) {
@@ -272,10 +273,10 @@ async function lookup(call: Call, question: string, turn: Turn) {
         throw error;
       }
     }).then(packet =>
-      packet.refs.length ? packet : turn.query?.kind === 'conversation' ? liveEvidence(call.sync, question, false, currentQuestion, 'No dated archive match; the supplied conversation quotes are limited to this sync.') : { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'No matching original records were found for this question in the prepared history. This does not establish that the information is absent. Ask which project or detail is intended; do not substitute an old conversation as current project status.' }), refs: [] }
+      packet.kind === 'unrelated' || packet.kind === 'clarify' || packet.refs.length ? packet : turn.query?.kind === 'conversation' ? liveEvidence(call.sync, question, false, currentQuestion, 'No dated archive match; the supplied conversation quotes are limited to this sync.') : { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'No matching original records were found for this question in the prepared history. This does not establish that the information is absent. Ask which project or detail is intended; do not substitute an old conversation as current project status.' }), refs: [] }
     ).catch(() => ({
       text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'Archive lookup failed or is busy. No other search mode or provider was substituted. Say earlier history could not be checked; do not invent a historical answer.' }), refs: [],
-    })).then(packet => snapshot ? { ...packet, snapshot } : packet));
+    })).then(packet => snapshot && !('kind' in packet && packet.kind !== 'ready') ? { ...packet, snapshot } : packet));
   }
   return turn.lookups.get(refined)!;
 }

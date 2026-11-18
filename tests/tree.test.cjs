@@ -119,7 +119,7 @@ test('cache hits across retries/syncs are source-addressed, not tied to old E re
   await generateReply(first.id);
   const firstCount = calls().length;
   await generateReply(first.id, 'Explain');
-  assert.equal(calls().length - firstCount, 1, 'discussion reuses the entire cheap tree');
+  assert.equal(calls().length - firstCount, 2, 'discussion selects evidence and answers without rebuilding the tree');
   store.discardSync(first.id);
   const second = store.startSync();
   for (const row of getDb().prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(second.id)) {

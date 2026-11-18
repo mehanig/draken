@@ -6,7 +6,8 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
 const { indexReadiness } = require('../dist/memory/readiness');
 const { historyQuery: voiceHistoryQuery } = require('../dist/memory/focus');
-const { historyPacket } = require('../dist/memory/packet');
+const { historyPacket } = require('../dist/evidence/packet');
+const { evidenceDependencies } = require('../dist/evidence-adapter');
 const { sourceEntry } = require('./fixtures/source-entry.cjs');
 let root, db, cache, index;
 const cutoff = '2026-01-07T22:00:00.000Z';
@@ -56,7 +57,7 @@ test('project candidates include recent work and exclude other projects, discuss
   assert.ok(found.results.some(item => /Profile-first journal navigation/.test(item.text)));
   assert.ok(found.results.every(record => record.session_id === 'trailboard' && record.at <= cutoff));
   assert.ok(!found.results.some(record => record.kind === 'discussion' || /only a small SwiftUI|future record must/.test(record.text)));
-  const packet = historyPacket(found, 7000, 1200); assert.ok(Buffer.byteLength(packet.text) <= 7000);
+  const packet = historyPacket(found, evidenceDependencies.cleanText, 7000, 1200); assert.ok(Buffer.byteLength(packet.text) <= 7000);
   assert.match(packet.text, /old dismissal callbacks/);
   const follow = voiceHistoryQuery(db, 'What are we uploading here? Images or what exactly?', plan.focus);
   const upload = await index.search({ ...follow.query, before: cutoff }, undefined, true);
@@ -71,7 +72,7 @@ test('multi-topic questions include original definitions, not just recent incide
   const prior = voiceHistoryQuery(db, 'Check Trailboard.').focus;
   const plan = voiceHistoryQuery(db, 'What does it mean upload safety and missing links?', prior);
   const found = await index.search({ ...plan.query, before: cutoff }, undefined, true);
-  const packet = historyPacket(found, 7000, 1200);
+  const packet = historyPacket(found, evidenceDependencies.cleanText, 7000, 1200);
   assert.match(packet.text, /GPS points and recording events/); assert.match(packet.text, /Terms\/EULA and Privacy Policy/);
   assert.ok(Buffer.byteLength(packet.text) <= 7000);
 });
@@ -87,21 +88,24 @@ test('source excerpts keep explanatory text, command context and closing qualifi
   const text = 'Recorded state. '.repeat(12) + 'Uploads contain GPS points and events; retries retain stable IDs.\nTool requested: read ' + 'x'.repeat(1000) + '\nDevice acceptance has NOT been performed.';
   const packet = historyPacket({ mode: 'hybrid', limitations: 'Synthetic source, not independently verified.', results: [
     { ref: 'H' + 'a'.repeat(24), kind: 'session', role: 'assistant', text, offset: 0, qualification: 'Agent report.', at: cutoff },
-  ] }, 7000, 1200);
+  ] }, evidenceDependencies.cleanText, 7000, 1200);
   assert.match(packet.text, /GPS points and events/); assert.match(packet.text, /Tool requested: read/);
   assert.match(packet.text, /Device acceptance has NOT been performed/);
 });
 test('explicit source requests support deeper prepared-only readback without corpus writes', async () => {
   entry('Earlier context. '.repeat(160) + 'GPS points and recording events are the payload.'); await index.prepare({ before: cutoff });
   const found = await index.search({ question: 'GPS points', before: cutoff }, undefined, true), ref = found.results[0].ref;
-  const service = require('../dist/memory/service'), original = service.readHistory;
+  const service = require('../dist/memory/service'), original = service.readHistory, search = service.searchPreparedHistory;
   const changes = cache.prepare('SELECT total_changes() n').get().n;
   service.readHistory = async (id, offset, _signal, before) => index.read(id, offset, before);
+  service.searchPreparedHistory = async query => index.search(query, undefined, true);
   try {
-    const packet = await require('../dist/memory/context').historyContext(`${ref} offset 2000`, cutoff, undefined, 7000, true, { session_ids: ['trailboard'] });
+    const packet = await require('../dist/evidence').prepareEvidence({ question: `${ref} offset 2000`, before: cutoff,
+      signal: new AbortController().signal, scope: { session_ids: ['trailboard'] },
+      ask: async () => '{"scope":"project","selected":["S1"]}' }, evidenceDependencies);
     assert.equal(JSON.parse(packet.text).sources[0].offset, 2000); assert.match(packet.text, /GPS points and recording events/);
     assert.equal(cache.prepare('SELECT total_changes() n').get().n, changes);
-  } finally { service.readHistory = original; }
+  } finally { service.readHistory = original; service.searchPreparedHistory = search; }
 });
 test('a legacy or interrupted import cannot certify its indexed prefix; later appends do not invalidate a captured prefix', async () => {
   entry('A recorded checkpoint.'); db.prepare('UPDATE agent_sessions SET scanned_bytes=0').run();

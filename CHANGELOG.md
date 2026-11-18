@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1
+
+- Give text and native voice one internal evidence-preparation module for prepared candidate search, project relevance, source selection and verified-original packets. The module owns its contracts and has no imports from other application code; search, verified reads, text cleaning and model calls are injected. CI checks imports and compiles/runs the folder in isolation. Conversation state, answering models, accounting and review remain outside it.
+- Support project-specific advice and architecture opinions by distinguishing recorded facts, which need citations, from recommendations, which are not agreed decisions. Clearly unrelated requests receive a short scope message; unclear requests receive a clarification. No matches do not make an engineering question unrelated.
+- Reuse the existing summary-model call for relevance and source selection. Empty candidate sets now also need this call. Text scope messages skip the answer-model call; voice delivers the decision through its existing native model, without a pi answer call.
+- Preserve source permissions, pinned cutoffs, original-byte verification, invocation limits and cancellation. Explicit frozen references are checked before and after selection. Prepared-search failures stop text replies visibly; invalid selector output is not silently repaired or automatically retried.
+- Retain histories, notes, embeddings, summary caches and explicit review. No new dependencies or database migration. Candidate coverage and model relevance decisions can still be wrong; this release does not add recent-matching retrieval or establish real native-audio quality.
+
 ## 0.9.0
 
 ### Let the summarization model select text and voice evidence

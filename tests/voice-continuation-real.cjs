@@ -11,7 +11,7 @@ delete process.env.DRAKEN_CODEX_BIN; delete process.env.DRAKEN_CODEX_HOME;
 process.env.DRAKEN_PI_BIN = path.join(root, 'fake-pi');
 fs.copyFileSync(path.join(__dirname, 'fixtures/fake-pi.cjs'), process.env.DRAKEN_PI_BIN); fs.chmodSync(process.env.DRAKEN_PI_BIN, 0o700);
 const schema = require('../dist/db/schema'), live = require('../dist/voice/live');
-const memory = require('../dist/memory/context'), originalLookup = memory.historyContext;
+const memory = require('../dist/evidence'), originalLookup = memory.prepareEvidence;
 const { NativeVoice } = require('../voice/realtime/native.mjs');
 const originalOpen = NativeVoice.prototype.open, originalContinue = NativeVoice.prototype.continueAnswer;
 let release, cues = 0, lookups = 0, server, browser, page, timer;
@@ -19,8 +19,8 @@ const errors = [], checks = {};
 const check = (name, condition) => { checks[name] = Boolean(condition); if (!condition) throw Error('Synthetic qualification failed: ' + name); };
 const ref = 'H0123456789abcdef01234567';
 const data = JSON.stringify({ type: 'read_only_history', sources: [{ ref, role: 'toolResult', scope: 'synthetic export test record', recorded_at: new Date().toISOString(), text: 'Targeted export tests: 5 passed and 0 failed. Deployment was NOT checked. Synthetic qualification data only.' }], limitations: 'Observed tests are not deployment verification or agreement.' });
-const delayed = new Promise(resolve => { release = () => resolve({ text: data, refs: [ref] }); });
-memory.historyContext = async () => { lookups++; return delayed; };
+const delayed = new Promise(resolve => { release = () => resolve({ kind: 'ready', text: data, refs: [ref] }); });
+memory.prepareEvidence = async () => { lookups++; return delayed; };
 NativeVoice.prototype.open = function(sdp, options) {
   return originalOpen.call(this, sdp, { ...options, prompt: options.prompt + '\nSynthetic timing qualification: on the first export-test question, say only “I will check the recorded test result.” Then wait for the application’s lookup completion before answering with the supplied results. Do not treat that acknowledgement as the answer.' });
 };
@@ -86,5 +86,5 @@ NativeVoice.prototype.continueAnswer = function(question) { cues++; return origi
 }).finally(async () => {
   clearTimeout(timer); release(); await browser?.close(); await live.shutdownLiveVoice();
   if (server) await new Promise(resolve => server.close(resolve));
-  schema.closeDb(); memory.historyContext = originalLookup; NativeVoice.prototype.open = originalOpen; NativeVoice.prototype.continueAnswer = originalContinue;
+  schema.closeDb(); memory.prepareEvidence = originalLookup; NativeVoice.prototype.open = originalOpen; NativeVoice.prototype.continueAnswer = originalContinue;
 });

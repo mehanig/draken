@@ -9,7 +9,7 @@ const { activity } = require('../dist/sync/activity');
 const conversation = require('../dist/sync/conversation');
 const background = require('../dist/sync/background');
 const memory = require('../dist/memory/service');
-const context = require('../dist/memory/context');
+const context = require('../dist/evidence');
 const live = require('../dist/voice/live');
 const { NativeVoice } = require('../voice/realtime/native.mjs');
 const BEFORE = '2025-01-01T00:00:00.000Z', NEXT = '2025-02-01T00:00:00.000Z';
@@ -63,7 +63,7 @@ beforeEach(() => {
   const at = new Date().toISOString();
   syncId = Number(getDb().prepare("INSERT INTO syncs(created_at,snapshot_at,snapshot_version,briefing,compression_complete,decisions,conversation_before) VALUES(?,?,2,'Original frozen briefing.',1,'Original notes.',?)").run(at, at, BEFORE).lastInsertRowid);
   replace(memory, 'historyReadiness', () => ({ ready: true, before }));
-  replace(context, 'historyContext', async (...args) => { lookups.push(args); return packet(); });
+  replace(context, 'prepareEvidence', async (args) => { lookups.push(args); return packet(); });
   const subscribe = replace(NativeVoice.prototype, 'subscribe', function (listener) { emit = listener; return subscribe.call(this, listener); });
 });
 afterEach(async () => {
@@ -97,7 +97,7 @@ test('damage during H retrieval is fatal rather than hidden by the qualified emp
   const file = frozenSource(), call = await connected(); let sends = 0, contexts = 0;
   replace(NativeVoice.prototype, 'text', async () => { sends++; });
   replace(NativeVoice.prototype, 'context', async () => { contexts++; });
-  replace(context, 'historyContext', async () => { fs.unlinkSync(file); throw Error('Original disappeared during retrieval'); });
+  replace(context, 'prepareEvidence', async () => { fs.unlinkSync(file); throw Error('Original disappeared during retrieval'); });
   await live.sendLiveText(call.id, 'What changed in the project?', randomUUID());
   await until(() => !activity.callActive);
   assert.equal(live.liveEvents(call.id, 0).active, false, 'fatal verification ends the call, not a successful empty-history answer');
@@ -118,8 +118,8 @@ test('new unprepared corpus arrivals do not block an already-prepared call or re
   assert.equal(conversation.conversationStatus(syncId).last_user_at, initial.last_user_at);
   await live.sendLiveText(call.id, 'What are we uploading?', randomUUID());
   await until(() => activity.backgroundIdle);
-  assert.deepEqual(lookups.map(args => args[1]), [BEFORE, BEFORE, BEFORE]);
-  assert.ok(lookups.every(args => args[4] === true), 'all retrieval stays prepared-only');
+  assert.deepEqual(lookups.map(args => args.before), [BEFORE, BEFORE, BEFORE]);
+  assert.ok(lookups.every(args => typeof args.ask === 'function'), 'all retrieval uses the shared accounted preparation entry point');
 });
 
 test('globally ready history cannot initialize a never-prepared conversation', async () => {
@@ -142,7 +142,7 @@ test('setup and readiness polling never adopt newer READY history; the first rea
   assert.equal(conversation.conversationStatus(syncId).history_before, BEFORE);
   assert.equal(conversation.conversationStatus(syncId).available_before, NEXT);
   await live.sendLiveText(call.id, 'What changed?', randomUUID());
-  assert.equal(lookups[0][1], NEXT);
+  assert.equal(lookups[0].before, NEXT);
   assert.equal(conversation.conversationStatus(syncId).history_before, NEXT);
 });
 
@@ -159,11 +159,11 @@ test('setup rechecks its own preparation after native status, without borrowing 
 
 test('unavailable history still permits prepared setup and delivers qualified empty context at the last known cutoff', async () => {
   replace(memory, 'historyReadiness', () => ({ ready: false, before: null }));
-  replace(context, 'historyContext', async (...args) => { lookups.push(args); throw Error('Synthetic archive unavailable'); });
+  replace(context, 'prepareEvidence', async (args) => { lookups.push(args); throw Error('Synthetic archive unavailable'); });
   const call = await connected();
   await live.sendLiveText(call.id, 'What changed?', randomUUID());
-  assert.equal(lookups[0][1], BEFORE);
-  assert.equal(lookups[0][4], true);
+  assert.equal(lookups[0].before, BEFORE);
+  assert.equal(typeof lookups[0].ask, 'function');
   assert.equal(conversation.conversationStatus(syncId).history_before, BEFORE);
   const text = requests().find(item => item.params?.role === 'developer').params.text;
   assert.match(text, /Archive lookup failed or is busy/);
@@ -175,7 +175,7 @@ test('unavailable history still permits prepared setup and delivers qualified em
 });
 
 test('READY history changes only at the next turn; all native refinements share its captured cutoff and frozen opening', async () => {
-  replace(context, 'historyContext', async (...args) => {
+  replace(context, 'prepareEvidence', async (args) => {
     lookups.push(args);
     if (lookups.length === 1) before = NEXT;
     return packet(`Hturn${lookups.length}`);
@@ -184,13 +184,13 @@ test('READY history changes only at the next turn; all native refinements share 
   assert.equal(activity.backgroundIdle, true);
   await live.sendLiveText(call.id, 'What are we uploading?', randomUUID());
   await until(() => activity.backgroundIdle);
-  assert.deepEqual(lookups.map(args => args[1]), [BEFORE, BEFORE, BEFORE]);
+  assert.deepEqual(lookups.map(args => args.before), [BEFORE, BEFORE, BEFORE]);
   assert.equal(conversation.conversationStatus(syncId).history_before, BEFORE);
   assert.equal(conversation.conversationStatus(syncId).available_before, NEXT);
   getDb().prepare("UPDATE syncs SET briefing='MUST_NOT_REWRITE_THE_OPENING' WHERE id=?").run(syncId);
   await live.sendLiveText(call.id, 'What else is recorded?', randomUUID());
   await until(() => activity.backgroundIdle);
-  assert.deepEqual(lookups.slice(3).map(args => args[1]), [NEXT, NEXT, NEXT]);
+  assert.deepEqual(lookups.slice(3).map(args => args.before), [NEXT, NEXT, NEXT]);
   assert.equal(conversation.conversationStatus(syncId).history_before, NEXT);
   const starts = requests().filter(item => item.method === 'thread/realtime/start');
   assert.equal(starts.length, 1);
@@ -208,7 +208,7 @@ test('typed arrival takes ownership immediately and awaits confirmed background 
   assert.equal(lookups.length, 0);
   assert.equal(requests().filter(item => item.method.includes('append')).length, 0);
   before = NEXT; stopped.resolve(); await pending;
-  assert.equal(lookups[0][1], BEFORE, 'capture happens at admission, not after drain');
+  assert.equal(lookups[0].before, BEFORE, 'capture happens at admission, not after drain');
   assert.equal(activity.backgroundIdle, false, 'delivered input is not a completed answer');
   event('assistant', 'The tests ', false);
   assert.equal(activity.backgroundIdle, false);
@@ -229,7 +229,7 @@ test('scheduler cancellation is not worker-exit confirmation; newer turns and ca
   assert.equal(activity.backgroundIdle, false);
   retired.resolve(); await Promise.all([older, newer]);
   assert.equal(lookups.length, 1);
-  assert.match(lookups[0][0], /New question/);
+  assert.match(lookups[0].question, /New question/);
   event('assistant', 'The new reply is complete.'); await flush();
   assert.equal(activity.backgroundIdle, true);
 
@@ -261,7 +261,7 @@ test('spoken reception stays nonblocking while background drains; acknowledgemen
   stopped.resolve();
   await until(() => requests().some(item => item.method.endsWith('appendSpeech')));
   await until(() => activity.backgroundIdle);
-  assert.equal(lookups[0][1], BEFORE);
+  assert.equal(lookups[0].before, BEFORE);
   assert.equal(live.liveHistory(syncId)[0].turns.filter(row => row.role === 'user').length, 1);
   assert.equal(conversation.conversationStatus(syncId).history_before, BEFORE);
 });
@@ -271,7 +271,7 @@ test('old interrupted completion and lookup cannot release a newer answer owner;
   await live.sendLiveText(call.id, 'First question.', randomUUID());
   event('assistant', 'Old streaming reply ', false);
   const held = gate(); let count = 0;
-  replace(context, 'historyContext', async (...args) => { lookups.push(args); return ++count === 1 ? held.promise : packet('Hnew'); });
+  replace(context, 'prepareEvidence', async (args) => { lookups.push(args); return ++count === 1 ? held.promise : packet('Hnew'); });
   const older = live.sendLiveText(call.id, 'Second question.', randomUUID());
   await until(() => count === 1);
   const newer = live.sendLiveText(call.id, 'Third question.', randomUUID());
@@ -404,9 +404,9 @@ test('missing assistant completion keeps background blocked and ends through cle
 
 test('history update/retrieval failure supplies the existing honest empty qualification, never fabricated evidence or another provider', async () => {
   const call = await connected(); before = NEXT;
-  replace(context, 'historyContext', async (...args) => { lookups.push(args); throw Error('Synthetic updated index failure'); });
+  replace(context, 'prepareEvidence', async (args) => { lookups.push(args); throw Error('Synthetic updated index failure'); });
   await live.sendLiveText(call.id, 'What changed?', randomUUID());
-  assert.equal(lookups[0][1], NEXT);
+  assert.equal(lookups[0].before, NEXT);
   const appends = requests().filter(item => item.params?.role === 'developer');
   assert.match(appends[0].params.text, /Archive lookup failed or is busy/);
   assert.match(appends[0].params.text, /No other search mode or provider was substituted/);

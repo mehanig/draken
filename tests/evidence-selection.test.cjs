@@ -5,7 +5,17 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), os = requ
 const Database = require('better-sqlite3');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
-const { selectHistory } = require('../dist/memory/selection');
+const { prepareEvidence } = require('../dist/evidence');
+const { evidenceDependencies } = require('../dist/evidence-adapter');
+async function selectHistory(found, query, before, ask, signal) {
+  const search = service.searchPreparedHistory;
+  service.searchPreparedHistory = async request => {
+    assert.equal(request.before, before); assert.equal(request.limit, 64);
+    return found;
+  };
+  try { return await prepareEvidence({ question: query.question, scope: query, before, ask, signal }, evidenceDependencies); }
+  finally { service.searchPreparedHistory = search; }
+}
 const service = require('../dist/memory/service');
 const { sourceEntry } = require('./fixtures/source-entry.cjs');
 let root, db, cache, index, read;
@@ -42,7 +52,7 @@ test('search brings command results into the candidate set and selected original
     calls++; assert.match(system, /untrusted historical data/);
     assert.ok(payload.candidates.some(item => item.role === 'toolResult' && /exit code 0/.test(item.text)));
     assert.ok(payload.candidates.every(item => item.session === 'atlas' && item.at <= before));
-    return JSON.stringify({ selected: payload.candidates.filter(item => /exit code 0|Device acceptance/.test(item.text)).map(item => item.id) });
+    return JSON.stringify({ scope: 'project', selected: payload.candidates.filter(item => /exit code 0|Device acceptance/.test(item.text)).map(item => item.id) });
   }, new AbortController().signal);
   assert.equal(calls, 1); assert.ok(packet.refs.length >= 2);
   assert.match(packet.text, /all checks passed/); assert.match(packet.text, /acceptance has not/);
@@ -57,7 +67,7 @@ test('selected commands bring their actual result even when it contains no query
   const { found, query } = await candidates('Explain UNIQUE_QUASAR_TIMEOUT');
   assert.ok(found.results.some(item => /UNIQUE_QUASAR_TIMEOUT/.test(item.text)));
   const packet = await selectHistory(found, query, before, async payload => JSON.stringify({
-    selected: payload.candidates.filter(item => /UNIQUE_QUASAR_TIMEOUT/.test(item.text)).map(item => item.id),
+    scope: 'project', selected: payload.candidates.filter(item => /UNIQUE_QUASAR_TIMEOUT/.test(item.text)).map(item => item.id),
   }), new AbortController().signal);
   assert.match(packet.text, /Connection refused/); assert.match(packet.text, /Exit status 1/);
   assert.ok(found.results.length <= 64);
@@ -67,18 +77,18 @@ test('older decisions and conflicting newer reports can both be selected without
   entry('Owner decision: retain the SQL store to support offline work.', 'user', 'atlas', '2026-01-01T00:00:00.000Z');
   entry('Proposal: replace the SQL store; no owner approval yet.');
   const { query, found } = await candidates('Why did we choose the SQL store, and has that decision changed?');
-  const packet = await selectHistory(found, query, before, async payload => JSON.stringify({ selected: payload.candidates.map(item => item.id) }), new AbortController().signal);
+  const packet = await selectHistory(found, query, before, async payload => JSON.stringify({ scope: 'project', selected: payload.candidates.map(item => item.id) }), new AbortController().signal);
   const sources = JSON.parse(packet.text).sources;
   assert.equal(sources.length, 2); assert.ok(sources.some(item => item.role === 'user' && item.at === '2026-01-01T00:00:00.000Z'));
   assert.match(packet.text, /no owner approval yet/);
 });
 
 test('packet byte limits preserve closing qualifications and original excerpt offsets', () => {
-  const { historyPacket } = require('../dist/memory/packet');
+  const { historyPacket } = require('../dist/evidence/packet');
   const text = '界'.repeat(1900) + '\nOwner approval has NOT been given.';
   const packet = historyPacket({ mode: 'hybrid', limitations: '', results: [{ ref: 'H' + 'a'.repeat(24), kind: 'session',
     at: before, role: 'assistant', title: 'Report', qualification: 'Original excerpt.', workspace: '/atlas',
-    text, offset: 100, score: 1 }] }, 3500, 3000);
+    text, offset: 100, score: 1 }] }, evidenceDependencies.cleanText, 3500, 3000);
   assert.ok(Buffer.byteLength(packet.text) <= 3500);
   const source = JSON.parse(packet.text).sources[0];
   assert.match(source.ending.text, /approval has NOT been given/);
@@ -88,17 +98,17 @@ test('packet byte limits preserve closing qualifications and original excerpt of
 test('unknown, repeated, excessive or malformed selections stop before source delivery', async () => {
   entry('Original evidence.'); const { query, found } = await candidates();
   service.readHistory = async () => assert.fail('Invalid selection must not read any original');
-  for (const output of ['not JSON', '{"selected":["S2"]}', '{"selected":["S1","S1"]}', '{"selected":[],"answer":"invented"}', JSON.stringify({ selected: Array(9).fill('S1') })]) {
+  for (const output of ['not JSON', '{"selected":[]}', '{"scope":"project","selected":["S2"]}', '{"scope":"project","selected":["S1","S1"]}', '{"scope":"project","selected":[],"answer":"invented"}', '{"scope":"unrelated","selected":["S1"]}', '{"scope":"other","selected":[]}', JSON.stringify({ scope: 'project', selected: Array(9).fill('S1') })]) {
     await assert.rejects(selectHistory(found, query, before, async () => output, new AbortController().signal), /Evidence selection returned invalid/);
   }
 });
 
-test('no candidates needs no selector call; selecting no useful evidence does not imply absence', async () => {
+test('no candidates still gets a scope decision; selecting no useful evidence does not imply absence', async () => {
   const query = { question: 'Unrecorded task', kind: 'sources' };
-  const empty = await selectHistory({ mode: 'hybrid', results: [], limitations: '' }, query, before, async () => assert.fail('No candidates'), new AbortController().signal);
+  const empty = await selectHistory({ mode: 'hybrid', results: [], limitations: '' }, query, before, async payload => { assert.deepEqual(payload.candidates, []); return '{"scope":"project","selected":[]}'; }, new AbortController().signal);
   assert.deepEqual(empty.refs, []); assert.match(empty.text, /No match is not proof/);
   entry('Unrelated evidence.'); const { found } = await candidates();
-  const packet = await selectHistory(found, query, before, async () => '{"selected":[]}', new AbortController().signal);
+  const packet = await selectHistory(found, query, before, async () => '{"scope":"project","selected":[]}', new AbortController().signal);
   assert.deepEqual(packet.refs, []);
 });
 
@@ -108,6 +118,6 @@ for (const change of ['excluded', 'damaged', 'cancelled']) test(`a source ${chan
     if (change === 'excluded') db.prepare('UPDATE agent_sessions SET included=0').run();
     if (change === 'damaged') fs.writeFileSync(db.prepare('SELECT path FROM agent_sessions').get().path, 'changed');
     if (change === 'cancelled') controller.abort();
-    return '{"selected":["S1"]}';
+    return '{"scope":"project","selected":["S1"]}';
   }, controller.signal));
 });
