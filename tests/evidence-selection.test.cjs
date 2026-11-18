@@ -6,13 +6,14 @@ const Database = require('better-sqlite3');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
 const { prepareEvidence } = require('../dist/evidence');
+const { evidenceDependencies } = require('../dist/evidence-adapter');
 async function selectHistory(found, query, before, ask, signal) {
   const search = service.searchPreparedHistory;
   service.searchPreparedHistory = async request => {
     assert.equal(request.before, before); assert.equal(request.limit, 64);
     return found;
   };
-  try { return await prepareEvidence({ question: query.question, scope: query, before, ask, signal }); }
+  try { return await prepareEvidence({ question: query.question, scope: query, before, ask, signal }, evidenceDependencies); }
   finally { service.searchPreparedHistory = search; }
 }
 const service = require('../dist/memory/service');
@@ -87,7 +88,7 @@ test('packet byte limits preserve closing qualifications and original excerpt of
   const text = '界'.repeat(1900) + '\nOwner approval has NOT been given.';
   const packet = historyPacket({ mode: 'hybrid', limitations: '', results: [{ ref: 'H' + 'a'.repeat(24), kind: 'session',
     at: before, role: 'assistant', title: 'Report', qualification: 'Original excerpt.', workspace: '/atlas',
-    text, offset: 100, score: 1 }] }, 3500, 3000);
+    text, offset: 100, score: 1 }] }, evidenceDependencies.cleanText, 3500, 3000);
   assert.ok(Buffer.byteLength(packet.text) <= 3500);
   const source = JSON.parse(packet.text).sources[0];
   assert.match(source.ending.text, /approval has NOT been given/);

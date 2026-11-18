@@ -1,31 +1,16 @@
-import { searchPreparedHistory } from '../memory/service';
-import { cleanText } from '../sync/normalize';
 import { selectHistory } from './selection';
-import type { HistoryQuery } from '../memory/types';
+import type { EvidenceDependencies, EvidenceRequest, EvidenceResult } from './contracts';
 
-/** The only application-facing entry point. No answer generation or state writes. */
-export interface EvidenceRequest {
-  question: string;
-  /** Optional retrieval refinement; never replaces the actual user request. */
-  lookupQuestion?: string;
-  before: string;
-  signal: AbortSignal;
-  scope?: Pick<HistoryQuery, 'session_ids' | 'kind' | 'recent' | 'topics'>;
-  previousQuestions?: string[];
-  briefing?: string;
-  ask: (payload: unknown, system: string) => Promise<string>;
-}
-export type EvidenceResult =
-  | { kind: 'ready'; text: string; refs: string[] }
-  | { kind: 'unrelated' | 'clarify'; text: string; refs: string[]; message: string };
+export type { EvidenceDependencies, EvidenceRequest, EvidenceResult } from './contracts';
 export { DISCUSSION_HISTORY_BYTES } from './packet';
 
-export async function prepareEvidence(request: EvidenceRequest): Promise<EvidenceResult> {
+/** The only application-facing operation. All host operations are injected. */
+export async function prepareEvidence(request: EvidenceRequest, dependencies: EvidenceDependencies): Promise<EvidenceResult> {
   request.signal.throwIfAborted();
-  const query = { ...request.scope, question: cleanText(request.lookupQuestion || request.question, 2000), before: request.before, limit: 64 };
+  const query = { ...request.scope, question: dependencies.cleanText(request.lookupQuestion || request.question, 2000), before: request.before, limit: 64 };
   // Search failures remain failures, never a scope decision or an empty match.
-  const found = await searchPreparedHistory(query, request.signal);
+  const found = await dependencies.search(query, request.signal);
   request.signal.throwIfAborted();
-  return selectHistory(found, { ...query, question: cleanText(request.question, 2000) }, request.before, request.ask, request.signal,
-    request.previousQuestions, request.briefing);
+  return selectHistory(found, { ...query, question: dependencies.cleanText(request.question, 2000) }, request.before,
+    request.ask, request.signal, dependencies, request.previousQuestions, request.briefing);
 }

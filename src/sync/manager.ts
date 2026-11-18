@@ -8,6 +8,7 @@ import { SummaryNode, SummaryTree } from './tree';
 import { recapInput, recapHash, summarizeRecap, saveRecap, invalidateRecap, memoryText, type RecapInput } from './recap';
 import { invokePi } from './pi';
 import { prepareEvidence, type EvidenceResult } from '../evidence';
+import { evidenceDependencies } from '../evidence-adapter';
 import { answerReferences, verdictReferenceIssue } from './answer-references';
 import { assertConversationActive, captureConversationHistory, expireConversations, touchConversation } from './conversation';
 import { yieldBackgroundIndexing } from './background';
@@ -185,7 +186,7 @@ export async function generateReply(id: number, question?: string, requestId?: s
           checkOpen();
           db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Selecting evidence', runId);
           return tree.call(payload, system);
-        } });
+        } }, evidenceDependencies);
     }
     // Tree boundaries check source consent; lifecycle checks need no bodies.
     checkOpen();

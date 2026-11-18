@@ -11,6 +11,7 @@ import { SyncDetail } from '../types';
 import { invalidateRecap } from '../sync/recap';
 import { LIVE_PROMPT, liveEvidence, liveRetrievalQuestion } from './live-context';
 import { prepareEvidence } from '../evidence';
+import { evidenceDependencies } from '../evidence-adapter';
 import { modelCall } from '../sync/model-call';
 import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyProgress, stopHistory } from '../memory/service';
@@ -263,7 +264,7 @@ async function lookup(call: Call, question: string, turn: Turn) {
             call.sync.models.final || 'native voice', call.sync.models.max_invocations, currentQuestion, `voice:${call.id}:${turn.user.id}`, new Date().toISOString()).lastInsertRowid);
           db.prepare("UPDATE sync_runs SET status='running',completed_at=NULL WHERE id=?").run(turn.selectionRun);
           return modelCall(payload, system, { models: call.sync.models, runId: turn.selectionRun, signal });
-        } });
+        } }, evidenceDependencies);
         if (turn.selectionRun) db.prepare("UPDATE sync_runs SET status='completed',completed_at=? WHERE id=?").run(new Date().toISOString(), turn.selectionRun);
         return packet;
       } catch (error) {

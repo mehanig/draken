@@ -1,8 +1,5 @@
-import { cleanText } from '../sync/normalize';
-import { readHistory } from '../memory/service';
 import { DISCUSSION_HISTORY_BYTES, historyPacket } from './packet';
-import type { HistoryQuery, HistoryResults } from '../memory/types';
-import type { EvidenceResult } from './index';
+import type { EvidenceCandidates, EvidenceDependencies, EvidenceQuery, EvidenceResult } from './contracts';
 
 const instructions = `Assess whether the request concerns the user's engineering work, and select original evidence for another model. Do not answer the question yourself.
 Return exactly ONE JSON object {"scope":"project","selected":["S1","S2"]} and nothing else: no commentary, reasoning, markdown or repeated JSON. Scope must be project, unrelated, or unclear.
@@ -15,8 +12,10 @@ For current-state questions, prefer relevant later outcomes over earlier plans, 
 Include evidence for each part of the question and distinguish projects. Do not assume that missing matches prove absence. Select IDs only from supplied candidates; never invent them. Missing evidence affects selection, not whether an engineering request is in scope.`;
 
 /** Selection uses the same paid call/accounting path as summarization. */
-export async function selectHistory(found: HistoryResults, query: HistoryQuery, before: string,
-  ask: (payload: unknown, system: string) => Promise<string>, signal: AbortSignal, previousQuestions: string[] = [], briefing = ''): Promise<EvidenceResult> {
+export async function selectHistory(found: EvidenceCandidates, query: EvidenceQuery, before: string,
+  ask: (payload: unknown, system: string) => Promise<string>, signal: AbortSignal, dependencies: EvidenceDependencies,
+  previousQuestions: string[] = [], briefing = ''): Promise<EvidenceResult> {
+  const cleanText = dependencies.cleanText;
   const candidates = found.results.slice(0, 64);
   signal.throwIfAborted();
   const output = await ask({ task: 'select_evidence', stage: 'selection', question: query.question,
@@ -42,7 +41,7 @@ export async function selectHistory(found: HistoryResults, query: HistoryQuery, 
     return { kind: scope === 'unrelated' ? 'unrelated' : 'clarify', message, refs: [],
       text: JSON.stringify({ type: 'engineering_scope', scope, message, instruction: 'Give this short scope message, not a substantive answer. No historical citations are needed.' }) };
   }
-  const results: HistoryResults['results'] = [], context: HistoryResults['results'] = [];
+  const results: EvidenceCandidates['results'] = [], context: EvidenceCandidates['results'] = [];
   for (const id of selected) {
     signal.throwIfAborted();
     const candidate = candidates[Number(id.slice(1)) - 1];
@@ -50,7 +49,7 @@ export async function selectHistory(found: HistoryResults, query: HistoryQuery, 
     const offset = requested ? Math.min(1000000, Number(requested[1])) : candidate.offset;
     // Resolve selected originals again after inference so exclusions or changed
     // records cannot be replaced with stale text from the candidate request.
-    const page = await readHistory(candidate.ref, offset, signal, before);
+    const page = await dependencies.read(candidate.ref, offset, signal, before);
     signal.throwIfAborted();
     if (!page.record.at || page.record.at > before || page.record.session_id !== candidate.session_id ||
       (query.session_ids && (!page.record.session_id || !query.session_ids.includes(page.record.session_id)))) {
@@ -64,5 +63,5 @@ export async function selectHistory(found: HistoryResults, query: HistoryQuery, 
     }
   }
   for (const item of context) if (!results.some(source => source.ref === item.ref)) results.push(item);
-  return { kind: 'ready', ...historyPacket({ ...found, results, limitations: found.limitations + ` Evidence selected from ${candidates.length} candidate excerpts within the ${before} cutoff; this is not a complete archive search.` }, DISCUSSION_HISTORY_BYTES, 3000) };
+  return { kind: 'ready', ...historyPacket({ ...found, results, limitations: found.limitations + ` Evidence selected from ${candidates.length} candidate excerpts within the ${before} cutoff; this is not a complete archive search.` }, cleanText, DISCUSSION_HISTORY_BYTES, 3000) };
 }

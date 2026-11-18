@@ -11,8 +11,9 @@
 
 - Application callers use only `src/evidence/index.ts`. Do not import its internals or add a separate text/voice search-and-selection path.
 - The module owns prepared candidate search, request relevance, source selection and checked-original packets. Callers own conversation state, invocation accounting, answering models, saving messages and review.
-- Pass cancellation, a fixed history cutoff and the existing accounted model callback. Do not add provider clients, database writes, automatic retries or conversation ownership inside the module.
+- `src/evidence/` must have no imports from other Draken code, external packages or Node builtins, including type-only imports. It owns its contract types and uses standard language/platform APIs. Do not add dependency exceptions.
+- Inject search, fresh verified-original reads and text cleaning through `EvidenceDependencies`; pass the accounted model callback, cancellation and fixed cutoff in the request. Wire Draken services only in `src/evidence-adapter.ts`, outside the module. Do not add default adapters, provider clients, database writes, automatic retries or conversation ownership inside the module.
 - Empty matches, unrelated requests, clarification and failures are different outcomes. Never infer irrelevance from an empty search.
-- Keep `tests/evidence-boundaries.test.cjs` and the public-contract tests running in normal CI. A new dependency or public export requires an explicit boundary review; do not weaken these tests merely to make a refactor pass.
+- Keep the import checks, standalone compile/run proof and pure public-contract tests in normal CI. The evidence folder must work when copied away from the repository with only injected host functions. Do not weaken these tests to make a refactor pass.
 - Preserve source permissions, original-byte verification, text/voice parity and cancellation tests when changing this boundary.
 - Keep responses concise. Use technical terms only when they help, and explain unfamiliar ones.
