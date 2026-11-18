@@ -15,6 +15,12 @@ export interface FrozenPointer {
   legacy_edit_match?: true;
 }
 const pointers = new WeakMap<Evidence, FrozenPointer>();
+export function withEvidenceRef(item: Evidence, ref: string): Evidence {
+  if (item.ref === ref) return item;
+  const copy = { ...item, ref }, pointer = pointers.get(item);
+  if (pointer) pointers.set(copy, pointer);
+  return copy;
+}
 const UNAVAILABLE_EVIDENCE = 'Original session evidence is unavailable or changed. Restore the original session file; Draken does not keep a text copy.';
 export const recordPointer = (row: RecordPointer): RecordPointer => ({ record_offset: row.record_offset, record_bytes: row.record_bytes, record_hash: row.record_hash });
 export function encodeEvidence(item: Evidence, pointer: FrozenPointer): string {
@@ -73,10 +79,9 @@ export class EvidenceReader {
   }
   freeze(item: Evidence): string {
     const previous = pointers.get(item);
-    if (previous) {
-      if (this.project(item, previous) !== item.text) throw new Error('Frozen evidence changed');
-      return encodeEvidence(item, previous);
-    }
+    // Session records are append-only. Encoding an already-read pointer must
+    // not reopen its original; citation/excerpt reads still resolve the bytes.
+    if (previous) return encodeEvidence(item, previous);
     const row = this.db.prepare('SELECT e.*,s.agent,s.external_id FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE e.session_id=? AND e.entry_id=?').get(item.session_id, item.entry_id) as any;
     if (!row || row.event_key !== item.event_key || !row.record_hash) throw new Error('Cannot freeze evidence without its verified source record');
     const pointer: FrozenPointer = { version: row.agent === 'pi' ? 1 : 2, ...(row.agent !== 'pi' ? { source: { agent: row.agent, external_id: row.external_id, parser_version: row.parser_version ?? 1 } } : {}), original: recordPointer(row), normalization: row.normalization ?? 2, text_hash: digest(item.text) };
@@ -85,8 +90,7 @@ export class EvidenceReader {
       if (!edit || edit.target_id !== item.entry_id || !edit.record_hash) throw new Error('Cannot freeze an unverified context edit');
       pointer.edit = { ...recordPointer(edit), entry_id: edit.entry_id, event_key: edit.event_key, normalization: edit.normalization ?? 2 };
     }
-    try { this.project(item, pointer); }
-    catch { pointer.clip = { limit: 2000, normalization: 2 }; this.project(item, pointer); }
+    if (row.effective_length > 2000 && item.text.length === 2000 + '\n[excerpt truncated]'.length) pointer.clip = { limit: 2000, normalization: 2 };
     pointers.set(item, pointer); return encodeEvidence(item, pointer);
   }
   close() { this.reader.close(); this.paths.clear(); }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.9
+
+- Treat session records as append-only during summary preparation. Reuse completed receipts and compact roots across appends instead of repeatedly reconstructing prompts and verifying all original bytes. Preserve source opt-outs, cancellation, invocation accounting and selected-original citation/retrieval checks.
+- Summarize only uncovered inputs. Pass a fitting forest directly to the final briefing; when reconciliation is needed, produce the current-state input directly. Retain historical caches and explicit review controls.
+- Hand captured evidence directly to preparation and adopt an existing completed background history index without a mandatory foreground refresh. Explicit **Refresh history** still refreshes; new entries join archive retrieval after the next completed index pass.
+- Real-model qualification on an isolated data copy reached chat readiness in **54.3 seconds**, with **11.1 seconds** of local tree work, covering 28,065 entries and summarizing a 44-entry tail. These measurements are not a universal latency guarantee or a model-quality claim.
+
 ## 0.8.8
 
 - One automatic-preparation control runs local indexing followed by paid summary caching, with a shared failure status and explicit retry. Preserve existing opt-outs and old open tabs' local-only consent; never retry failed paid work merely because time passes.

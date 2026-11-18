@@ -229,7 +229,7 @@ export class SummaryTree {
       .run(this.planIdentity, JSON.stringify(specs.map(spec => spec.key)));
     return specs;
   }
-  private leafStore() { return this.leaves ||= new ReusableLeaves(this.db, this.frozenScope); }
+  private leafStore() { return this.leaves ||= new ReusableLeaves(this.db, this.frozenScope, [...this.sync.items, ...this.sync.context]); }
 
   /** Every admitted leaf path (cached, restored pending, or fresh) must retain
    * physical representations, not just model/citation IDs. Identity memoization
@@ -261,12 +261,10 @@ export class SummaryTree {
       .run(store.frozenContext(this.sync.context), this.sync.id);
   }
 
-  /** Final inference is outside node(), and call() may be replaced by a provider
-   * boundary. Verify all inputs here, including uncited adopted dependencies.
-   * build() has closed its reader; this verification owns no lasting handles. */
+  /** Recheck source consent and cancellation, not append-only transcript bytes. */
   private verifyInputs() {
     if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
-    const store = new ReusableLeaves(this.db, this.frozenScope);
+    const store = new ReusableLeaves(this.db);
     try {
       store.verify(new Set([...this.sync.items, ...this.sync.context, ...[...this.dependencies.values()].flatMap(items => [...items])]));
     } finally { store.close(); }
@@ -274,8 +272,7 @@ export class SummaryTree {
   verifyFinal() { this.verifyInputs(); }
   async beforePreparation() {
     await this.planningYield();
-    // A persisted extra dependency may already be invalid on retry. Stop before
-    // any replacement leaf, parent, or recap—not after spending at the final gate.
+    // Source exclusions must take effect before any provider request.
     this.verifyInputs();
   }
   async beforeFinal() {
@@ -418,7 +415,6 @@ export class SummaryTree {
         .run(Number(cached), newlyProcessed.length, this.runId);
     };
     this.stage(spec.kind, spec.label);
-    this.verifyCacheProvenance(spec);
     for (const cacheKey of [spec.key, spec.legacyKey].filter((key): key is string => Boolean(key))) {
       const cache = this.db.prepare('SELECT output_json,model,prompt_version FROM summary_cache WHERE key = ?').get(cacheKey) as { output_json: string; model: string; prompt_version: string } | undefined;
       if (!cache) continue;
@@ -550,10 +546,7 @@ export class SummaryTree {
     const discover = (spec: Spec, verified?: string) => {
       const keys = [spec.key, spec.legacyKey].filter((key): key is string => Boolean(key && matchingKey(spec, undefined, key)));
       if (!keys.length) return;
-      if (!verified) {
-        if (found.has(spec.key)) return;
-        this.verifyCacheProvenance(spec);
-      }
+      if (!verified && found.has(spec.key)) return;
       keys.forEach(key => reconstructed.add(key));
       let frozen: string;
       let current = true;
@@ -612,8 +605,12 @@ export class SummaryTree {
         })) unresolvedReceipt();
         continue;
       }
-      const spec = this.leafSpec(input, Boolean(receipt.batch));
-      if (spec.key !== receipt.key && spec.legacyKey !== receipt.key) unresolvedReceipt();
+      // The persisted receipt already names this completed batch. Its model,
+      // recipe and membership were checked above; do not reconstruct its prompt.
+      const spec: Spec = { key: receipt.key, legacyKey: row.prompt_version === 'sync-tree-v1' ? receipt.key : undefined,
+        kind: 'chunk', label: `${input.evidence[0].session_name || input.workspace} · cached batch`, payload: {},
+        allowed: new Set([...input.evidence, ...input.background].map(sourceKey)), sources: input.evidence.map(sourceKey),
+        children: [], batch: Boolean(receipt.batch), leafInput: input, reuseOnly: true };
       discover(spec, receipt.input_json);
     }
 
@@ -968,32 +965,7 @@ export class SummaryTree {
     return !receipt || (receipt.recipe === this.leafRecipe(spec.batch) && receipt.output_hash === digest(row.output_json));
   }
 
-  /** Model keys deliberately omit selected physical pointers. A known receipt
-   * therefore outranks default packing, including across v1/v2 aliases. Check
-   * every alias before accepting ANY output or paying for a replacement. */
-  private verifyCacheProvenance(spec: Spec): void {
-    if (!spec.leafInput) return;
-    for (const key of [spec.key, spec.legacyKey].filter((value): value is string => Boolean(value))) {
-      const row = this.db.prepare('SELECT output_json,model,prompt_version FROM summary_cache WHERE key=?').get(key) as { output_json: string; model: string; prompt_version: string } | undefined;
-      // Changed recipes/models or corrupt outputs remain locally affected work.
-      if (!row || !this.compatibleCache(spec, key, row)) continue;
-      const receipt = this.db.prepare('SELECT input_json FROM summary_leaf_inputs WHERE key=?').get(key) as { input_json: string } | undefined;
-      if (!receipt) continue; // Exact full-current-input output-only compatibility.
-      const store = this.leafStore(), input = store.decode(receipt.input_json);
-      const fail = () => { throw new HttpError(409, 'A completed leaf receipt is unavailable, changed, excluded or unresolved. Cached work is intact; no paid replacement was requested.'); };
-      if (!input) return fail();
-      const original = this.leafSpec(input, spec.batch, false);
-      if (original.key !== key && original.legacyKey !== key) return fail();
-      const identity = (value: LeafInput) => JSON.stringify([value.evidence.map(item => store.identities(item)[0]), value.background.map(item => store.identities(item)[0])]);
-      if (identity(input) !== identity(spec.leafInput)) return fail();
-      // decode may reuse a planning read. Admission AND physical bytes must be
-      // fresh at this boundary, even for uncited inputs and legacy aliases.
-      store.verify([...input.evidence, ...input.background]);
-    }
-  }
-
   private cached(spec: Spec): boolean {
-    this.verifyCacheProvenance(spec);
     for (const key of [spec.key, spec.legacyKey].filter((key): key is string => Boolean(key))) {
       const row = this.db.prepare('SELECT output_json,model,prompt_version FROM summary_cache WHERE key=?').get(key) as { output_json: string; model: string; prompt_version: string } | undefined;
       if (!row || !this.compatibleCache(spec, key, row)) continue;
@@ -1157,9 +1129,6 @@ export class SummaryTree {
         const complete = children as Candidate[];
         const leaves = complete.flatMap(child => [...child.leaves]);
         if (new Set(leaves).size !== leaves.length) continue;
-        // A selective briefing is reusable only for the exact complete input,
-        // never as historical coverage when new work needs reconciliation.
-        if (row.compact && leaves.length !== nodes.length) continue;
         const spec = this.reconciliationSpec(complete.map(child => child.node), row.label, Boolean(row.compact), false);
         if (spec.key !== row.key || !this.cached(spec)) continue;
         const cache = this.db.prepare('SELECT output_json FROM summary_cache WHERE key=?').get(key) as { output_json: string };
@@ -1178,7 +1147,7 @@ export class SummaryTree {
     const prior = this.db.prepare('SELECT keys_json FROM summary_leaf_plans WHERE identity=?').get(this.parentPlanIdentity()) as { keys_json: string } | undefined;
     const preferred = new Set<string>(prior ? JSON.parse(prior.keys_json) : []);
     const candidates = [...available.values()].filter((value): value is Candidate => Boolean(value?.row))
-      .sort((a, b) => Number(preferred.has(b.node.key)) - Number(preferred.has(a.node.key)) || b.node.sources.length - a.node.sources.length || b.leaves.size - a.leaves.size);
+      .sort((a, b) => Number(preferred.has(b.node.key)) - Number(preferred.has(a.node.key)) || b.node.sources.length - a.node.sources.length || b.leaves.size - a.leaves.size || Number(b.row!.compact) - Number(a.row!.compact));
     const consumed = new Set<string>(), selected: Candidate[] = [];
     for (const candidate of candidates) {
       if ([...candidate.leaves].some(key => consumed.has(key))) continue;
@@ -1221,12 +1190,15 @@ export class SummaryTree {
     const processed = (this.db.prepare(`SELECT processed_entries FROM ${this.runTable} WHERE id=?`).get(this.runId) as { processed_entries: number }).processed_entries;
     if (processed !== this.sync.items.length) throw new Error('Incomplete source coverage: refusing to generate a final verdict');
     nodes = await this.retainedParents(nodes);
-    for (let depth = 0; nodes.length > 1; depth++) {
+    // The briefing already combines summaries. Do not regenerate a cached root
+    // merely to attach a small tail that fits alongside it in the final input.
+    for (let depth = 0; nodes.length > 1 && !this.compactRoots(nodes); depth++) {
       if (depth > 20) throw new Error('Summary tree depth exceeded');
       const groups = await this.tokenBatches(nodes, node => this.mergePayload([node], true));
       if (groups.length >= nodes.length) throw new HttpError(400, 'Summaries cannot be safely reconciled within the input budget. Cached results are intact.');
       const next: SummaryNode[] = [];
-      for (const [index, group] of groups.entries()) next.push(group.length === 1 ? group[0] : await this.reconcileBatch(group, `Global reconciliation ${depth + 1} · part ${index + 1}`));
+      for (const [index, group] of groups.entries()) next.push(group.length === 1 ? group[0] : await this.reconcileBatch(group,
+        groups.length === 1 ? 'Current project briefing' : `Global reconciliation ${depth + 1} · part ${index + 1}`, groups.length === 1));
       nodes = next;
     }
     // Oversized history needs current-state selection, not exhaustive compression.

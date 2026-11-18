@@ -1,11 +1,12 @@
 import type Database from 'better-sqlite3';
 import type { Evidence, NodeSummary } from '../types';
-import { EvidenceReader } from '../db/evidence';
+import { EvidenceReader, withEvidenceRef } from '../db/evidence';
 import { NormalizationCache } from './jsonl';
 import { digest, sourceKey } from './normalize';
 import { EvidenceScope, evidenceIdentities } from './evidence-scope';
 import { EntryReader } from './source-files';
 import { cleanText } from './normalize';
+import { admittedAgent } from '../sources/registry';
 
 export interface LeafInput {
   session: string;
@@ -33,31 +34,30 @@ export class ReusableLeaves {
   private historicalReads = new Map<string, Evidence | null>();
   private readonly normalization = new NormalizationCache();
   private readonly scope: EvidenceScope;
-  constructor(private db: Database.Database, frozenScope: Iterable<Evidence> = []) {
+  constructor(private db: Database.Database, frozenScope: Iterable<Evidence> = [], known: Iterable<Evidence> = frozenScope) {
     this.reader = new EvidenceReader(db, undefined, this.normalization);
-    const scopeReader = new EvidenceReader(db, undefined, this.normalization);
-    try {
-      this.scope = new EvidenceScope(db, [...frozenScope].map(item => JSON.parse(scopeReader.freeze(item))));
-    } finally { scopeReader.close(); }
+    this.scope = new EvidenceScope(db, [...frozenScope].map(item => JSON.parse(this.reader.freeze(item))));
+    // The snapshot already read these append-only records. Reuse those objects
+    // when loading saved batch receipts instead of reading the same files again.
+    for (const item of known) this.reads.set(evidenceIdentities(JSON.parse(this.reader.freeze(item)))[0], item);
   }
-  /** A node boundary must reopen originals: RecordReader's successful reads and
-   * descriptors are deliberately local to a synchronous verification batch.
-   * Normalization alone is reusable, and only AFTER fresh bytes pass hashing. */
+  /** Cached records are append-only; only current source consent can revoke
+   * their use between awaits. Do not reread every original at each tree node. */
   verify(items: Iterable<Evidence>) {
-    const reader = new EvidenceReader(this.db, undefined, this.normalization);
-    try {
-      for (const item of items) this.scope.assert(JSON.parse(reader.freeze(item)));
-    } finally { reader.close(); }
+    const included = new Set((this.db.prepare(`SELECT s.id FROM agent_sessions s
+      WHERE s.included=1 AND s.missing=0 AND ${admittedAgent('s')}`).all() as { id: string }[]).map(row => row.id));
+    for (const item of items) if (!included.has(item.session_id)) throw new Error('Original source is excluded or unavailable.');
   }
   close() { this.reader.close(); }
   read(value: string | Record<string, unknown>): Evidence | undefined {
     const encoded = typeof value === 'string' ? value : JSON.stringify(value);
-    try { this.scope.assert(JSON.parse(encoded)); } catch { return; }
-    if (!this.reads.has(encoded)) {
-      try { this.reads.set(encoded, this.reader.read(encoded)); }
-      catch { this.reads.set(encoded, null); }
+    const metadata = JSON.parse(encoded), key = evidenceIdentities(metadata)[0];
+    if (!this.reads.has(key)) {
+      try { this.scope.assert(metadata); this.reads.set(key, this.reader.read(metadata)); }
+      catch { this.reads.set(key, null); }
     }
-    return this.reads.get(encoded) || undefined;
+    const item = this.reads.get(key);
+    return item ? withEvidenceRef(item, metadata.ref) : undefined;
   }
   decode(value: string): LeafInput | undefined {
     try {
@@ -81,7 +81,7 @@ export class ReusableLeaves {
       VALUES (?,?,?,?,?,?)`).run(key, model, recipe, Number(batch), input, digest(output));
   }
   frozenContext(items: Evidence[]): string { return JSON.stringify(items.map(item => JSON.parse(this.reader.freeze(item)))); }
-  /** Verify the actual selected pointer, not merely its canonical citation ID. */
+  /** Retain the selected pointer's identity, not merely its canonical citation ID. */
   identities(item: Evidence): [string, string] { return evidenceIdentities(JSON.parse(this.reader.freeze(item))); }
 
   /** Reconstruct the deployed preview's bounded context from verified indexed

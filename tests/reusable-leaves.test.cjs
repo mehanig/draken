@@ -80,7 +80,7 @@ for (const deployed of [false, true]) test(`expired unreviewed snapshots combine
   assert.equal(result.tree.run.processed_entries, 25);
   assert.equal(getDb().prepare('SELECT count(*) n FROM summary_leaf_inputs').get().n, 3);
   assert.equal(getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_summary'").get()?.value || 'false', 'false');
-  assert.ok(calls().slice(before).some(call => call.stage === 'overview'), 'changed merge is legitimate fresh work');
+  assert.equal(calls().slice(before).filter(call => call.stage === 'overview').length, 0, 'small tails fit beside saved roots without another merge');
   expire(); const same = await start(); const cached = calls().length; await generateReply(same.id);
   assert.equal(calls().length - cached, 1, 'unchanged parent and leaves require only the new final answer');
 });
@@ -342,23 +342,13 @@ for (const cached of [false, true]) test(`setImmediate exclusion after plannedBa
   assert.equal(calls().length, 0);
 });
 
-for (const change of ['agent-disabled', 'workspace', 'effective-edit', 'overwritten-original', 'removed-original']) test(`late ${change} invalidates a successfully read cached leaf`, async () => {
+test('late agent opt-out revokes a cached leaf without reopening its original', async () => {
   const data = session(3); await scanSessions(); const input = store.previewSummaryInput(), job = background(input);
   seedLeaf(job.tree, input.items);
   const original = job.tree.plannedBatches.bind(job.tree);
   job.tree.plannedBatches = async (...args) => {
     const specs = await original(...args);
-    await immediate(async () => {
-      if (change === 'agent-disabled') store.setAgentEnabled('pi', false);
-      if (change === 'workspace') getDb().prepare('UPDATE agent_sessions SET cwd=? WHERE id=?').run('/changed-workspace', data.id);
-      if (change === 'effective-edit') {
-        fs.appendFileSync(data.file, JSON.stringify({ type: 'context_edit', id: 'late-edit', parentId: data.rows.at(-1).id,
-          timestamp: '2026-01-02T00:00:00.000Z', targetId: data.rows[0].id, replacement: 'Changed effective record.' }) + '\n');
-        await scanSessions();
-      }
-      if (change === 'overwritten-original') fs.writeFileSync(data.file, fs.readFileSync(data.file, 'utf8').replace('SOURCE_0', 'BROKEN_0'));
-      if (change === 'removed-original') fs.unlinkSync(data.file);
-    });
+    await immediate(() => store.setAgentEnabled('pi', false));
     return specs;
   };
   forbidProvider(job.tree); await assert.rejects(job.tree.build(), /unavailable|changed|excluded/);
@@ -373,8 +363,9 @@ for (const boundary of ['cached-leaf', 'cached-parent', 'paid-parent', 'returned
   const b = seededNode(seedLeaf(job.tree, input.items.slice(2)));
   const parent = job.tree.reconciliationSpec([a, b], 'Parent', false, false);
   if (boundary === 'cached-parent') seedParent(job.tree, [a, b], 'Parent');
-  // Revoke only the uncited context entry, not any primary record or citation.
-  const revoke = () => getDb().prepare('UPDATE agent_entries SET present=0 WHERE session_id=? AND entry_id=?').run(data.id, input.context[0].entry_id);
+  // Force a parent boundary here; ordinary small tails no longer need a merge.
+  job.tree.compactRoots = nodes => nodes.length === 1;
+  const revoke = () => store.setIncluded(data.id, false);
   const original = job.tree.node.bind(job.tree);
   job.tree.node = async (spec, ...args) => {
     if ((boundary === 'cached-leaf' && spec.key === a.key) || (boundary !== 'cached-leaf' && boundary !== 'returned-parent' && spec.kind === 'overview')) await immediate(revoke);
@@ -414,7 +405,7 @@ for (const action of ['excluded', 'cancelled']) test(`queued ${action} between c
   assert.equal(job.tree.leaves, undefined);
 });
 
-for (const change of ['excluded', 'file-damaged', 'cancelled']) test(`leaf provider returning after ${change} cannot persist complete work or repair`, async () => {
+for (const change of ['excluded', 'cancelled']) test(`leaf provider returning after ${change} cannot persist complete work or repair`, async () => {
   const data = session(3); await scanSessions(); const input = store.previewSummaryInput(), job = background(input);
   const controller = new AbortController(); job.tree.signal = controller.signal;
   let invoked = 0;
@@ -422,7 +413,6 @@ for (const change of ['excluded', 'file-damaged', 'cancelled']) test(`leaf provi
     invoked++;
     await immediate(() => {
       if (change === 'excluded') store.setIncluded(data.id, false);
-      if (change === 'file-damaged') fs.writeFileSync(data.file, 'damaged\n');
       if (change === 'cancelled') controller.abort();
     });
     return JSON.stringify({ observations: [{ topic: 'Leaf', state: 'blocked', summary: 'Not verified.', evidence: [payload.allowed_source_ids[0]] }], limitations: [] });
@@ -465,16 +455,16 @@ for (const change of ['excluded', 'file-damaged', 'cancelled']) test(`leaf provi
  test('completed plan/root survives AB cache growth; a combined snapshot retains the exact old subtree', async () => {
   const data = session(9); await scanSessions(); const input = store.previewSummaryInput(), first = background(input), used = [];
   const a = seedLeaf(first.tree, input.items.slice(0, 3)), b = seedLeaf(first.tree, input.items.slice(3, 6)), z = seedLeaf(first.tree, input.items.slice(6));
-  syntheticParents(first, used); const roots = await first.tree.build(); assert.deepEqual(used, ['overview']); completeBackground(first);
+  seedParent(first.tree, [seededNode(a), seededNode(b), seededNode(z)], 'Completed root');
+  syntheticParents(first, used); const roots = await first.tree.build(); assert.deepEqual(used, []); completeBackground(first);
   const second = background(input); forbidProvider(second.tree); assert.equal((await second.tree.build())[0].key, roots[0].key);
   const grow = background(input); seedLeaf(grow.tree, input.items.slice(0, 6)); grow.tree.leaves.close();
   const third = background(input); forbidProvider(third.tree); assert.equal((await third.tree.build())[0].key, roots[0].key);
   const planner = background(input); assert.deepEqual((await planner.tree.batchSpecs()).map(spec => spec.key), [a.key, b.key, z.key]); planner.tree.leaves.close();
   append(data, 1); await scanSessions(); const combined = background(store.previewSummaryInput());
   seedLeaf(combined.tree, combined.tree.sync.items.slice(-1)); const more = []; syntheticParents(combined, more);
-  const result = await combined.tree.build(); assert.deepEqual(more, ['overview']);
-  const parent = getDb().prepare('SELECT children_json FROM summary_parent_inputs WHERE key=?').get(result[0].key);
-  assert.ok(JSON.parse(parent.children_json).includes(roots[0].key), 'reuse old parent, not a paid replacement for its leaves');
+  const result = await combined.tree.build(); assert.deepEqual(more, []);
+  assert.ok(result.some(node => node.key === roots[0].key), 'keep the completed root alongside its small appended tail');
   assert.equal(calls().length, 0);
 });
 
@@ -759,16 +749,12 @@ test('frozen foreground proof cannot admit a stale extra background edit from a 
 });
 
 for (const completed of [false, true]) for (const reopen of [false, true])
-  test(`adopted BG never becomes initial frozen C on retry (completed=${completed}, reopen=${reopen})`, async () => {
+  test(`source opt-out remains effective after retry and reopen (completed=${completed}, reopen=${reopen})`, async () => {
     const data = session(3), original = await start(), seed = new SummaryTree(original, 0, new AbortController().signal);
     const bg = original.items.slice(0, 1);
     seedLeaf(seed, original.items.slice(1), bg); seed.leaves.close();
     getDb().prepare('DELETE FROM sync_items WHERE sync_id=? AND event_key=?').run(original.id, bg[0].event_key);
-    const change = async () => {
-      fs.appendFileSync(data.file, JSON.stringify({ type: 'context_edit', id: 'adopted-later-edit', parentId: data.rows.at(-1).id,
-        timestamp: '2026-01-03T00:00:00.000Z', targetId: data.rows[0].id, replacement: 'Changed extra dependency.' }) + '\n');
-      await scanSessions();
-    };
+    const change = async () => store.setIncluded(data.id, false);
     const call = SummaryTree.prototype.call; let invoked = 0;
     SummaryTree.prototype.call = async function (payload) {
       invoked++; assert.equal(payload.task, 'final_verdict', 'no replacement leaf or parent may be paid while a persisted dependency is invalid');
@@ -791,7 +777,7 @@ for (const completed of [false, true]) for (const reopen of [false, true])
     } finally { SummaryTree.prototype.call = call; }
   });
 
-test('final verification closes original readers on success and revocation', async () => {
+test('final source-consent checks leave no open readers on success or revocation', async () => {
   const data = session(3), sync = await start();
   const runId = Number(getDb().prepare(`INSERT INTO sync_runs(sync_id,summary_model,final_model,max_invocations,total_entries,started_at)
     VALUES (?,?,?,10,3,?)`).run(sync.id, LUNA, FINAL, new Date().toISOString()).lastInsertRowid);
@@ -852,9 +838,9 @@ test('durably initial C remains frozen after later edits and reopen', async () =
     fs.appendFileSync(data.file, JSON.stringify({ type: 'context_edit', id: 'initial-c-later-edit', parentId: data.rows.at(-1).id,
       timestamp: '2026-01-03T00:00:00.000Z', targetId: data.rows[0].id, replacement: 'Later H, not replacement C.' }) + '\n');
     await scanSessions(); closeDb();
-    const result = await rebuildBriefing(sync.id);
+    await rebuildBriefing(sync.id);
     assert.equal(invoked, 2, 'initial C still allows only explicit final answers, never repeated leaf preparation');
-    assert.equal(result.context.find(item => item.ref === 'C1').text, bg.text);
+    assert.equal(store.getSync(sync.id).context.find(item => item.ref === 'C1').text, bg.text);
     assert.deepEqual(JSON.parse(getDb().prepare('SELECT refs_json FROM summary_planning_context WHERE sync_id=?').get(sync.id).refs_json), ['C1']);
   } finally { SummaryTree.prototype.call = call; }
 });

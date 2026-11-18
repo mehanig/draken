@@ -1,9 +1,9 @@
 import { getDb } from '../db/schema';
 import type { CallReadiness } from '../types';
-import { assertEvidenceAvailable, getSync, requireOpen } from './store';
+import { getSync, requireOpen } from './store';
 import { activity } from './activity';
 import { HttpError } from '../errors';
-import { historyReadiness, prepareHistory } from '../memory/service';
+import { historyPreparationStatus, historyReadiness, prepareHistory } from '../memory/service';
 import { assertConversationActive, conversationStatus, expireConversations, markConversationPrepared } from './conversation';
 
 const jobs = new Map<number, { done: Promise<void> }>();
@@ -29,9 +29,16 @@ export function callReadiness(id: number, _capturedOnly = false): CallReadiness 
  * indexing writes the same readiness receipt, without invoking any provider. */
 export function prepareCall(id: number) {
   assertConversationActive(id);
-  const sync = requireOpen(id);
-  assertEvidenceAvailable(sync);
+  const sync = requireOpen(id, false, false);
   if (!sync.briefing || !sync.tree.complete) throw new HttpError(409, 'Prepare the briefing before preparing a call.');
+  const prepared = historyPreparationStatus();
+  if (!sync.conversation.history_before && prepared.ready && prepared.before) {
+    // Use the completed background index now. New arrivals are already in the
+    // briefing's snapshot and can join archive retrieval at the next idle update.
+    markConversationPrepared(id, prepared.before);
+    errors().delete(id);
+    return getSync(id, false);
+  }
   const controller = new AbortController(), failed = errors();
   const release = activity.beginJob(id, controller);
   const job = { done: Promise.resolve() };
@@ -55,5 +62,5 @@ export function prepareCall(id: number) {
 export async function prepareCallAndWait(id: number) {
   prepareCall(id);
   await jobs.get(id)?.done;
-  return getSync(id);
+  return getSync(id, false);
 }

@@ -93,7 +93,8 @@ test('failed user generation is not retried by indexing; explicit retry reuses t
  assert.ok(store.getSync(sync.id).briefing);assert.equal(count('syncs'),1);assert.equal(count('sync_coverage'),0);assert.ok(calls().length>=2);
 });
 
-test('a completed user briefing survives local-readiness failure; explicit retry reuses it without paying again',async()=>{
+test('without a prepared index, a briefing survives local-readiness failure and retries without paying again',async t=>{
+ t.mock.method(service,'historyPreparationStatus',()=>({ready:false,before:null}));
  session(64);await scanSessions();const sync=store.startConversationSync(randomUUID());
  service.prepareHistory=async()=>{throw Error('Synthetic local storage failure');};
  await generateReply(sync.id);

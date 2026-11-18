@@ -261,7 +261,8 @@ export function startConversationSync(requestId: string, evidence = true): SyncD
       VALUES (?,?,2,?,?,?,?)`).run(now, now, frozenContext(db, context), JSON.stringify(memory), memory[0]?.carry_forward || '', JSON.stringify(defaultModels()));
     const id = Number(result.lastInsertRowid); persistItems(id, items);
     db.prepare('INSERT INTO sync_presentations(sync_id,request_id,memory_inputs_json) VALUES (?,?,?)').run(id, requestId, JSON.stringify(inputs));
-    return getSync(id, evidence);
+    const sync = getSync(id, false);
+    return evidence ? { ...sync, items, context } : sync;
   })();
 }
 
