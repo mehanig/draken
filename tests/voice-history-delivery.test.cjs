@@ -6,7 +6,7 @@ const {DISCUSSION_HISTORY_BYTES}=require('../dist/memory/packet');
 function parts(delivery){return delivery.contexts.filter(s=>s.startsWith('READ-ONLY')).map(s=>JSON.parse(s.slice(s.indexOf('\n')+1)));}
 test('voice transports the whole chat packet, including late qualifications and follow-up edges, within native limits',()=>{
   const refs=Array.from({length:16},(_,i)=>'H'+i.toString(16).padStart(24,'0'));
-  const packet={refs,text:JSON.stringify({type:'read_only_history',sources:refs.map((ref,i)=>({ref,at:'2026-01-02',role:'assistant',session_id:'project',sequence:i,text:'Reported implementation. '+('日😀\\"\n'.repeat(65)),ending:{offset:8000,text:'Delivery remains disabled; device acceptance unverified.'}})),reconciliation:{threads:[{earlier_ref:refs[0],later_refs:refs.slice(1,4)}],qualification:'Candidates, not verified supersession.'},limitations:'No match is not absence. Not agreement.'})};
+  const packet={refs,text:JSON.stringify({type:'read_only_history',sources:refs.map((ref,i)=>({ref,at:'2026-01-02',role:'assistant',session_id:'project',sequence:i,text:'Reported implementation. '+('日😀\\"\n'.repeat(65)),ending:{offset:8000,text:'Delivery remains disabled; device acceptance unverified.'}})),limitations:'No match is not absence. Not agreement.'})};
   assert.ok(Buffer.byteLength(packet.text)<=DISCUSSION_HISTORY_BYTES);
   const delivery=historyDelivery(packet,42),fragments=parts(delivery),receipt=JSON.parse(delivery.receipt);
   assert.ok(fragments.length>1);assert.ok(delivery.contexts.length<=13);

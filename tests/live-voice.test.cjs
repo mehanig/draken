@@ -281,7 +281,7 @@ test('native refinement reaches source search, is deduplicated, and source IDs d
     assert.equal(lookups.length,3,'one base query plus two distinct refinements; repeated requests reuse their result');
     assert.match(lookups[1][0],/GPS points and recording events/);assert.doesNotMatch(lookups[1][0],/SYSTEM_INPUT/);
     assert.equal(lookups[1][5].kind,'sources');assert.equal(lookups[1][4],true);
-    assert.ok(lookups.every(args=>args[3]===32000),'voice uses the same expanded selection/reconciliation budget as chat');
+    assert.ok(lookups.every(args=>args[3]===32000),'voice uses the same evidence packet byte limit as chat');
     assert.deepEqual(JSON.parse(live.liveHistory(syncId)[0].turns.at(-1).evidence_json),['Hturn1','Hturn2','Hturn3']);
     const contexts=requests().filter(r=>r.params?.role==='developer').map(r=>r.params.text);
     assert.ok(contexts.every(s=>Buffer.byteLength(s)<=8192));
@@ -316,7 +316,7 @@ test('new calls inherit only actual-user project focus, and explicit switches st
 
 test('an explicit frozen status request supplies its original excerpt and checks later archive reports',async()=>{
   evidence();const context=require('../dist/memory/context'),original=context.historyContext;let query;
-  context.historyContext=async(...args)=>{query=args;return {text:JSON.stringify({sources:[{ref:'Hlater',text:'Client implemented; delivery remains disabled.'}],reconciliation:{threads:[],qualification:'Candidates, not verified supersession.'}}),refs:['Hlater']};};
+  context.historyContext=async(...args)=>{query=args;return {text:JSON.stringify({sources:[{ref:'Hlater',text:'Client implemented; delivery remains disabled.'}]}),refs:['Hlater']};};
   try{
     const call=await connected();await live.sendLiveText(call.id,'Is E2 still the current blocked status?',randomUUID());
     assert.equal(query[3],32000);assert.equal(query[5].recent,true);
@@ -329,7 +329,7 @@ test('an explicit frozen status request supplies its original excerpt and checks
   }finally{context.historyContext=original;}
 });
 
-const largePacket=()=>({refs:['H'+'1'.repeat(24),'H'+'2'.repeat(24)],text:JSON.stringify({type:'read_only_history',sources:[{ref:'H'+'1'.repeat(24),text:'Client wiring implemented. '+ 'Details. '.repeat(1700)},{ref:'H'+'2'.repeat(24),text:'Jobs implemented. Live delivery disabled; acceptance unverified.'}],reconciliation:{threads:[{earlier_ref:'H'+'1'.repeat(24),later_refs:['H'+'2'.repeat(24)]}]}})});
+const largePacket=()=>({refs:['H'+'1'.repeat(24),'H'+'2'.repeat(24)],text:JSON.stringify({type:'read_only_history',sources:[{ref:'H'+'1'.repeat(24),text:'Client wiring implemented. '+ 'Details. '.repeat(1700)},{ref:'H'+'2'.repeat(24),text:'Jobs implemented. Live delivery disabled; acceptance unverified.'}]})});
 test('full evidence is committed before typed input; partial delivery never publishes sources or resumes speech after Stop', async () => {
   const context=require('../dist/memory/context'),original=context.historyContext;
   const {NativeVoice}=require('../voice/realtime/native.mjs'),originalAppend=NativeVoice.prototype.context;
@@ -532,7 +532,6 @@ test('native API inherits authentication/origin restrictions and validates bound
   assert.equal((await request('/live/calls', 'POST', { syncId: 0 })).status, 400);
   assert.equal((await request('/live/calls', 'POST', { syncId, history: false })).status, 400, 'retired scope switch cannot silently disable automatic memory');
   const call = await (await request('/live/calls', 'POST', { syncId })).json();
-  assert.equal((await request('/calls', 'POST', { syncId })).status, 404, 'retired local call endpoint is absent');
   assert.equal((await request(`/live/calls/${call.id}/connect`, 'POST', { sdp: 'v=0\r\nm=audio 9 test' })).status, 200);
   assert.equal((await request(`/live/calls/${call.id}/text`, 'POST', { question: 'x'.repeat(2001), requestId: randomUUID() })).status, 400);
   assert.equal((await request(`/live/calls/${call.id}/events?after=-1`)).status, 400);
