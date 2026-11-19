@@ -4,6 +4,8 @@ const {normalizeEntry,digest}=require('../../dist/sync/normalize');
 const {EntryReader}=require('../../dist/sync/source-files');
 const {EvidenceReader}=require('../../dist/db/evidence');
 exports.sourceEntry=(db,directory,text,options={})=>{
+  // These provenance fixtures intentionally include historical (often 2020) work.
+  db.prepare("INSERT OR IGNORE INTO sync_settings(key,value) VALUES('activity_days','null')").run();
   fs.mkdirSync(directory,{recursive:true});
   const session=options.session||'session-a',id=options.id||String(db.prepare('SELECT COUNT(*) n FROM agent_entries').get().n+1),timestamp=options.timestamp||'2020-01-02T00:00:00.000Z';
   const file=path.join(directory,session+'.jsonl');

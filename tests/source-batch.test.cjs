@@ -14,7 +14,7 @@ beforeEach(()=>{
  const fake=root+'/pi';fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),fake);fs.chmodSync(fake,0o700);
  fs.writeFileSync(root+'/control.json','{}');
  Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions',DRAKEN_PI_BIN:fake,DRAKEN_TEST_CALL_LOG:root+'/calls.jsonl',DRAKEN_FAKE_CONTROL:root+'/control.json'});
- jobs=embeddings=0;now=Date.now();getDb();
+ jobs=embeddings=0;now=Date.now();getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
 });
 afterEach(()=>{cache?.close();cache=index=model=undefined;closeDb();fs.rmSync(root,{recursive:true,force:true});});
 function session(id){

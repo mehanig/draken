@@ -1,4 +1,5 @@
 import { getDb } from '../db/schema';
+import { assertRecentSessions } from '../sources/activity-window';
 import { Evidence, SyncDetail } from '../types';
 import { cleanText, sourceKey, sourceRepresentatives } from './normalize';
 import { assertEvidenceAvailable, configureModels, getSync, requireOpen } from './store';
@@ -107,6 +108,10 @@ export async function generateReply(id: number, question?: string, requestId?: s
     }
   }
   assertConversationActive(id);
+  if (!question && !(getDb().prepare('SELECT briefing FROM syncs WHERE id=?').get(id) as { briefing: string } | undefined)?.briefing) {
+    const sources = getDb().prepare("SELECT DISTINCT json_extract(evidence_json,'$.session_id') session FROM sync_items WHERE sync_id=?").all(id) as { session: string }[];
+    assertRecentSessions(getDb(), sources.map(row => row.session));
+  }
   let sync = options.snapshot || requireOpen(id, false, !question);
   assertEvidenceAvailable(sync);
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand this legacy partial snapshot before generating a new briefing. Your notes and previous discussion are preserved.');

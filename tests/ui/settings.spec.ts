@@ -11,8 +11,8 @@ async function inventory(page: Page) {
 }
 
 async function openSources(page: Page) {
-  await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('main', { name: 'Settings', exact: true });
   await dialog.getByText('Agents & sessions', { exact: true }).click();
   return dialog;
 }
@@ -33,8 +33,8 @@ test('automatic indexing saves only enabled, preserves the choice on reload and 
     return route.fulfill({ json: state });
   });
   const open = async () => {
-    await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
-    return page.getByRole('dialog', { name: 'Settings', exact: true });
+    await page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true }).click();
+    return page.getByRole('main', { name: 'Settings', exact: true });
   };
   await page.goto('/'); let dialog = await open();
   let toggle = dialog.getByRole('switch', { name: /Automatically prepare history/ });
@@ -61,20 +61,19 @@ test('automatic indexing saves only enabled, preserves the choice on reload and 
   expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
 });
 
-test('a queued close event cannot dismiss a newly reopened settings dialog', async ({ page }) => {
+test('Settings has a direct URL, reloads, and follows browser Back without starting work', async ({ page }) => {
+  const mutations: string[] = [];
+  page.on('request', request => { if (request.url().includes('/api/') && !['GET', 'HEAD'].includes(request.method())) mutations.push(request.url()); });
   await page.goto('/');
-  const trigger = page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true });
-  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
-  for (let cycle = 0; cycle < 3; cycle++) {
-    await trigger.click(); await expect(dialog).toBeVisible();
-    await page.keyboard.press('Escape'); await expect(trigger).toBeFocused();
-    await page.keyboard.press('Enter'); await expect(dialog).toBeVisible();
-    // Native close events are queued: the previous close can arrive after showModal().
-    await dialog.evaluate(element => element.dispatchEvent(new Event('close')));
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: 'Close settings' }).click();
-    await expect(dialog).not.toBeVisible();
-  }
+  const link = page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true });
+  await expect(link).toHaveAttribute('href', '/settings');
+  await link.focus(); await page.keyboard.press('Enter'); await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.reload(); await expect(link).toHaveAttribute('aria-current', 'page');
+  await page.goBack(); await expect(page).toHaveURL(/\/$/);
+  await page.goto('/settings'); await expect(page.getByRole('main', { name: 'Settings', exact: true })).toBeVisible();
+  expect(mutations).toEqual([]);
 });
 
 test('settings inventory shows recorded sources; scan, selection and missing-source states remain explicit', async ({ page }) => {
@@ -106,10 +105,10 @@ test('settings inventory shows recorded sources; scan, selection and missing-sou
     await scan.click(); await expect(row).toBeVisible();
     await expect(row).toContainText('Inventory fixture'); await expect(row).toContainText(file);
     await expect(row).toContainText('/synthetic/settings-inventory/project-with-a-long-workspace-name');
-    await expect(row).toContainText('Last recorded change:'); await expect(row).toContainText('1 unreviewed entry');
+    await expect(row).toContainText('First message:'); await expect(row).toContainText('Last message:'); await expect(row).toContainText('1 unreviewed entry');
     await expect(dialog.getByRole('list', { name: 'Scan warnings' })).toContainText('inventory-malformed.jsonl');
     const selected = row.getByRole('checkbox'); await expect(selected).toBeChecked(); await expect(selected).toBeEnabled();
-    await selected.uncheck(); await expect(row).toContainText('Excluded');
+    await selected.uncheck(); await expect(row).toContainText('Manually excluded');
     await expect.poll(async () => (await inventory(page)).sessions.find((session: any) => session.id === id).included).toBe(0);
     await expect(selected).toBeEnabled(); await selected.check();
     await expect.poll(async () => (await inventory(page)).sessions.find((session: any) => session.id === id).included).toBe(1);
@@ -120,7 +119,7 @@ test('settings inventory shows recorded sources; scan, selection and missing-sou
     await page.setViewportSize({ width: 320, height: 700 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-    await row.scrollIntoViewIfNeeded(); await expect(dialog.getByRole('button', { name: 'Close settings' })).toBeInViewport();
+    await row.scrollIntoViewIfNeeded(); await expect(row).toBeInViewport();
     await page.screenshot({ path: '.test-artifacts/settings-sources-mobile.png' });
     expect(fs.readFileSync(file, 'utf8')).toBe(content);
     const homeAfter = await (await page.request.get('/api/home')).json();
@@ -141,18 +140,15 @@ test('source settings handle an empty inventory, failed changes and foreground w
   await page.route('**/api/scan', route => route.fulfill({ status: 503, json: { error: 'Synthetic scan failure' } }));
   await page.route('**/api/sessions/settings-fixture', route => route.fulfill({ status: 503, json: { error: 'Synthetic selection failure' } }));
   await page.goto('/'); const dialog = await openSources(page), scan = dialog.getByRole('button', { name: 'Scan enabled agents' });
-  const reopen = async () => {
-    await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible(); const previous = reads;
-    await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click(); await expect.poll(() => reads).toBeGreaterThan(previous);
-  };
+  const refresh = async () => { const previous = reads; await expect.poll(() => reads, { timeout: 6000 }).toBeGreaterThan(previous); };
   await expect(dialog).toContainText('No pi sessions recorded yet.'); await expect(scan).toBeEnabled();
   await scan.click(); await expect(dialog.getByRole('alert')).toHaveText('Synthetic scan failure');
-  await reopen(); await expect(dialog.getByRole('alert')).toHaveText('Synthetic scan failure');
+  await refresh(); await expect(dialog.getByRole('alert')).toHaveText('Synthetic scan failure');
   sessions = [{ id: 'settings-fixture', agent: 'pi', external_id: 'settings-fixture', name: 'Synthetic session', cwd: '/synthetic/work', path: '/synthetic/pi/sessions/fixture.jsonl', included: 1, missing: 0, pending: 2, modified_at: new Date().toISOString() }];
-  await reopen(); const selected = dialog.getByRole('checkbox'); await expect(selected).toBeEnabled(); await selected.click();
+  await refresh(); const selected = dialog.getByRole('checkbox'); await expect(selected).toBeEnabled(); await selected.click();
   await expect(dialog.getByRole('alert')).toHaveText('Synthetic selection failure'); await expect(selected).toBeChecked();
-  await reopen(); await expect(dialog.getByRole('alert')).toHaveText('Synthetic selection failure'); await expect(selected).toBeChecked();
-  busy = true; await reopen(); await expect(scan).toBeDisabled(); await expect(selected).toBeDisabled();
+  await refresh(); await expect(dialog.getByRole('alert')).toHaveText('Synthetic selection failure'); await expect(selected).toBeChecked();
+  busy = true; await refresh(); await expect(scan).toBeDisabled(); await expect(selected).toBeDisabled();
   await expect(dialog).toContainText('Source changes are paused');
   await expect(dialog.getByRole('switch', { name: 'Enable Codex CLI history' })).toBeDisabled();
   expect(await page.evaluate(() => (window as any).__captures)).toBe(0);

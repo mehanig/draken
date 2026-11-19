@@ -62,8 +62,8 @@ p { line-height: 1.7; }
 .brand strong { display: block; font-size: 28px; font-weight: 900; letter-spacing: -.06em; text-transform: uppercase; line-height: 1; }
 .brand span { display: block; font-size: 10px; font-weight: 800; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; margin-top: 6px; }
 .header-right { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; min-width: 0; }
-.header-right .header-settings { min-height: 36px; padding: 7px 10px; font-size: 10px; }
-.settings-dialog { --settings-padding: 24px; width: min(960px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: var(--settings-padding); border: 2px solid var(--line); background: var(--panel); color: var(--ink); box-shadow: 8px 8px 0 var(--ink); overflow: auto; overscroll-behavior: contain; }
+.settings-page { width: min(960px, calc(100% - 32px)); margin: 32px auto; }
+.settings-page > h1 { margin-bottom: 24px; }
 .preparation-usage { border-bottom: 1px solid var(--rule); margin-bottom: 24px; padding-bottom: 16px; }
 .usage-controls, .usage-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
 .usage-controls label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; min-width: 0; }
@@ -91,8 +91,6 @@ p { line-height: 1.7; }
   .usage-controls, .usage-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .usage-controls label:last-child, .usage-totals > div:first-child { grid-column: 1 / -1; }
 }
-.settings-dialog::backdrop { background: rgb(17 17 17 / 60%); }
-.settings-dialog > .section-heading { position: sticky; top: calc(-1 * var(--settings-padding)); z-index: 1; margin-top: calc(-1 * var(--settings-padding)); padding-block: var(--settings-padding) 12px; background: var(--panel); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .section-heading > * { min-width: 0; }
 .section-heading h2 { margin-bottom: 0; }
@@ -100,6 +98,8 @@ p { line-height: 1.7; }
 .session-list { margin-top: 20px; max-height: 440px; overflow-y: auto; padding: 3px; }
 .session-source { display: flex; align-items: flex-start; gap: 10px; padding: 12px; margin-bottom: 10px; border: 2px solid var(--line); cursor: pointer; background: var(--paper); }
 .session-source:has(input:checked) { background: var(--panel); box-shadow: inset 4px 0 0 var(--accent); }
+.session-source.session-ignored { background: var(--surface-muted); box-shadow: none; border-style: dashed; }
+.session-source .source-last-message { display: block; margin-top: 6px; overflow-wrap: anywhere; }
 .session-source > span { min-width: 0; }
 .session-source strong { display: block; font-size: 13px; overflow-wrap: anywhere; font-weight: 800; }
 .source-cwd { display: block; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; color: var(--muted); font-size: 11px; margin: 5px 0; }
@@ -303,7 +303,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .sync-home, .sync-detail { width: min(100%, 1060px); margin: auto; padding: 40px 30px 72px; min-width: 0; }
 .sync-detail { width: min(100%, 1180px); }
 .setup-panel { margin-block: 24px; padding: 18px; border: 2px solid var(--line); background: var(--panel); overflow-wrap: anywhere; }
-.settings-dialog .setup-panel { padding: 14px; margin-bottom: 0; }
+.settings-page .setup-panel { padding: 14px; margin-bottom: 0; }
 .setup-panel h2 { font-size: 18px; }
 .setup-panel p, .setup-panel ul { margin-block: 10px; }
 .setup-panel code { font-size: 0.9em; white-space: normal; }
@@ -360,7 +360,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
   .brand strong { font-size: 24px; }
   .brand img { width: 36px; height: 36px; }
   .brand span { font-size: 9px; }
-  .settings-dialog { --settings-padding: 16px; }
   .session-list { max-height: 180px; }
   .notes-grid { grid-template-columns: 1fr; }
   .card { padding: 20px; }

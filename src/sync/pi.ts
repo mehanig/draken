@@ -1,3 +1,4 @@
+import { PLAIN_ENGLISH } from '../plain-english';
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -31,6 +32,7 @@ export async function stopManagerProcesses(): Promise<void> {
 /** One tool-free invocation, without a shell. The user payload uses stdin;
  * the fixed system prompt is a CLI argument. */
 export async function invokePi(prompt: string, request: PiRequest): Promise<string> {
+  request = { ...request, system: `${request.system}\n${PLAIN_ENGLISH}` };
   if (stopping) throw new HttpError(503, 'Draken is stopping. No new model work can start.');
   if (request.signal?.aborted) throw new HttpError(409, 'Generation cancelled');
   const large = request.largeSummary === true;

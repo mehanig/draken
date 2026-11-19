@@ -31,7 +31,7 @@ test('first-run instructions explain private pi and separate voice login; readin
   await page.setViewportSize({ width: 320, height: 700 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '.test-artifacts/onboarding-mobile.png' });
   fail = false; await panel.getByRole('button', { name: 'Check setup again' }).click(); await expect(start).toBeEnabled();
-  await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true }); await expect(dialog.getByRole('region', { name: 'Draken setup' })).toContainText('Runtime & sign-in');
+  await page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('main', { name: 'Settings', exact: true }); await expect(dialog.getByRole('region', { name: 'Draken setup' })).toContainText('Runtime & sign-in');
   expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true); expect(mutations).toEqual([]);
 });

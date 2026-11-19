@@ -18,6 +18,7 @@ beforeEach(() => {
   for (const agent of ['pi', 'codex', 'claude']) fs.mkdirSync(path.join(root, agent));
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(root, 'state'), DRAKEN_PI_SESSIONS_DIR: path.join(root, 'pi'), DRAKEN_CODEX_SESSIONS_DIR: path.join(root, 'codex'), DRAKEN_CLAUDE_SESSIONS_DIR: path.join(root, 'claude') });
   db = getDb();
+  db.prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
 });
 afterEach(() => {
   closeDb(); fs.rmSync(root, { recursive: true, force: true });

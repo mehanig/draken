@@ -10,8 +10,8 @@ test('Settings usage offers every range and bucket, honest partial costs and a w
   let requests = 0, mutations = 0;
   page.on('request', request => { if (request.url().includes('/api/') && !['GET', 'HEAD'].includes(request.method())) mutations++; });
   await page.route('**/api/settings/preparation-usage?*', route => { requests++; const q = new URL(route.request().url()).searchParams; return route.fulfill({ json: usage(q.get('range')!, q.get('bucket')!) }); });
-  await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true }), panel = dialog.getByRole('region', { name: 'Preparation usage', exact: true });
+  await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto('/settings');
+  const dialog = page.getByRole('main', { name: 'Settings', exact: true }), panel = dialog.getByRole('region', { name: 'Preparation usage', exact: true });
   await expect(panel).toContainText('Known cost subtotal'); await expect(panel.locator('.usage-totals')).toContainText('$1.25'); await expect(panel).toContainText('not your bill');
   expect((await dialog.boundingBox())!.width).toBeGreaterThan(800);
   await expect(panel.locator('.usage-y-axis span')).toHaveText(['$0', '$0.50', '$1.00', '$1.50']);
@@ -37,8 +37,8 @@ test('Settings usage offers every range and bucket, honest partial costs and a w
   await page.screenshot({ path: '.test-artifacts/usage-mobile.png' });
   await panel.getByText('Bucket details', { exact: true }).click(); await expect(panel.getByRole('table')).toContainText('Unavailable (partial)');
   expect(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
-  await page.keyboard.press('Escape'); const closed = requests; await page.waitForTimeout(16000); expect(requests).toBe(closed); expect(mutations).toBe(0);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await expect(panel.getByLabel('Look back')).toHaveValue('14d'); await expect(panel.getByLabel('Bucket size')).toHaveValue('24h'); await expect(panel.locator('.usage-totals')).toContainText('$1.25');
+  await page.getByRole('link', { name: 'Draken sync history', exact: true }).click(); const closed = requests; await page.waitForTimeout(16000); expect(requests).toBe(closed); expect(mutations).toBe(0);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click(); await expect(panel.getByLabel('Look back')).toHaveValue('7d'); await expect(panel.getByLabel('Bucket size')).toHaveValue('1h'); await expect(panel.locator('.usage-totals')).toContainText('$1.25');
 });
 for (const usd of [0, 0.0000002, 0.000001, 1000000, 1e12, null]) test(`Y-axis stays readable for cost ${usd} and a single batch on a narrow screen`, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 844 });
@@ -47,7 +47,7 @@ for (const usd of [0, 0.0000002, 0.000001, 1000000, 1e12, null]) test(`Y-axis st
     if (usd === null) data.buckets[0].cost.complete = false;
     return route.fulfill({ json: data });
   });
-  await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.goto('/settings');
   const panel = page.getByRole('region', { name: 'Preparation usage', exact: true });
   await expect(panel.locator('.usage-axis-unit')).toHaveText('USD');
   const labels = await panel.locator('.usage-y-axis span').allTextContents();
@@ -76,7 +76,7 @@ test('changed range ignores an old response and a failed refresh never presents 
     if (fail) { await route.fulfill({ status: 503, json: { error: 'Synthetic usage read failure' } }); return; }
     await route.fulfill({ json: usage(q.get('range')!, q.get('bucket')!, 2.5) });
   });
-  await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.goto('/settings');
   const panel = page.getByRole('region', { name: 'Preparation usage', exact: true }); await expect(panel).toContainText('Loading preparation usage');
   await expect.poll(() => first).toBe(false); await panel.getByLabel('Look back').selectOption('1d'); await expect(panel.locator('.usage-totals')).toContainText('$2.50');
   release(); await page.waitForTimeout(100); await expect(panel).not.toContainText('$999');

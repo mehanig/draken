@@ -31,6 +31,55 @@ async function fixture(t) {
   return { root, env, launch };
 }
 
+const cliScript = args => `require('./dist/sync/background').startBackgroundIndexing=()=>console.log('START WINDOW '+require('./dist/sources/activity-window').activityDays(require('./dist/db/schema').getDb()));process.argv=${JSON.stringify([process.execPath, 'draken', ...args])};require('./dist/cli');`;
+const stop = async item => { item.child.kill('SIGTERM'); assert.equal(await item.closed, 0, item.output()); };
+
+test('startup history flag saves before background work; saved windows, opt-outs and paid pauses survive restart', async t => {
+  const f = await fixture(t), first = await f.launch(cliScript([])); await first.waitFor(/START WINDOW 7/); await stop(first);
+  const Database = require('better-sqlite3'), db = new Database(path.join(f.env.DRAKEN_DATA_DIR, 'draken.db'));
+  try {
+    const consent = [['auto_index', 'false'], ['auto_summary', 'false'], ['auto_summary_error', 'Synthetic paid pause']];
+    for (const [key, value] of consent) db.prepare('INSERT INTO sync_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
+    for (const [args, expected] of [[[], 7], [['--history-days', '30', '--yes'], 30], [[], 30], [['--history-days', 'all', '--yes'], null], [[], null], [['--history-days', '1'], 1]]) {
+      const server = await f.launch(cliScript(args)); await server.waitFor(new RegExp('START WINDOW ' + expected)); await stop(server);
+      for (const [key, value] of consent) assert.equal(db.prepare('SELECT value FROM sync_settings WHERE key=?').get(key).value, value);
+    }
+  } finally { db.close(); }
+});
+
+test('history flag cannot change a running owner through either a busy port or another port', async t => {
+  const f = await fixture(t), owner = await f.launch(cliScript([])); await owner.waitFor(/START WINDOW 7/);
+  for (const extra of [{ DRAKEN_PORT: owner.env.DRAKEN_PORT }, {}]) {
+    const contender = await f.launch(cliScript(['--history-days', 'all', '--yes']), extra);
+    assert.equal(await contender.closed, 1, contender.output()); assert.match(contender.output(), /owns this data directory|port is already in use/);
+    const Database = require('better-sqlite3'), db = new Database(path.join(f.env.DRAKEN_DATA_DIR, 'draken.db'), { readonly: true });
+    try { assert.equal(require('../dist/sources/activity-window').activityDays(db), 7); } finally { db.close(); }
+  }
+  await stop(owner);
+});
+
+test('invalid history flags and unconfirmed noninteractive widening do not start background work', async t => {
+  const f = await fixture(t);
+  for (const value of ['0', '-1', '1.5', '36501', 'unknown']) {
+    const result = await f.launch(cliScript(['--history-days', value])); assert.equal(await result.closed, 1, result.output());
+    assert.match(result.output(), /--history-days must be/); assert.equal(fs.existsSync(path.join(f.env.DRAKEN_DATA_DIR, 'draken.db')), false);
+  }
+  const result = await f.launch(cliScript(['--history-days', 'all'])); assert.equal(await result.closed, 1, result.output());
+  assert.match(result.output(), /Run interactively to confirm, or pass --yes/); assert.doesNotMatch(result.output(), /START WINDOW/);
+  const next = await f.launch(cliScript([])); await next.waitFor(/START WINDOW 7/); await stop(next);
+});
+
+test('interactive history widening requires an affirmative answer', async t => {
+  const f = await fixture(t);
+  for (const answer of ['no', '', 'yes']) {
+    const script = `Object.defineProperty(process.stdin,'isTTY',{value:true});require('node:readline/promises').createInterface=()=>({question:async text=>{console.log(text);return ${JSON.stringify(answer)};},close(){}});`;
+    const result = await f.launch(script + cliScript(['--history-days', '30']));
+    await result.waitFor(/provider quota or API billing/);
+    if (answer === 'yes') { await result.waitFor(/START WINDOW 30/); await stop(result); }
+    else { assert.equal(await result.closed, 1, result.output()); assert.match(result.output(), /Startup cancelled/); const next = await f.launch(cliScript([])); await next.waitFor(/START WINDOW 7/); await stop(next); }
+  }
+});
+
 test('a suspended server cannot lose ownership to a stale clock; genuine process death permits recovery', { skip: process.platform === 'win32', timeout: 15000 }, async t => {
   const f = await fixture(t), owner = await f.launch(); await owner.waitFor(/Draken sync running/);
   const record = path.join(f.env.DRAKEN_DATA_DIR, 'server-state.json'), before = fs.readFileSync(record);

@@ -19,6 +19,7 @@ beforeEach(() => {
   Object.assign(process.env, { DRAKEN_DATA_DIR: root + '/state', DRAKEN_PI_SESSIONS_DIR: root + '/sessions', DRAKEN_PI_BIN: fake,
     DRAKEN_PI_SUMMARY_MODEL: LUNA, DRAKEN_PI_FINAL_MODEL: FINAL, DRAKEN_FAKE_CONTROL: controlFile, DRAKEN_TEST_CALL_LOG: log });
   delete process.env.DRAKEN_PI_MAX_INVOCATIONS; delete process.env.DRAKEN_PI_TIMEOUT_MS;
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
   rows = []; control({});
 });
 afterEach(async () => { await background.stopBackgroundIndexing(); closeDb(); fs.rmSync(root, { recursive: true, force: true }); });

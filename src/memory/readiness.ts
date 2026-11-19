@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { recentSession, activityDays } from '../sources/activity-window';
 import path from 'path';
 import { createHash } from 'crypto';
 import Database from 'better-sqlite3';
@@ -65,11 +66,13 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
   }
   let until = Infinity;
   const since = (source.prepare("SELECT value FROM sync_settings WHERE key='history_since'").get() as { value: string } | undefined)?.value || '';
-  const sessions = new Map((source.prepare(`SELECT s.id,s.path,s.file_identity,s.byte_offset,s.scanned_bytes,s.modified_at
+  const sessions = new Map((source.prepare(`SELECT s.id,s.path,s.file_identity,s.byte_offset,s.scanned_bytes,s.modified_at,s.last_message_at
     FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent
-    WHERE s.included=1 AND s.missing=0 AND a.enabled=1 ORDER BY s.id`).all() as {
-      id: string; path: string; file_identity: string; byte_offset: number; scanned_bytes: number; modified_at: string;
+    WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND ${recentSession('s')} ORDER BY s.id`).all() as {
+      id: string; path: string; file_identity: string; byte_offset: number; scanned_bytes: number; modified_at: string; last_message_at: string | null;
     }[]).map(row => [row.id, row]));
+  const days = activityDays(source);
+  if (days !== null) for (const row of sessions.values()) if (row.last_message_at) until = Math.min(until, Date.parse(row.last_message_at) + days * 86400000);
   const required = new Map<string, number>();
   const requirePointer = (session: string, pointer: { record_offset: number; record_bytes: number }) => {
     const end = pointer.record_offset + pointer.record_bytes;

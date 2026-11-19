@@ -23,8 +23,8 @@ test('one preparation control preserves old opt-outs, exposes paid failures and 
       pending_records: 7, pending_entries: 200, last_completed_at: null, error: summary.error } });
   });
   const open = async () => {
-    await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
-    return page.getByRole('dialog', { name: 'Settings', exact: true });
+    await page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true }).click();
+    return page.getByRole('main', { name: 'Settings', exact: true });
   };
   await page.goto('/'); let dialog = await open();
   let toggle = dialog.getByRole('switch', { name: /Automatically prepare history/ });

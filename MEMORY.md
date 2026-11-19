@@ -2,7 +2,7 @@
 
 **Just ask.** Draken automatically searches retained older sessions, sync conversations and saved notes when you ask a text question or talk to it. The separate **Search history** page (`/history`) lets you inspect the same records directly.
 
-There is no memory-enable switch, search-mode selector or wider-history checkbox. An existing sync offers **Prepare history** when its call history is not ready. Historical retrieval does not replace the complete-snapshot summary tree or advance review coverage.
+The session activity window defaults to **7 days** and is configurable in **Settings → Agents & sessions**. It controls new indexing, summary preparation and ordinary source search. Older cached work and explicitly opened saved citations remain available; original-byte checks and manual exclusions still apply. See [Session activity window](SOURCES.md#session-activity-window). There is no separate memory-enable switch or search-mode selector. An existing sync offers **Prepare history** when its call history is not ready. Historical retrieval does not replace the complete-snapshot summary tree or advance review coverage.
 
 ## Automatic local search preparation
 
@@ -53,7 +53,7 @@ The sync page distinguishes newly included entries from unreviewed entries carri
 
 #### Read-only eligibility, shared summary cache
 
-Paid preparation reads the accumulated entries eligible for the next explicit snapshot, respecting enabled agents, session selection, baseline, active-branch projection, verified originals, existing coverage and entries reserved by open, non-ended syncs. It does not reserve those entries or create/own `syncs`, `sync_items`, `sync_coverage`, `sync_messages`, `sync_runs` or `sync_tree_nodes` rows. It never runs the final model, generates a briefing or recap, starts a call, saves user notes or advances review. Existing histories, notes, coverage and frozen snapshots are unchanged.
+Paid preparation reads the accumulated entries eligible for the next explicit snapshot, respecting enabled agents, session selection, the activity window, baseline, active-branch projection, verified originals, existing coverage and entries reserved by open, non-ended syncs. It does not reserve those entries or create/own `syncs`, `sync_items`, `sync_coverage`, `sync_messages`, `sync_runs` or `sync_tree_nodes` rows. It never runs the final model, generates a briefing or recap, starts a call, saves user notes or advances review. Existing histories, notes, coverage and frozen snapshots are unchanged.
 
 The work warms the **same validated `summary_cache` leaves plus reconciliation/compact final input used by explicit sync**, with the same model/prompt/content identity and citation validation—not a separate rolling-memory summary or an unvalidated text shortcut. An explicit sync freezes all then-eligible accumulated evidence and consumes matching cache; warming cache is neither inclusion nor review. Completed batches retain their original input boundaries across appends and combined snapshots, including a completed partial tail and successful work from a cancelled run. Only uncovered or changed input needs new leaf preparation; a previously included entry without a successful cached result still needs its first preparation. Aggregate reconciliation for a different combined input may need on-demand work at **Start chat**; the final briefing and any prior-conversation recaps always remain explicit. Cache preparation can reduce repeated work, but does not promise zero latency.
 

@@ -14,7 +14,8 @@ let root,db,cache,index,model,calls;
 beforeEach(()=>{
  root=fs.mkdtempSync(path.join(os.tmpdir(),'draken-live-readiness-'));fs.mkdirSync(root+'/sessions');
  Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions',DRAKEN_PI_BIN:'/not-a-provider'});
- db=getDb();fs.mkdirSync(root+'/state/memory');cache=new Database(root+'/state/memory/index.sqlite');calls=0;
+ db=getDb();db.prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+ fs.mkdirSync(root+'/state/memory');cache=new Database(root+'/state/memory/index.sqlite');calls=0;
  model={fingerprint:'synthetic-live-readiness',ready:()=>true,setup:async()=>{},embed:async()=>{calls++;const vector=new Float32Array(384);vector[0]=1;return vector;}};
  index=new HistoryIndex(cache,db,model);
 });

@@ -1,3 +1,4 @@
+import { recentSession } from '../sources/activity-window';
 import type Database from 'better-sqlite3';
 import * as vec from 'sqlite-vec';
 import { cleanText } from '../sync/normalize';
@@ -36,7 +37,10 @@ export class HistoryIndex {
   private refresh(addNew = true) {
     const current = new Map<string, SourceRecord>();
     this.source.transaction(() => this.db.transaction(() => {
-      const retained = new Set<string>();
+      // Age is a preparation policy, not deletion. Keep old vectors and citation
+      // metadata; direct reads still verify permissions and original bytes.
+      const inactive = new Set((this.source.prepare(`SELECT s.id FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND COALESCE(${recentSession('s')},0)=0`).all() as { id: string }[]).map(row => row.id));
+      const retained = new Set((this.db.prepare('SELECT ref,session_id FROM records').all() as { ref: string; session_id: string | null }[]).filter(row => row.session_id && inactive.has(row.session_id)).map(row => row.ref));
       const existing = new Set((this.db.prepare('SELECT ref FROM records').all() as { ref: string }[]).map(row => row.ref));
       const insert = this.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?)');
       const insertPassage = this.db.prepare('INSERT OR IGNORE INTO passages(hash) VALUES(?)');
@@ -92,7 +96,7 @@ export class HistoryIndex {
       finish(); notify('indexing'); return;
     }
     notify('loading'); await this.ensureModel(report);
-    const getChunk = this.db.prepare('SELECT c.ref,c.offset,p.hash FROM chunk_links c JOIN passages p ON p.id=c.passage_id WHERE p.id=? ORDER BY c.id LIMIT 1');
+    const getChunk = this.db.prepare(`SELECT c.ref,c.offset,p.hash FROM chunk_links c JOIN passages p ON p.id=c.passage_id JOIN records r ON r.ref=c.ref WHERE p.id=? ${filter.sql} ORDER BY c.id LIMIT 1`);
     const saveVector = this.db.prepare('INSERT INTO passage_vectors(rowid,embedding) VALUES(?,?)');
     const markReady = this.db.prepare('UPDATE passages SET embedded=1 WHERE id=?');
     const pending: { id: number; embedding: Buffer }[] = [];
@@ -110,7 +114,7 @@ export class HistoryIndex {
     for (let offset = 0; offset < groups.length; offset += 8) {
       if (!computed) notify('loading');
       const batch = groups.slice(offset, offset + 8), bodies = batch.map(group => {
-        const chunk = getChunk.get(group.id) as { ref: string; offset: number; hash: string }, record = this.record(chunk.ref);
+        const chunk = getChunk.get(group.id, ...filter.args) as { ref: string; offset: number; hash: string }, record = this.record(chunk.ref);
         const { body, hash } = passage(record, chunk.offset, this.model.fingerprint);
         if (hash !== chunk.hash) throw new Error('Verified search passage changed');
         return body;
@@ -170,7 +174,8 @@ export class HistoryIndex {
       && (!scope.kind || (scope.kind === 'sources' ? record.session_id !== null : record.session_id === null));
   }
   private filter(query: Partial<HistoryQuery>) {
-    const conditions: string[] = [], args: (string | number)[] = [];
+    const eligible = (this.source.prepare(`SELECT s.id FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND ${recentSession('s')}`).all() as { id: string }[]).map(row => row.id);
+    const conditions: string[] = ['(r.session_id IS NULL OR r.session_id IN (SELECT value FROM json_each(?)))'], args: (string | number)[] = [JSON.stringify(eligible)];
     if (query.session_id) { conditions.push('r.session_id=?'); args.push(query.session_id); }
     if (query.session_ids) { conditions.push(`r.session_id IN (${query.session_ids.map(() => '?').join(',')})`); args.push(...query.session_ids); }
     if (query.kind) conditions.push(query.kind === 'sources' ? 'r.session_id IS NOT NULL' : 'r.session_id IS NULL');
@@ -181,7 +186,7 @@ export class HistoryIndex {
   async search(query: HistoryQuery, report?: ReportHistory, preparedOnly = false): Promise<HistoryResults> {
     if (!preparedOnly) await this.prepare(query, report);
     report?.(historyUpdate('searching'));
-    const filter = this.filter(query);
+    let filter = this.filter(query);
     const any = this.db.prepare(`SELECT 1 FROM chunks c JOIN records r ON r.ref=c.ref WHERE 1=1 ${filter.sql} LIMIT 1`).get(...filter.args);
     if (!any) return { mode: 'hybrid', results: [], limitations: LIMITATIONS };
     if (preparedOnly && !this.model.ready()) throw new Error('Prepare the local search model before calling.');
@@ -193,6 +198,7 @@ export class HistoryIndex {
     // arrivals. All returned candidates have both lexical and semantic coverage.
     if (preparedOnly) this.current.clear();
     else this.refresh(false);
+    filter = this.filter(query);
     const metadata = new Map<string, SourceRecord>();
     const record = (ref: string): SourceRecord | undefined => {
       if (!preparedOnly) return this.current.get(ref);
@@ -258,7 +264,7 @@ export class HistoryIndex {
         if (neighbor) this.loadPrepared(neighbor.ref, { before: preparedBefore });
       }
     }
-    else this.refresh();
+    else { this.refresh(); this.loadPrepared(ref, {}); }
     const item = this.record(ref);
     const rows = this.db.prepare(`SELECT ref FROM records WHERE group_id=? ORDER BY COALESCE(at,''),position,ref`).all(item.group) as { ref: string }[];
     const records = rows.filter(row => this.current.has(row.ref)).map(row => this.record(row.ref)), at = records.findIndex(row => row.ref === ref);

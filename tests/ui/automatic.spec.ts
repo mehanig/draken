@@ -47,15 +47,15 @@ test('Home shows accumulated local history without automatic sync links, summari
   state = { ...state, phase: 'error', error: 'Local indexing could not finish. Completed embeddings are retained; retry in five minutes.' };
   await expect(progress.getByRole('alert')).toContainText('Completed embeddings are retained', { timeout: 8000 });
   await expect(progress).not.toContainText('entries available for your next sync');
-  await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('main', { name: 'Settings', exact: true });
   await expect(dialog.getByRole('switch', { name: /Automatically prepare history/ })).toBeChecked();
   await expect(dialog.getByRole('button', { name: 'Retry automatic preparation' })).toBeVisible();
   await expect(dialog).toContainText('quota or API billing');
   await dialog.getByLabel('About automatic preparation', { exact: true }).click();
   await expect(dialog.getByText('Local search uses CPU, memory and disk', { exact: false })).toBeVisible();
   await expect(dialog.getByText('Preparation runs while Draken is idle.', { exact: false })).toBeVisible();
-  await page.keyboard.press('Escape');
+  await page.goBack();
   unavailable = true; await expect(page.getByRole('status').filter({ hasText: 'Automatic preparation status is temporarily unavailable' })).toBeVisible({ timeout: 8000 });
   expect(mutations).toBe(0); expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
 });
