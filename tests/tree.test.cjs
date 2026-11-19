@@ -33,6 +33,7 @@ beforeEach(() => {
   });
   delete process.env.DRAKEN_PI_TIMEOUT_MS;
   delete process.env.DRAKEN_PI_MAX_INVOCATIONS;
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
 });
 afterEach(() => { closeDb(); fs.rmSync(temp, { recursive: true, force: true }); });
 const calls = () => fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];

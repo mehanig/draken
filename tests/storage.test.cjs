@@ -20,6 +20,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-storage-test-')); fs.mkdirSync(path.join(root, 'sessions'));
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(root, 'state'), DRAKEN_PI_SESSIONS_DIR: path.join(root, 'sessions') });
   db = getDb(); caches = [];
+  db.prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
 });
 afterEach(() => { for (const cache of caches) cache.close(); closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
 function source(records, id = 'demo') {

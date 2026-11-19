@@ -34,6 +34,7 @@ beforeEach(() => {
   closeDb(); root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-live-scope-'));
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(root, 'db'), DRAKEN_PI_SESSIONS_DIR: path.join(root, 'sessions'), DRAKEN_VOICE_MODE: 'native',
     DRAKEN_PI_SUMMARY_MODEL: 'openai/gpt-6-luna', DRAKEN_PI_FINAL_MODEL: 'openai/gpt-6-astra' });
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
   fs.mkdirSync(process.env.DRAKEN_PI_SESSIONS_DIR); file = path.join(process.env.DRAKEN_PI_SESSIONS_DIR, 'scope.jsonl');
   const rows = [{ type: 'session', version: 3, id: 'scope', cwd: '/synthetic/old', timestamp: '2026-01-01T00:00:00.000Z' }];
   for (let n = 0; n < 3; n++) rows.push({ type: 'message', id: `m${n}`, parentId: n ? `m${n - 1}` : null,

@@ -135,7 +135,7 @@ AVAILABLE -- create snapshot --> INCLUDED IN AN OPEN SYNC
     History is retained. Idle ending is not review completion.
 ```
 
-Several snapshots may remain open. A new sync skips unreviewed entries reserved by another open, non-ended conversation. Idle ending releases the reservation, not the original snapshot membership. Source selection and the installation's saved history-start date also affect eligibility.
+Several snapshots may remain open. A new sync skips unreviewed entries reserved by another open, non-ended conversation. Idle ending releases the reservation, not the original snapshot membership. Source selection, the rolling session-activity window (seven days by default), and the installation's saved history-start date also affect eligibility. `src/sources/activity-window.ts` owns the window policy, SQL predicate and confirmation preview; `activity-metadata.ts` reads message dates from file edges before full import. The catalog stores first/last message dates, a cleaned last-message preview and a file metadata stamp. Window changes preserve manual selection and drain background work; widening requires a current confirmation, and foreground work/calls must first finish or be explicitly stopped. Existing cached originals/vectors outside the window are retained for direct citation reads, but excluded from new preparation and ordinary search. See [SOURCES.md](SOURCES.md#session-activity-window).
 
 **Why:** you should be able to start a new conversation without being forced to approve the previous one. Reading, summarizing or hearing something is not the same as reviewing it.
 
@@ -209,6 +209,8 @@ The server checks the shape of a summary and whether its references exist. If th
 **The cost of this design:** summaries lose information. Processing every eligible entry does not prove that every fact survived. A real source ID does not prove that the source supports the claim. Draken does not independently rerun tests or check deployments.
 
 ### Evidence-preparation boundary
+
+`src/plain-english.ts` supplies the shared wording instruction to every pi request and the native voice prompt. It asks for simple English without corporate filler, while preserving required JSON, citations and uncertainty. It does not invalidate completed summary caches merely to restyle their wording.
 
 Text and voice call `prepareEvidence(request, dependencies)` from `src/evidence/index.ts`. The request contains the actual question, optional retrieval refinement, conversation scope, fixed history cutoff, recent user questions, briefing, cancellation signal and an accounted model-call callback. `EvidenceDependencies` supplies prepared search, fresh verified-original reads and text cleaning. All data contracts belong to `src/evidence/contracts.ts`; the module imports no other Draken code, package or Node builtin, including types. A refinement never replaces the actual question sent for relevance assessment.
 

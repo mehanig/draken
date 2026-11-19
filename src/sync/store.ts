@@ -7,6 +7,7 @@ import { EvidenceScope } from './evidence-scope';
 import { cleanText, sourceKey, sourceRepresentatives } from './normalize';
 import { aggregationCost } from './cost';
 import { recapInput, invalidateRecap, type RecapInput } from './recap';
+import { recentSession, activityDays, withinActivityWindow } from '../sources/activity-window';
 import { admittedAgent, agentSources, AGENTS } from '../sources/registry';
 
 import { HttpError } from '../errors';
@@ -23,7 +24,7 @@ const summaryQuery = `SELECT s.id, s.status, s.created_at, s.completed_at, s.bri
   (SELECT COUNT(*) FROM sync_items i WHERE i.sync_id = s.id) AS item_count FROM syncs s`;
 const historyWindow = `e.timestamp >= COALESCE((SELECT value FROM sync_settings WHERE key = 'history_since'), '')`;
 const pendingWhere = `e.active = 1 AND e.present = 1 AND e.is_activity = 1 AND e.effective_length > 0
-  AND ${historyWindow} AND s.included = 1 AND s.missing = 0 AND ${admittedAgent('s')} AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)`;
+  AND ${historyWindow} AND ${recentSession('s')} AND s.included = 1 AND s.missing = 0 AND ${admittedAgent('s')} AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)`;
 const availableFilter = (exceptSync = 0) => `${pendingWhere} AND NOT EXISTS (SELECT 1 FROM sync_items i JOIN syncs held ON held.id=i.sync_id WHERE i.event_key=e.event_key AND held.status='open' AND held.conversation_ended_at IS NULL AND held.id != ${exceptSync})`;
 const availableWhere = availableFilter();
 const evidenceSelect = `SELECT s.agent,e.id AS source_id, e.event_key, e.session_id, s.name AS session_name, s.path AS source_path,
@@ -41,11 +42,13 @@ function historySince(): string | null {
 
 export function overview(): Overview {
   const db = getDb();
-  const sessions = db.prepare(`SELECT s.id, s.agent, COALESCE(s.external_id,s.id) AS external_id, s.path, s.cwd, s.name, s.included, s.missing, s.modified_at,
+  const sessions = db.prepare(`SELECT s.id, s.agent, COALESCE(s.external_id,s.id) AS external_id, s.path, s.cwd, s.name, s.included, s.missing, s.modified_at, s.first_message_at, s.last_message_at, s.last_message_preview,
     (SELECT COUNT(DISTINCT e.event_key) FROM agent_entries e WHERE e.session_id = s.id AND e.active = 1
     AND e.present = 1 AND e.is_activity = 1 AND e.effective_length > 0 AND ${historyWindow}
     AND NOT EXISTS (SELECT 1 FROM sync_coverage c WHERE c.event_key = e.event_key)) AS pending
-    FROM agent_sessions s ORDER BY s.modified_at DESC`).all() as ObservedSession[];
+    FROM agent_sessions s ORDER BY s.last_message_at DESC, s.id`).all() as ObservedSession[];
+  const days = activityDays(db);
+  for (const session of sessions) session.within_activity_window = withinActivityWindow(session.last_message_at, days);
   const rows = db.prepare(`${summaryQuery} ORDER BY s.id DESC LIMIT 50`).all() as SyncSummary[];
   const conversations = conversationStatuses(rows.map(row => row.id));
   const syncs = rows.map((row, index) => ({ ...row, conversation: conversations[index], aggregation_cost: aggregationCost(db, row.id, Boolean(row.briefing)) }));

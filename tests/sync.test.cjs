@@ -32,6 +32,7 @@ beforeEach(() => {
   delete process.env.DRAKEN_TEST_CALL_LOG;
   process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/cheap';
   process.env.DRAKEN_PI_FINAL_MODEL = 'test/strong';
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
 });
 afterEach(async () => {
   for (const server of servers) await new Promise(resolve => server.close(resolve));

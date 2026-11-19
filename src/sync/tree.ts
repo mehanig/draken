@@ -1,4 +1,5 @@
 import { getDb } from '../db/schema';
+import { assertRecentSessions } from '../sources/activity-window';
 import { Evidence, NodeKind, NodeSummary, SyncDetail, TopicGroups } from '../types';
 import { cleanText, digest, sourceKey, sourceRepresentatives } from './normalize';
 import { assertEvidenceAvailable } from './store';
@@ -295,6 +296,7 @@ export class SummaryTree {
     assertEvidenceAvailable(sync);
     const question = !this.background && (this.db.prepare('SELECT question FROM sync_runs WHERE id=?').get(runId) as { question: string | null } | undefined)?.question;
     this.accountAggregation = this.background || question === null;
+    if (this.accountAggregation) assertRecentSessions(this.db, sync.items.map(item => item.session_id));
     // Citation representatives are stable: initial E, then the first C. Extras
     // with the same canonical body key must not overwrite either representative.
     this.sourceMap = sourceRepresentatives(sync.items, sync.context);
@@ -318,6 +320,7 @@ export class SummaryTree {
 
   async call(payload: unknown, system: string, final = false): Promise<string> {
     if (this.background && final) throw new HttpError(409, 'Background preparation cannot call the final provider');
+    if (this.accountAggregation) assertRecentSessions(this.db, this.sync.items.map(item => item.session_id));
     return modelCall(payload, system, { models: this.sync.models, runId: this.runId, signal: this.signal,
       table: this.runTable, final, reserveAnswer: !final && !this.background, accounting: this.accountAggregation });
   }

@@ -6,12 +6,15 @@ import { ScanResult, type AgentKind } from '../types';
 import { cleanText, digest, NormalizedEntry } from './normalize';
 import { fileRecords, RECORD_BYTES, type RecordPointer } from './jsonl';
 import { getSourceRoots } from '../sources/registry';
+import { activityMetadata } from '../sources/activity-metadata';
+import { activityDays, withinActivityWindow } from '../sources/activity-window';
 import { identifySource, normalizeSource } from '../sources/adapters';
 
 interface Source {
   id: string; agent: AgentKind; external_id: string; path: string; cwd: string; name: string; byte_offset: number;
   file_identity: string; boundary_hash: string; prefix_hash: string;
   modified_at: string; leaf_id: string | null; scanned_bytes: number;
+  activity_stamp: string; last_message_at: string | null; included: number;
 }
 
 function inside(candidate: string, root: string): boolean {
@@ -112,6 +115,7 @@ async function pointersMatch(file: fs.promises.FileHandle, sessionId: string): P
 async function indexFile(filePath: string, agent: AgentKind, root: string, warnings: string[], signal?: AbortSignal): Promise<{ id?: string; added: number }> {
   const db = getDb();
   let previous = db.prepare('SELECT * FROM agent_sessions WHERE path = ?').get(filePath) as Source | undefined;
+  const originalId = previous?.id;
   if (previous && previous.agent !== agent) throw new Error('Session path belongs to another agent');
   const real = fs.realpathSync(filePath), base = fs.realpathSync(root);
   if (real === base || !inside(real, base)) throw new Error('Session path is outside its source root');
@@ -119,10 +123,30 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
   try {
     const stat = await file.stat();
     if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino) throw new Error('Session file identity changed');
-    const header = identifySource(agent, fileRecords(file.fd, Math.min(stat.size, RECORD_BYTES)));
-    if (inside(path.resolve(header.cwd), getDataDir())) return { added: 0 };
     const identity = `${stat.dev}:${stat.ino}`;
     const modified = stat.mtime.toISOString();
+    const stamp = JSON.stringify([identity, stat.size, stat.mtimeMs, stat.ctimeMs]);
+    // An unchanged ignored file needs no transcript reads, even for its header.
+    if (previous?.activity_stamp === stamp && (!previous.included || !withinActivityWindow(previous.last_message_at, activityDays(db)))) return { id: previous.id, added: 0 };
+    const header = identifySource(agent, fileRecords(file.fd, Math.min(stat.size, RECORD_BYTES)));
+    if (inside(path.resolve(header.cwd), getDataDir())) return { added: 0 };
+    const duplicatePath = db.prepare('SELECT path,agent FROM agent_sessions WHERE id=?').get(header.id) as { path: string; agent: AgentKind } | undefined;
+    if (duplicatePath && duplicatePath.agent !== agent) throw new Error('Agent session ID collision');
+    if (duplicatePath && duplicatePath.path !== filePath && fs.existsSync(duplicatePath.path)) {
+      warnings.push(`Ignored duplicate session ${header.id} at ${filePath}.`); return { id: header.id, added: 0 };
+    }
+    if (!previous || previous.id !== header.id || previous.activity_stamp !== stamp) {
+      const metadata = await activityMetadata(file, stat.size, header, signal);
+      const after = await file.stat();
+      if (after.size < stat.size || (after.size === stat.size && (after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs))) throw new Error('Session changed while reading activity; scan again');
+      if (previous && previous.id !== header.id) db.prepare('UPDATE agent_sessions SET path=?,missing=1 WHERE id=?').run(`${filePath}#replaced:${previous.id}`, previous.id);
+      db.prepare(`INSERT INTO agent_sessions(id,path,cwd,modified_at,agent,external_id,first_message_at,last_message_at,last_message_preview,activity_stamp)
+        VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,cwd=excluded.cwd,
+        first_message_at=excluded.first_message_at,last_message_at=excluded.last_message_at,last_message_preview=excluded.last_message_preview,activity_stamp=excluded.activity_stamp,missing=0`)
+        .run(header.id,filePath,header.cwd,modified,agent,header.external_id,metadata.first_message_at,metadata.last_message_at,metadata.last_message_preview,stamp);
+      previous = db.prepare('SELECT * FROM agent_sessions WHERE id=?').get(header.id) as Source;
+    }
+    if (!previous.included || !withinActivityWindow(previous.last_message_at, activityDays(db))) return { id: header.id, added: 0 };
     let reset = !previous || previous.id !== header.id || previous.file_identity !== identity || stat.size < previous.byte_offset || previous.scanned_bytes < 0 || (previous.scanned_bytes === 0 && stat.size === previous.byte_offset);
     if (previous && !reset) {
       const boundary = await hashRegion(file, Math.max(0, previous.byte_offset - 256), Math.min(256, previous.byte_offset));
@@ -222,6 +246,10 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     reset = false;
     await new Promise<void>(resolve => setImmediate(resolve));
     }
+  } catch (error) {
+    db.prepare('UPDATE agent_sessions SET scanned_bytes=0 WHERE path=?').run(filePath);
+    if (previous && previous.id !== originalId) db.prepare('DELETE FROM agent_sessions WHERE id=? AND NOT EXISTS (SELECT 1 FROM agent_entries WHERE session_id=?)').run(previous.id, previous.id);
+    throw error;
   } finally { await file.close(); }
 }
 

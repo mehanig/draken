@@ -15,6 +15,7 @@ beforeEach(() => {
   closeDb(); root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-append-only-')); fs.mkdirSync(root + '/sessions');
   Object.assign(process.env, { DRAKEN_DATA_DIR: root + '/state', DRAKEN_PI_SESSIONS_DIR: root + '/sessions',
     DRAKEN_PI_BIN: '/no-provider-permitted', DRAKEN_PI_SUMMARY_MODEL: 'openai/gpt-6-luna', DRAKEN_PI_FINAL_MODEL: 'openai/gpt-6-astra' });
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
   file = root + '/sessions/source.jsonl';
   fs.writeFileSync(file, JSON.stringify({ type: 'session', version: 3, id: 'append-only', cwd: '/synthetic', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
   calls = []; originalCall = SummaryTree.prototype.call;

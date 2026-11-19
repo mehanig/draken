@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { recentSession } from '../sources/activity-window';
 import type { HistoryQuery } from './types';
 const statusQuestion = (text: string) => /\b(?:status|current|latest|blocked|blockers?|unfinished|unconfirmed|remaining|finished|completed?|still|how (?:long|much longer)|where (?:are we|we are)|what(?:'s| is) left)\b/i.test(text);
 
@@ -26,7 +27,7 @@ export function discussionFocus(db: Database.Database, syncId: number, currentUs
 export function historyQuery(db: Database.Database, question: string, previous?: HistoryFocus): { focus: HistoryFocus; query: HistoryQuery } {
   const terms = words(question);
   const rows = db.prepare(`SELECT s.id,s.name,s.cwd FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent
-    WHERE s.included=1 AND s.missing=0 AND a.enabled=1 ORDER BY s.id`).all() as { id: string; name: string; cwd: string }[];
+    WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND ${recentSession('s')} ORDER BY s.id`).all() as { id: string; name: string; cwd: string }[];
   const named = rows.map(row => ({ id: row.id, words: words(`${row.name} ${row.cwd.split(/[\\/]/).pop() || ''}`) }));
   // Common workspace names cannot select a project shared by every session.
   const matches = terms.map(word => ({ word, sessions: named.filter(row => row.words.includes(word)).map(row => row.id) }))

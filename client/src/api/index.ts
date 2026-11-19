@@ -1,3 +1,4 @@
+import type { ActivityWindowSettings } from '../../../src/types';
 import type { Evidence, ConversationState, PreparationUsage, UsageRange, UsageBucket, CallReadiness, PiSetupStatus, AutoIndexSettings, Overview, HomeOverview, ScanResult, SyncDetail, TreeProgress, NodeSummary, TopicGroups } from '../types';
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
@@ -22,6 +23,8 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 
 export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir: string }>(`/setup${refresh ? '?refresh=1' : ''}`);
 export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);
+export const activityWindow = (days?: number | null) => request<ActivityWindowSettings>(`/settings/activity-window${days === undefined ? '' : `?days=${days ?? 'all'}`}`);
+export const setActivityWindow = (days: number | null, confirmation?: string) => request<ActivityWindowSettings>('/settings/activity-window', 'PATCH', { days, confirmation });
 export const autoIndexSettings = () => request<AutoIndexSettings>('/settings/auto-index');
 export const setAutoIndex = (enabled: boolean) => request<AutoIndexSettings>('/settings/auto-index', 'PATCH', { enabled, summaries: true });
 export const home = (before?: number) => request<HomeOverview>(`/home${before ? `?before=${before}` : ''}`);

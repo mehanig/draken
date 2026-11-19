@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { recentSession } from '../sources/activity-window';
 import path from 'path';
 import { createHash } from 'crypto';
 import Database from 'better-sqlite3';
@@ -12,7 +13,7 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
  * the same original again. No bodies are reconstructed or retained here. */
 export function sourceStamps(db: Database.Database, before?: string): Map<string, string> {
   const since = (db.prepare("SELECT value FROM sync_settings WHERE key='history_since'").get() as { value: string } | undefined)?.value || '';
-  const sessions = new Set((db.prepare('SELECT s.id FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent WHERE s.included=1 AND s.missing=0 AND a.enabled=1').all() as { id: string }[]).map(row => row.id));
+  const sessions = new Set((db.prepare(`SELECT s.id FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND ${recentSession('s')}`).all() as { id: string }[]).map(row => row.id));
   const groups = new Map<string, Set<string>>();
   const add = (key: unknown, projection: unknown) => {
     const id = hash(key), versions = groups.get(id) || new Set<string>(); versions.add(hash(projection)); groups.set(id, versions);

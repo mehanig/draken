@@ -100,6 +100,8 @@ p { line-height: 1.7; }
 .session-list { margin-top: 20px; max-height: 440px; overflow-y: auto; padding: 3px; }
 .session-source { display: flex; align-items: flex-start; gap: 10px; padding: 12px; margin-bottom: 10px; border: 2px solid var(--line); cursor: pointer; background: var(--paper); }
 .session-source:has(input:checked) { background: var(--panel); box-shadow: inset 4px 0 0 var(--accent); }
+.session-source.session-ignored { background: var(--surface-muted); box-shadow: none; border-style: dashed; }
+.session-source .source-last-message { display: block; margin-top: 6px; overflow-wrap: anywhere; }
 .session-source > span { min-width: 0; }
 .session-source strong { display: block; font-size: 13px; overflow-wrap: anywhere; font-weight: 800; }
 .source-cwd { display: block; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; color: var(--muted); font-size: 11px; margin: 5px 0; }

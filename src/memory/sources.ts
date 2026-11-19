@@ -1,3 +1,4 @@
+import { recentSession } from '../sources/activity-window';
 import type Database from 'better-sqlite3';
 import { cleanText, digest } from '../sync/normalize';
 import { EntryReader } from '../sync/source-files';
@@ -13,7 +14,7 @@ export interface SourceRecord extends HistoryRecord { group: string; position: n
  * No discovery, scan, recovery or application/source writes. Current exclusions
  * and baseline apply to archive retrieval, not to frozen pages. */
 export function* historySources(db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache, scope: Partial<HistoryQuery> = {}, only?: Omit<SourceRecord, 'text'>): Generator<SourceRecord> {
-  const sessions = new Map((db.prepare('SELECT s.id,s.included,s.missing,a.enabled FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent' + (only ? ' WHERE s.id=?' : '')).all(...(only ? [only.session_id] : [])) as { id: string; included: number; missing: number; enabled: number }[]).map(row => [row.id, row]));
+  const sessions = new Map((db.prepare('SELECT s.id,s.included,s.missing,a.enabled FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent' + (only ? ' WHERE s.id=?' : ` WHERE ${recentSession('s')}`)).all(...(only ? [only.session_id] : [])) as { id: string; included: number; missing: number; enabled: number }[]).map(row => [row.id, row]));
   const baseline = (db.prepare("SELECT value FROM sync_settings WHERE key='history_since'").get() as { value: string } | undefined)?.value || '';
   const allowed = (session: string, at: string) => scope.kind !== 'conversation'
     && (!scope.session_id || session === scope.session_id) && (!scope.session_ids || scope.session_ids.includes(session))

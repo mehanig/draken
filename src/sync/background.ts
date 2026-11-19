@@ -121,6 +121,10 @@ export async function stopBackgroundIndexing() {
   if (unregisterStatus === unregister) unregisterStatus = undefined;
   if (!timer && worker === prior) worker = undefined;
 }
+export function refreshBackgroundPreparation() {
+  startBackgroundIndexing(); worker!.retry();
+  void worker!.tick().catch(() => { if (worker) { worker.state.phase = 'error'; worker.state.error = 'Could not apply the activity window to background preparation. Check server storage and retry.'; } });
+}
 export async function yieldBackgroundIndexing() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }
 export function autoIndexSettings(): AutoIndexSettings {
   const on = enabled(), summary = summaryPreparationSettings();

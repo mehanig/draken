@@ -2,6 +2,16 @@
 
 Draken reads **pi, Codex CLI and Claude Code** JSONL histories. These are source adapters, not coding-agent execution engines. It does not run Codex/Claude to import their logs, copy their credentials, execute recorded tools, or change the source files. **Summaries, recaps and text replies still use the existing isolated, tool-free pi runner and its configured models.** ChatGPT native voice remains separate.
 
+## Session activity window
+
+By default, Draken prepares sessions whose **last message was within 7 days**. Change **Settings → Agents & sessions → Prepare sessions active in** to another period or **All history**. This selects sessions, not individual messages: an active session includes its older messages, subject to existing source choices and any saved installation baseline.
+
+Discovery checks the first and last messages before importing the transcript. Unchanged file metadata reuses that result. It reads complete records from the file edges; it may need to read farther through metadata-only records. Modification dates and compaction summaries do not count as new messages. Inactive sessions remain listed with their first/last message dates, a cleaned last-message preview of at most 240 characters, and an explicit ignored status. This preview is inventory metadata, not evidence. Disabled agents are still not scanned.
+
+Widening requires confirmation before saving or scheduling work, even when discovery is incomplete. The preview counts additional discovered, selected sessions; it is not a cost estimate. Narrowing immediately changes eligibility. Foreground work or a call must finish or be explicitly stopped first; changing the window drains background work before applying it. Automatic preparation then checks the new scope immediately if enabled, without enabling saved opt-outs or clearing paid failure pauses. Manual exclusions remain in effect.
+
+Older originals, cached summaries, vectors, saved notes, conversations and review state are retained. New preparation and ordinary archive search omit inactive sessions; explicitly opened saved citations still verify their originals and source permissions. Widening can reuse compatible cached work. An unfinished snapshot containing inactive sessions requires widening the window before preparation; its membership is never silently shortened.
+
 ## Settings and discovery
 
 Open **Settings → Agents & sessions**. Each adapter shows its configured directories, directory-presence status, recorded sessions, native IDs, workspace/file paths, inclusion choices and missing-source status. A directory being present does not establish that an executable is installed, logged in, or that every file has been parsed.
@@ -9,7 +19,7 @@ Open **Settings → Agents & sessions**. Each adapter shows its configured direc
 - Existing pi sessions and exclusions survive the migration. Pi history is enabled by default.
 - **Codex and Claude history are off until explicitly enabled.** An existing background-indexing preference does not silently gain access to new transcripts.
 - Enabling an agent persists its permission; it does not itself scan, download a model, summarize, create a sync or acquire a microphone. The next explicit scan/sync, or an enabled background schedule (on by default for new installations), may read its logs.
-- **Scan enabled agents** discovers and parses enabled roots only. New sessions from enabled agents are selected by default. Each session can be excluded independently.
+- **Scan enabled agents** discovers enabled roots and imports only sessions allowed by the activity window and manual selection. New sessions from enabled agents are selected by default. Each session can be excluded independently.
 - Disabled agents are excluded from new snapshots and historical retrieval. Disabling does not rewrite existing frozen snapshots or erase discussions, notes or derived files.
 - Merely opening/polling Settings reads database metadata and directory existence, not transcript bodies.
 

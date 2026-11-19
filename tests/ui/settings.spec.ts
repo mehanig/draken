@@ -106,10 +106,10 @@ test('settings inventory shows recorded sources; scan, selection and missing-sou
     await scan.click(); await expect(row).toBeVisible();
     await expect(row).toContainText('Inventory fixture'); await expect(row).toContainText(file);
     await expect(row).toContainText('/synthetic/settings-inventory/project-with-a-long-workspace-name');
-    await expect(row).toContainText('Last recorded change:'); await expect(row).toContainText('1 unreviewed entry');
+    await expect(row).toContainText('First message:'); await expect(row).toContainText('Last message:'); await expect(row).toContainText('1 unreviewed entry');
     await expect(dialog.getByRole('list', { name: 'Scan warnings' })).toContainText('inventory-malformed.jsonl');
     const selected = row.getByRole('checkbox'); await expect(selected).toBeChecked(); await expect(selected).toBeEnabled();
-    await selected.uncheck(); await expect(row).toContainText('Excluded');
+    await selected.uncheck(); await expect(row).toContainText('Manually excluded');
     await expect.poll(async () => (await inventory(page)).sessions.find((session: any) => session.id === id).included).toBe(0);
     await expect(selected).toBeEnabled(); await selected.check();
     await expect.poll(async () => (await inventory(page)).sessions.find((session: any) => session.id === id).included).toBe(1);

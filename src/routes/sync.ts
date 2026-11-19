@@ -7,7 +7,8 @@ import { piSetupStatus } from '../pi/runtime';
 import { scanSessions } from '../sync/collector';
 import { evidenceExcerpt, completeSync, configureModels, discardSync, expandSnapshot, getProgress, getSync, getTreeNode, homeOverview, overview, saveNotes, setIncluded, setAgentEnabled, startSync, startConversationSync } from '../sync/store';
 import { cancelReply, launchReply, launchRecap, launchChat } from '../sync/manager';
-import { autoIndexSettings, setAutoIndex, setAutoSummary, yieldBackgroundIndexing } from '../sync/background';
+import { activityWindowStatus, validActivityDays } from '../sources/activity-window';
+import { autoIndexSettings, setAutoIndex, setAutoSummary, yieldBackgroundIndexing, refreshBackgroundPreparation } from '../sync/background';
 import { callReadiness, prepareCall } from '../sync/preparation';
 import { preparationUsage } from '../sync/usage';
 import { summaryPreparationSettings } from '../sync/summary-preparation';
@@ -47,6 +48,22 @@ router.use((req, _res, next) => {
   if (['POST', 'PATCH', 'DELETE'].includes(req.method)) void yieldBackgroundIndexing().then(() => next(), next);
   else next();
 });
+
+router.get('/settings/activity-window', route((req, res) => {
+  if (Object.keys(req.query).some(key => key !== 'days')) throw new HttpError(400, 'Unknown activity window option');
+  const days = req.query.days === undefined ? undefined : req.query.days === 'all' ? null : Number(req.query.days);
+  if (days !== undefined && !validActivityDays(days)) throw new HttpError(400, 'Choose 1–36500 days or all history');
+  res.json(activityWindowStatus(getDb(), days));
+}));
+router.patch('/settings/activity-window', route((req, res) => {
+  if (!req.body || Object.keys(req.body).some(key => !['days', 'confirmation'].includes(key)) || !validActivityDays(req.body.days)) throw new HttpError(400, 'Choose 1–36500 days or all history');
+  if (activity.busy || activity.callActive) throw new HttpError(409, 'Stop foreground preparation or end the active call before changing the activity window.');
+  const preview = activityWindowStatus(getDb(), req.body.days);
+  if (preview.confirmation_required && req.body.confirmation !== preview.confirmation) throw new HttpError(409, 'Confirm the additional sessions before changing the activity window. Refresh the preview if sources changed.');
+  getDb().prepare("INSERT INTO sync_settings(key,value) VALUES('activity_days',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(req.body.days));
+  res.json(activityWindowStatus(getDb()));
+  refreshBackgroundPreparation();
+}));
 
 router.get('/home', route((req, res) => {
   const before = req.query.before === undefined ? undefined : Number(req.query.before);

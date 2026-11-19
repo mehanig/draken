@@ -1,6 +1,7 @@
 export interface CallReadiness { ready: boolean; briefingReady: boolean; historyReady: boolean; preparing: boolean; before: string | null; error: string }
 export type AgentKind = 'pi' | 'codex' | 'claude';
 export interface AgentSource { id: AgentKind; name: string; enabled: boolean; roots: { path: string; status: 'present' | 'missing' | 'unavailable' }[] }
+export interface ActivityWindowSettings { days: number | null; proposed_days: number | null; additional_sessions: number; confirmation_required: boolean; confirmation: string }
 export interface ObservedSession {
   id: string;
   agent: AgentKind;
@@ -11,6 +12,10 @@ export interface ObservedSession {
   included: number;
   missing: number;
   modified_at: string;
+  first_message_at: string | null;
+  last_message_at: string | null;
+  last_message_preview: string;
+  within_activity_window: boolean;
   pending: number;
 }
 
