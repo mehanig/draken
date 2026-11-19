@@ -147,7 +147,7 @@ test('settings persist both preparation stages without sync creation, browser ca
   await page.getByRole('link',{name:'Search history',exact:true}).click();await expect(page).toHaveURL(/\/history$/);
   await button.click();await expect(toggle).toBeChecked();await page.goBack();await expect(page).toHaveURL(/\/history$/);
   expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);const after=await(await page.request.get('/api/home')).json();expect(after.covered).toEqual(before.covered);expect(after.syncs.map((sync:any)=>sync.id)).toEqual(before.syncs.map((sync:any)=>sync.id));
-  await button.click();await toggle.uncheck();await expect.poll(async()=>(await(await page.request.get('/api/settings/auto-index')).json()).enabled).toBe(false);
+  await button.click();await expect(toggle).toBeEnabled();await expect(toggle).toBeChecked();await toggle.uncheck();await expect.poll(async()=>(await(await page.request.get('/api/settings/auto-index')).json()).enabled).toBe(false);
  }finally{await page.request.patch('/api/settings/auto-index',{data:{enabled:false}});}
 });
 
