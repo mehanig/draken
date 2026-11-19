@@ -11,13 +11,11 @@ import { SyncDetail } from '../types';
 import { invalidateRecap } from '../sync/recap';
 import { LIVE_PROMPT, liveEvidence, liveRetrievalQuestion } from './live-context';
 import { prepareEvidence } from '../evidence';
-import { evidenceDependencies } from '../evidence-adapter';
+import { evidenceDependencies, evidenceQuestions } from '../evidence-adapter';
 import { modelCall } from '../sync/model-call';
 import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyProgress, stopHistory } from '../memory/service';
 import { ReplyContinuation } from './continuation';
-import { discussionFocus, historyQuery, type HistoryFocus } from '../memory/focus';
-import type { HistoryQuery } from '../memory/types';
 
 // Resource limits, not a subscription spending guarantee.
 const CALL_LIMITS = { minutes: 30, turns: 60, leaseSeconds: 90 };
@@ -29,8 +27,8 @@ const isStopRequest = (text: string) => text.trim() === STOP_TEXT || /^(?:please
 type Native = { subscribe(fn: (event: any) => void): () => void; open(sdp: string, options: any): Promise<string>; text(text: string): Promise<void>; context(text: string): Promise<void>; continueAnswer(question: string): Promise<void>; close(): Promise<{ helperExited: boolean }> };
 const runtime = () => require('../../voice/realtime/native.mjs') as { nativeStatus(options?: any): Promise<any>; NativeVoice: new (options?: any) => Native };
 interface Message { id: number; role: 'user' | 'assistant'; text: string; final: boolean; interrupted?: boolean; refs: string[]; started: number; turn?: Turn; release?: () => void; completionTimer?: NodeJS.Timeout }
-interface Turn { selectionRun?: number; user: Message; life: AbortController; continuation: ReplyContinuation; historyBefore: string | null; backgroundReady: Promise<void>; drained: boolean; completed: boolean; release?: () => void; query?: HistoryQuery; refs: string[]; lookups: Map<string, Promise<EvidencePacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
-interface Call { turn?: Turn; id: string; sync: SyncDetail; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; release: VoiceLease; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; focus?: HistoryFocus; contextDelivery: Promise<void>; drains: Set<Promise<void>>; nativeDrains: Set<Promise<void>> }
+interface Turn { selectionRun?: number; user: Message; life: AbortController; continuation: ReplyContinuation; historyBefore: string | null; backgroundReady: Promise<void>; drained: boolean; completed: boolean; release?: () => void; refs: string[]; lookups: Map<string, Promise<EvidencePacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
+interface Call { turn?: Turn; id: string; sync: SyncDetail; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; release: VoiceLease; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; contextDelivery: Promise<void>; drains: Set<Promise<void>>; nativeDrains: Set<Promise<void>> }
 const calls = new Map<string, Call>();
 // End can overtake creation on a second HTTP connection. Retain unknown-ID
 // cancellations for the HTTP request window, bounded independently of calls.
@@ -236,12 +234,8 @@ async function lookup(call: Call, question: string, turn: Turn) {
   await turn.backgroundReady;
   if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
   const currentQuestion = turn.user.text;
-  if (!turn.query) {
-    const plan = historyQuery(getDb(), currentQuestion, call.focus);
-    turn.query = plan.query; call.focus = plan.focus;
-  }
   const snapshot = /\b[EC]\d+\b/.test(question) ? liveEvidence(call.sync, question, false, currentQuestion) : undefined;
-  const refined = question !== currentQuestion ? cleanText(question, 2000) : turn.query.question;
+  const refined = cleanText(question, 2000);
   if (!turn.lookups.has(refined)) {
     if (turn.lookups.size >= 3) return { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'This question reached its three-lookup limit. Explain what was found and ask a specific follow-up; do not claim the archive lacks the answer.' }), refs: [] };
     const priorLookup = [...turn.lookups.values()].at(-1);
@@ -251,10 +245,9 @@ async function lookup(call: Call, question: string, turn: Turn) {
       if (!turn.historyBefore) throw new Error('Prepared conversation history is unavailable');
       const signal = AbortSignal.any([call.historyLife.signal, turn.life.signal]);
       const db = getDb();
-      const previous = (db.prepare("SELECT text FROM live_messages WHERE call_id=? AND role='user' AND id<? ORDER BY id DESC LIMIT 6")
-        .all(call.id, turn.user.id) as { text: string }[]).reverse().map(row => row.text);
+      const previous = evidenceQuestions(call.sync.id, -1, turn.user.id);
       try {
-        const packet = await prepareEvidence({ question: currentQuestion, lookupQuestion: refined, before: turn.historyBefore, signal, scope: turn.query,
+        const packet = await prepareEvidence({ question: currentQuestion, lookupQuestion: refined, before: turn.historyBefore, signal,
           briefing: call.sync.briefing || '', previousQuestions: previous, ask: async (payload, system) => {
           signal.throwIfAborted();
           if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
@@ -262,7 +255,8 @@ async function lookup(call: Call, question: string, turn: Turn) {
             (sync_id,summary_model,final_model,max_invocations,total_entries,question,request_id,started_at,stage)
             VALUES (?,?,?,?,0,?,?,?,'Selecting voice evidence')`).run(call.sync.id, call.sync.models.summary,
             call.sync.models.final || 'native voice', call.sync.models.max_invocations, currentQuestion, `voice:${call.id}:${turn.user.id}`, new Date().toISOString()).lastInsertRowid);
-          db.prepare("UPDATE sync_runs SET status='running',completed_at=NULL WHERE id=?").run(turn.selectionRun);
+          db.prepare("UPDATE sync_runs SET status='running',stage=?,completed_at=NULL WHERE id=?").run(
+            (payload as { task?: string }).task === 'plan_evidence' ? 'Planning voice evidence' : 'Selecting voice evidence', turn.selectionRun);
           return modelCall(payload, system, { models: call.sync.models, runId: turn.selectionRun, signal });
         } }, evidenceDependencies);
         if (turn.selectionRun) db.prepare("UPDATE sync_runs SET status='completed',completed_at=? WHERE id=?").run(new Date().toISOString(), turn.selectionRun);
@@ -273,7 +267,7 @@ async function lookup(call: Call, question: string, turn: Turn) {
         throw error;
       }
     }).then(packet =>
-      packet.kind === 'unrelated' || packet.kind === 'clarify' || packet.refs.length ? packet : turn.query?.kind === 'conversation' ? liveEvidence(call.sync, question, false, currentQuestion, 'No dated archive match; the supplied conversation quotes are limited to this sync.') : { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'No matching original records were found for this question in the prepared history. This does not establish that the information is absent. Ask which project or detail is intended; do not substitute an old conversation as current project status.' }), refs: [] }
+      packet.kind === 'unrelated' || packet.kind === 'clarify' || packet.refs.length ? packet : { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'No matching original records were found for this question in the prepared history. This does not establish that the information is absent. Ask which project or detail is intended; do not substitute an old conversation as current project status.' }), refs: [] }
     ).catch(() => ({
       text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'Archive lookup failed or is busy. No other search mode or provider was substituted. Say earlier history could not be checked; do not invent a historical answer.' }), refs: [],
     })).then(packet => snapshot && !('kind' in packet && packet.kind !== 'ready') ? { ...packet, snapshot } : packet));
@@ -420,7 +414,7 @@ export async function createLiveCall(syncId: number, signal: AbortSignal, reserv
   if (!latest.tree.complete || !latest.briefing) throw new HttpError(409, 'Prepare the briefing before calling.');
   if (!conversationStatus(syncId).history_before) throw new HttpError(409, 'History changed. Prepare history before calling. No call was started.');
   const now = Date.now();
-  const call: Call = { id: reservationId, sync: latest, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController(), focus: discussionFocus(getDb(), latest.id), contextDelivery: Promise.resolve(), drains: new Set(), nativeDrains: new Set(), release: activity.beginCall(syncId) };
+  const call: Call = { id: reservationId, sync: latest, started: now, touched: now, sequence: 0, events: [], connecting: false, connected: false, closed: false, released: false, question: '', refs: [], typedEcho: null, stopEcho: null, historyLife: new AbortController(), contextDelivery: Promise.resolve(), drains: new Set(), nativeDrains: new Set(), release: activity.beginCall(syncId) };
   try { getDb().prepare('INSERT INTO live_calls(id, sync_id, started_at) VALUES (?, ?, ?)').run(call.id, syncId, new Date(now).toISOString()); }
   catch (error) { call.release(); throw error; }
   calls.set(call.id, call);

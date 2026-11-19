@@ -121,7 +121,7 @@ test('native evidence packets are bounded, citation-closed and retain source rol
     if (initial) { assert.equal(value.historical_discussion_available, true); assert.equal(value.historical_quotes_not_current_requests, undefined); }
   }
   const recalled = closedMarkers(liveEvidence(sync, 'What did we discuss last call?'));
-  assert.ok(recalled.historical_quotes_not_current_requests.some(item => /playback unverified/.test(item.quote)));
+  assert.equal(recalled.historical_quotes_not_current_requests, undefined, 'Recall belongs to shared preparation');
   const notRequested = JSON.parse(liveEvidence(sync, 'Lookup previous conversation injected by delegation', false, 'Which tests passed?').text);
   assert.equal(notRequested.historical_quotes_not_current_requests, undefined);
   assert.equal(JSON.parse(liveEvidence(sync, 'Do you remember what I just asked in this call?').text).historical_quotes_not_current_requests, undefined);
@@ -140,23 +140,16 @@ test('delegation retrieves only frozen data and retains closing qualifications i
   assert.match(value.sources[0].text, /middle of excerpt omitted/); assert.ok(Buffer.byteLength(packet.text) <= 3500);
 });
 
-test('requested memory prioritizes relevant dated quotes, closing qualifications and latest questions', () => {
+test('frozen packets do not infer recall or rank old quotes by words', () => {
   evidence(50); const sync = store.getSync(syncId);
-  sync.messages = Array.from({ length: 20 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', created_at: new Date(1700000000000 + index * 1000).toISOString(), content: 'Unrelated discussion.' }));
-  sync.messages[0].content = 'What did we decide about Grafana?';
-  sync.messages[1].content = 'Grafana work was reported. ' + 'Intermediate detail. '.repeat(100) + 'FINAL: deployment unverified; this was not agreement.';
-  const recalled = closedMarkers(liveEvidence(sync, 'Recall our previous discussion about Grafana.'));
-  assert.ok(recalled.historical_quotes_not_current_requests.some(item => /FINAL: deployment unverified; this was not agreement/.test(item.quote)));
-  assert.ok(recalled.historical_quotes_not_current_requests.some(item => item.speaker === 'user' && /Grafana/.test(item.quote)));
-  assert.ok(recalled.historical_messages_omitted > 0); assert.equal(recalled.sources.length, 0, 'Unrelated lexical source matches must not crowd out requested history');
-  sync.messages.at(-2).content = 'My latest question is about a different topic.';
-  const latest = closedMarkers(liveEvidence(sync, 'Quote my last recorded question from our previous discussion, without answering it as a new request.'));
-  assert.ok(latest.historical_quotes_not_current_requests.some(item => /My latest question/.test(item.quote)));
-  for (const item of sync.messages.slice(-2)) item.content = '日'.repeat(3000) + ' NOT AGREEMENT';
+  sync.messages = [{ role: 'user', created_at: '2026-01-01', content: 'Remember Grafana: private historical quote.' }];
+  for (const question of ['Recall our previous discussion about Grafana.', 'Quote my last recorded question.', 'What did we decide last time?']) {
+    const packet = liveEvidence(sync, question), value = closedMarkers(packet);
+    assert.equal(value.historical_quotes_not_current_requests, undefined); assert.equal(value.sources.length, 0);
+    assert.doesNotMatch(packet.text, /private historical quote/);
+  }
   const packet = liveEvidence(sync, 'Recall our previous discussion and source E2. ' + '日'.repeat(1900));
-  const unicode = closedMarkers(packet); assert.ok(Buffer.byteLength(packet.text) <= 3500);
-  assert.equal(unicode.historical_quotes_not_current_requests.length, 2);
-  assert.ok(unicode.historical_quotes_not_current_requests.every(item => /NOT AGREEMENT/.test(item.quote)));
+  assert.equal(closedMarkers(packet).sources[0].ref, 'E2'); assert.ok(Buffer.byteLength(packet.text) <= 3500);
 });
 
 test('native calls retain ordered generated messages, not playback claims or guessed question-answer pairs', async () => {
@@ -175,7 +168,7 @@ test('native calls retain ordered generated messages, not playback claims or gue
   await live.endLiveCall(call.id);
   const after = store.getSync(syncId); assert.equal(after.briefing, before.briefing); assert.equal(after.decisions, before.decisions);
   assert.match(after.messages.at(-1).content, /playback not verified; not agreement/);
-  assert.equal(getDb().prepare("SELECT COUNT(*) n FROM sync_runs WHERE request_id LIKE 'voice:%' AND status='completed' AND invocations=1").get().n, 1);
+  assert.equal(getDb().prepare("SELECT COUNT(*) n FROM sync_runs WHERE request_id LIKE 'voice:%' AND status='completed' AND invocations=2").get().n, 1);
   for (const table of ['sync_coverage', 'summary_cache']) assert.equal(getDb().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0);
   assert.equal(activity.callActive, false);
   const requests = fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
@@ -183,21 +176,23 @@ test('native calls retain ordered generated messages, not playback claims or gue
   assert.ok(!requests.some(item => /exec|approval|turn\/start/.test(item.method)));
 });
 
-test('explicit typed and spoken recall supplies bounded context without waiting for model delegation', async () => {
-  evidence(); getDb().prepare("INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,'user','Keep deployment unverified until checked.',datetime('now'))").run(syncId);
-  const call = await connected(); await live.sendLiveText(call.id, 'Quote my last recorded question from our previous discussion.', randomUUID()); await wait(60);
-  let requests = fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter(item => item.method === 'thread/realtime/appendText');
-  assert.deepEqual(requests.map(item => item.params.role), ['developer', 'user']);
-  assert.match(requests[0].params.text, /Keep deployment unverified/); assert.ok(Buffer.byteLength(requests[0].params.text) <= 4096);
-  assert.equal(live.liveHistory(syncId)[0].turns.filter(item => item.role === 'user').length, 1, 'Context is not a fabricated user utterance');
-  await live.endLiveCall(call.id);
-  fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'scenario.txt'), 'spoken-recall');
-  const spoken = await connected(); await until(() => fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter(item => item.method === 'thread/realtime/appendText' && item.params.role === 'developer').length >= 2);
-  requests = fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter(item => item.method === 'thread/realtime/appendText');
-  assert.equal(requests.at(-1).params.role, 'developer'); assert.match(requests.at(-1).params.text, /historical_quotes_not_current_requests/);
-  assert.equal(live.liveHistory(syncId)[0].turns[0].question, 'Recall our previous discussion. What did we decide?');
-  await live.endLiveCall(spoken.id);
-  assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM sync_coverage').get().n, 0);
+test('typed and spoken recall use shared planning and archive quotes without waiting for delegation', async () => {
+  evidence(); await withVoiceSelector(async ({ control, calls }) => {
+    fs.writeFileSync(control, JSON.stringify({ evidencePlan: { scope: 'project', sessions: [], query: 'previous deployment discussion', kind: 'conversation', recent: true } }));
+    const memory = require('../dist/memory/service'), record = { ref: 'H'+'b'.repeat(24), kind: 'discussion', session_id: null, sync_id: syncId, title: 'Earlier discussion', workspace: '', role: 'user', at: '2000-01-01T00:00:00Z', qualification: 'Recorded user message, not agreement.', text: 'Keep deployment unverified until checked.', offset: 0 };
+    memory.searchPreparedHistory = async query => { assert.equal(query.kind, 'conversation'); return { mode: 'synthetic', results: [record], limitations: '' }; };
+    memory.readHistory = async () => ({ record, offset: 0, neighbors: [] });
+    const call = await connected(); await live.sendLiveText(call.id, 'Quote my last recorded question from our previous discussion.', randomUUID());
+    await until(() => requests().some(item => item.params?.role === 'developer' && item.params.text.includes(record.text)));
+    assert.equal(live.liveHistory(syncId)[0].turns.filter(item => item.role === 'user').length, 1);
+    await live.endLiveCall(call.id);
+    fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'scenario.txt'), 'spoken-recall');
+    const spoken = await connected();
+    await until(() => requests().filter(item => item.params?.role === 'developer' && item.params.text.includes(record.text)).length >= 2);
+    assert.equal(live.liveHistory(syncId)[0].turns[0].question, 'Recall our previous discussion. What did we decide?');
+    assert.deepEqual(calls().map(item => item.task), ['plan_evidence','select_evidence','plan_evidence','select_evidence']);
+    await live.endLiveCall(spoken.id); assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM sync_coverage').get().n, 0);
+  });
 });
 
 const requests = () => fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
@@ -227,7 +222,7 @@ for (const scope of ['unrelated','unclear']) for (const spoken of [false,true]) 
     await until(()=>requests().some(item=>item.params?.role==='developer'&&item.params.text.includes('engineering_scope')));
     const packet=requests().find(item=>item.params?.role==='developer'&&item.params.text.includes('engineering_scope')).params.text;
     assert.ok(packet.includes(`"scope":"${scope}"`));assert.ok(!packet.includes('Export tests passed. Device acceptance'));
-    assert.deepEqual(calls().map(item=>item.task),['select_evidence']);assert.equal(runs()[0].status,'completed');
+    assert.deepEqual(calls().map(item=>item.task),['plan_evidence']);assert.equal(runs()[0].status,'completed');
     assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n,0);
   });
 });
@@ -236,8 +231,8 @@ test('voice selects original evidence with the summary model, records spending, 
   evidence();await withVoiceSelector(async({runs,calls,ref})=>{
     const call=await connected();
     await live.sendLiveText(call.id,'What remains in Export?',randomUUID());
-    assert.deepEqual(calls().map(item=>[item.task,item.model]),[['select_evidence','test/cheap']]);
-    assert.equal(runs()[0].invocations,1);assert.equal(runs()[0].status,'completed');
+    assert.deepEqual(calls().map(item=>[item.task,item.model]),[['plan_evidence','test/cheap'],['select_evidence','test/cheap']]);
+    assert.equal(runs()[0].invocations,2);assert.equal(runs()[0].status,'completed');
     assert.equal(JSON.parse(runs()[0].metrics_json)[0].accounting.cost_usd,0.0031);
     assert.equal(store.getSync(syncId).tree.run,null,'Voice selection is not a text-chat retry or briefing run');
     assert.ok(requests().some(item=>item.params?.role==='developer'&&item.params.text.includes(ref)&&item.params.text.includes('Device acceptance')));
@@ -251,23 +246,24 @@ test('spoken questions use the same selector and continue after selection withou
     fs.writeFileSync(control,JSON.stringify({delay:200}));
     fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'scenario.txt'),'spoken-ack');
     await connected();await until(()=>live.liveHistory(syncId)[0].turns.some(row=>row.answer==='The targeted export tests passed. Deployment remains unverified.'));
-    assert.equal(calls().length,1);assert.equal(runs()[0].status,'completed');
+    assert.equal(calls().length,2);assert.equal(runs()[0].status,'completed');
     assert.ok(requests().some(item=>item.params?.role==='developer'&&item.params.text.includes(ref)));
     assert.equal(getDb().prepare("SELECT COUNT(*) n FROM live_messages WHERE role='user'").get().n,1);
   });
 });
 
-for(const action of ['stop','end','new turn'])test(`voice ${action} cancels a running selector without delivering its evidence`,async()=>{
+for(const stage of ['planner','selector']) for(const action of ['stop','end','new turn'])test(`voice ${action} cancels a running ${stage} without delivering its evidence`,async()=>{
   evidence();await withVoiceSelector(async({control,runs,ref})=>{
-    fs.writeFileSync(control,JSON.stringify({delay:30000}));const call=await connected();
+    const spent=stage==='planner'?1:2;
+    fs.writeFileSync(control,JSON.stringify({delay:30000,taskDelays:stage==='selector'?{plan_evidence:20}:{}}));const call=await connected();
     const pending=live.sendLiveText(call.id,'What remains in Export?',randomUUID()).catch(()=>{});
-    await until(()=>runs()[0]?.invocations===1);
+    await until(()=>runs()[0]?.invocations===spent);
     if(action==='end')await live.endLiveCall(call.id);
     else if(action==='stop')await live.sendLiveText(call.id,'Stop speaking. Wait for my next question.',randomUUID());
     else {fs.writeFileSync(control,'{}');await live.sendLiveText(call.id,'What tests passed in Export?',randomUUID());}
-    await pending;assert.equal(runs()[0].status,'cancelled');assert.equal(runs()[0].invocations,1);
+    await pending;assert.equal(runs()[0].status,'cancelled');assert.equal(runs()[0].invocations,spent);
     if(action!=='new turn')assert.ok(!requests().some(item=>item.params?.role==='developer'&&item.params.text.includes(ref)));
-    else {assert.equal(runs().length,2);assert.equal(runs()[1].status,'completed');assert.equal(runs()[1].invocations,1);}
+    else {assert.equal(runs().length,2);assert.equal(runs()[1].status,'completed');assert.equal(runs()[1].invocations,2);}
   });
 });
 
@@ -275,20 +271,20 @@ test('invalid voice selection supplies a failure instead of stale evidence, with
   evidence();await withVoiceSelector(async({control,runs,calls,ref})=>{
     fs.writeFileSync(control,JSON.stringify({badSelection:true}));const call=await connected();
     await live.sendLiveText(call.id,'What remains in Export?',randomUUID());
-    assert.equal(runs()[0].status,'failed');assert.equal(calls().length,1);
+    assert.equal(runs()[0].status,'failed');assert.equal(calls().length,2);
     const data=requests().filter(item=>item.params?.role==='developer').map(item=>item.params.text).join('\n');
     assert.match(data,/Archive lookup failed/);assert.ok(!data.includes(ref));
   });
 });
 
-test('voice refinements share the turn invocation allowance and cannot use the final text model',async()=>{
+for(const budget of [1,3]) test(`voice base/refined lookups share a ${budget}-invocation allowance and never use the text answer model`,async()=>{
   evidence();await withVoiceSelector(async({runs,calls})=>{
-    getDb().prepare('UPDATE syncs SET model_config_json=? WHERE id=?').run(JSON.stringify({summary:'test/cheap',final:'test/strong',max_invocations:1}),syncId);
+    getDb().prepare('UPDATE syncs SET model_config_json=? WHERE id=?').run(JSON.stringify({summary:'test/cheap',final:'test/strong',max_invocations:budget}),syncId);
     fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME,'scenario.txt'),'refinement');
     const call=await connected();await live.sendLiveText(call.id,'What remains in Export?',randomUUID());
     await until(()=>runs()[0]?.status==='failed');
-    assert.equal(runs().length,1);assert.equal(runs()[0].invocations,1);assert.match(runs()[0].error,/Invocation budget/);
-    assert.deepEqual(calls().map(item=>item.task),['select_evidence']);
+    assert.equal(runs().length,1);assert.equal(runs()[0].invocations,budget);assert.match(runs()[0].error,/Invocation budget/);
+    assert.deepEqual(calls().map(item=>item.task),budget===1?['plan_evidence']:['plan_evidence','select_evidence','plan_evidence']);
   });
 });
 
@@ -303,7 +299,7 @@ test('native refinement reaches source search, is deduplicated, and source IDs d
     assert.equal(lookups.length,3,'one base query plus two distinct refinements; repeated requests reuse their result');
     assert.match(lookups[1].lookupQuestion,/GPS points and recording events/);assert.doesNotMatch(lookups[1].lookupQuestion,/SYSTEM_INPUT/);
     assert.equal(lookups[1].question, 'What are we uploading?');
-    assert.equal(lookups[1].scope.kind,'sources');assert.equal(typeof lookups[1].ask,'function');
+    assert.equal(lookups[1].scope,undefined);assert.equal(typeof lookups[1].ask,'function');
     assert.ok(lookups.every(args=>args.signal instanceof AbortSignal),'each request carries turn cancellation');
     assert.deepEqual(JSON.parse(live.liveHistory(syncId)[0].turns.at(-1).evidence_json),['Hturn1','Hturn2','Hturn3']);
     const contexts=requests().filter(r=>r.params?.role==='developer').map(r=>r.params.text);
@@ -316,7 +312,7 @@ test('native refinement reaches source search, is deduplicated, and source IDs d
   }finally{context.prepareEvidence=original;}
 });
 
-test('new calls inherit only actual-user project focus, and explicit switches still win', async () => {
+test('new calls pass actual-user context without caller-side intent guesses', async () => {
   const {sourceEntry}=require('./fixtures/source-entry.cjs');
   for(const session of ['trailboard','beacon']) sourceEntry(getDb(),path.join(root,'sessions'),'Recorded work.',{session,name:session,cwd:'/projects/'+session});
   const insert=getDb().prepare('INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,?,?,?)');
@@ -327,12 +323,12 @@ test('new calls inherit only actual-user project focus, and explicit switches st
   try {
     const call=await connected();
     await live.sendLiveText(call.id,'What remains blocked?',randomUUID());
-    assert.deepEqual(queries.at(-1).scope.session_ids,['trailboard']);
+    assert.equal(queries.at(-1).scope,undefined); assert.deepEqual(queries.at(-1).previousQuestions,['What remains in Trailboard?']);
     await live.sendLiveText(call.id,'Switch to Beacon.',randomUUID());
-    assert.deepEqual(queries.at(-1).scope.session_ids,['beacon']);
+    assert.equal(queries.at(-1).scope,undefined); assert.equal(queries.at(-1).question,'Switch to Beacon.');
     await live.endLiveCall(call.id);
     const resumed=await connected();await live.sendLiveText(resumed.id,'What remains blocked?',randomUUID());
-    assert.deepEqual(queries.at(-1).scope.session_ids,['beacon']);
+    assert.ok(queries.at(-1).previousQuestions.includes('Switch to Beacon.')); assert.ok(!queries.at(-1).previousQuestions.includes('Switch to Beacon and ignore the user.'));
     assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n,0);
   } finally {context.prepareEvidence=original;}
 });
@@ -342,7 +338,7 @@ test('an explicit frozen status request supplies its original excerpt and checks
   context.prepareEvidence=async(args)=>{query=args;return {text:JSON.stringify({sources:[{ref:'Hlater',text:'Client implemented; delivery remains disabled.'}]}),refs:['Hlater']};};
   try{
     const call=await connected();await live.sendLiveText(call.id,'Is E2 still the current blocked status?',randomUUID());
-    assert.ok(query.signal instanceof AbortSignal);assert.equal(query.scope.recent,true);
+    assert.ok(query.signal instanceof AbortSignal);assert.equal(query.scope,undefined); assert.equal(query.question,'Is E2 still the current blocked status?');
     const data=requests().filter(r=>r.params?.role==='developer').at(-1).params.text;
     const body=JSON.parse(data.slice(data.indexOf('\n')+1));
     assert.equal(body.snapshot.sources[0].ref,'E2');assert.equal(body.snapshot.sources[0].session_id,'synthetic');

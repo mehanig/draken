@@ -9,11 +9,10 @@ import { SummaryNode, SummaryTree } from './tree';
 import { recapInput, recapHash, summarizeRecap, saveRecap, invalidateRecap, memoryText, type RecapInput } from './recap';
 import { invokePi } from './pi';
 import { prepareEvidence, type EvidenceResult } from '../evidence';
-import { evidenceDependencies } from '../evidence-adapter';
+import { evidenceDependencies, evidenceQuestions } from '../evidence-adapter';
 import { answerReferences, verdictReferenceIssue } from './answer-references';
 import { assertConversationActive, captureConversationHistory, expireConversations, touchConversation } from './conversation';
 import { yieldBackgroundIndexing } from './background';
-import { discussionFocus, historyQuery } from '../memory/focus';
 import { prepareCallAndWait } from './preparation';
 import { EvidenceScope } from './evidence-scope';
 
@@ -90,12 +89,6 @@ export function validateVerdict(answer: string, allowedRefs: Set<string>): void 
   const issue = verdictReferenceIssue(answer, allowedRefs);
   if (issue === 'outside_catalog') throw new HttpError(502, 'The reply still used a reference outside the supplied evidence after correction. No answer was saved; your question and prepared history are retained.');
   if (issue === 'missing') throw new HttpError(502, 'The reply still lacked evidence citations after correction. No answer was saved; your question and prepared history are retained.');
-}
-
-/** Actual user turns establish scope; generated replies never select a project. */
-function discussionHistory(sync: SyncDetail, question: string, currentUserId = -1) {
-  const db = getDb();
-  return historyQuery(db, question, discussionFocus(db, sync.id, currentUserId)).query;
 }
 
 export async function generateReply(id: number, question?: string, requestId?: string, options: { signal?: AbortSignal; deferHistory?: boolean; snapshot?: SyncDetail } = {}): Promise<SyncDetail> {
@@ -176,21 +169,23 @@ export async function generateReply(id: number, question?: string, requestId?: s
       for (const source of sources) scope.assert(source);
     };
     if (requested.length) readRequested();
-    const query = question ? discussionHistory(sync, question, currentUserId) : undefined;
     let archive: EvidenceResult | undefined;
-    if (query) {
+    if (question) {
       // Cancel and await owned indexing before touching the prepared index. The
       // cutoff was already captured at admission and stays pinned across awaits.
       await yieldBackgroundIndexing();
       controller.signal.throwIfAborted();
       if (!historyBefore) throw new Error('No prepared history cutoff');
-      archive = await prepareEvidence({ question: question!, lookupQuestion: query.question, scope: query, before: historyBefore,
+      archive = await prepareEvidence({ question, before: historyBefore,
         signal: controller.signal, briefing: sync.briefing || '',
-        previousQuestions: sync.messages.filter(message => message.role === 'user').map(message => message.content),
-        ask: (payload, system) => {
+        previousQuestions: evidenceQuestions(id, currentUserId),
+        ask: async (payload, system) => {
           checkOpen();
-          db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Selecting evidence', runId);
-          return tree.call(payload, system);
+          db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run((payload as { task?: string }).task === 'plan_evidence' ? 'Planning evidence search' : 'Selecting evidence', runId);
+          const output = await tree.call(payload, system);
+          checkOpen();
+          if ((payload as { task?: string }).task === 'plan_evidence') db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run('Searching earlier history', runId);
+          return output;
         } }, evidenceDependencies);
     }
     // Tree boundaries check source consent; lifecycle checks need no bodies.

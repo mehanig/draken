@@ -5,7 +5,7 @@ const Database = require('better-sqlite3');
 const { getDb, closeDb } = require('../dist/db/schema');
 const { HistoryIndex } = require('../dist/memory/index');
 const { indexReadiness } = require('../dist/memory/readiness');
-const { historyQuery: voiceHistoryQuery } = require('../dist/memory/focus');
+const { prepareEvidence } = require('../dist/evidence');
 const { historyPacket } = require('../dist/evidence/packet');
 const { evidenceDependencies } = require('../dist/evidence-adapter');
 const { sourceEntry } = require('./fixtures/source-entry.cjs');
@@ -37,30 +37,44 @@ function fixture() {
     db.prepare('INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES(?,?,?,?)').run(sync, role, text, '2026-01-05T19:00:00.000Z');
   }
 }
-test('project scope follows generic follow-ups, changes on an explicit switch, and still permits conversation recall', () => {
-  fixture(); db.prepare("UPDATE agent_sessions SET name='Beacon indexing: upload safety, visual parity, screen tests and remaining blockers' WHERE id='beacon'").run(); let focus;
-  for (const question of ["What's happening with iOS Trailboard rewrite?", 'So, have you checked', 'What is it working on at the moment?', 'What does it mean upload safety and missing links?', 'What are we uploading here? Images?', 'How is visual parity progressing?', 'Which screens match and what remains?', 'What is still blocked?']) {
-    const plan = voiceHistoryQuery(db, question, focus); focus = plan.focus;
-    assert.deepEqual(plan.query.session_ids, ['trailboard']); assert.equal(plan.query.kind, 'sources');
-    if (question.includes('uploading here')) assert.deepEqual(plan.query.topics, ['upload safety', 'missing links']);
-  }
-  const next = voiceHistoryQuery(db, "What's happening with Beacon?", focus); assert.deepEqual(next.query.session_ids, ['beacon']);
-  assert.deepEqual(new Set(voiceHistoryQuery(db, 'Compare Trailboard and Beacon.', next.focus).query.session_ids), new Set(['trailboard', 'beacon']));
-  const recall = voiceHistoryQuery(db, 'What did we discuss in the previous call?', next.focus);
-  assert.equal(recall.query.kind, 'conversation'); assert.equal(recall.query.session_ids, undefined);
-  assert.deepEqual(voiceHistoryQuery(db, 'Switch to a different project.', next.focus).focus.sessions, []);
+async function planned(question, plan, previousQuestions = []) {
+  let found, query;
+  const packet = await prepareEvidence({ question, before: cutoff, signal: new AbortController().signal, previousQuestions,
+    ask: async payload => JSON.stringify(payload.task === 'plan_evidence' ? plan : { scope: 'project', selected: payload.candidates.slice(0, 8).map(item => item.id) }) },
+    { ...evidenceDependencies, search: async value => { query = value; return found = await index.search(value, undefined, true); },
+      read: async (ref, offset, _signal, before) => index.read(ref, offset, before) });
+  return { packet, found, query };
+}
+const trailPlan = (query, recent = true) => ({ scope: 'project', sessions: ['P2'], query, kind: 'sources', recent });
+
+test('a casual status question receives recent originals even when older lexical/vector matches fill their top-k lists', async () => {
+  for (let i=0;i<100;i++) entry(`Draken startup proposal ${i}; implementation not yet done.`, 'draken');
+  entry('Settings page installed and browser checked. Existing data preserved.', 'draken', '2026-01-07T21:59:00.000Z', 'toolResult');
+  entry('Future failed deployment.', 'draken', '2026-01-08T00:00:00.000Z');
+  await index.prepare({ before: cutoff });
+  const { packet, found, query } = await planned('Whatsup currently woth draken?', { scope: 'project', sessions: ['P1'], query: 'Draken latest state', kind: 'sources', recent: true });
+  assert.equal(query.recent, true); assert.ok(found.results.length <= 64);
+  assert.match(packet.text, /Settings page installed and browser checked/); assert.doesNotMatch(packet.text, /Future failed deployment/);
 });
+test('source permission revoked during model planning is checked before prepared search and original reads', async () => {
+  fixture(); await index.prepare({ before: cutoff }); const changes = cache.prepare('SELECT total_changes() n').get().n;
+  const packet = await prepareEvidence({ question: 'Trailboard status?', before: cutoff, signal: new AbortController().signal,
+    ask: async payload => {
+      if (payload.task === 'plan_evidence') { db.prepare("UPDATE agent_sessions SET included=0 WHERE id='trailboard'").run(); return JSON.stringify(trailPlan('Trailboard current work')); }
+      assert.deepEqual(payload.candidates, []); return '{"scope":"project","selected":[]}';
+    } }, { ...evidenceDependencies, search: query => index.search(query, undefined, true), read: async () => assert.fail('Revoked source was read') });
+  assert.deepEqual(packet.refs, []); assert.equal(cache.prepare('SELECT total_changes() n').get().n, changes);
+});
+
 test('project candidates include recent work and exclude other projects, discussions and future records', async () => {
   fixture(); await index.prepare({ before: cutoff });
-  const plan = voiceHistoryQuery(db, "Hello, can you check what's happening with iOS Trailboard rewrite");
-  const found = await index.search({ ...plan.query, before: cutoff }, undefined, true);
+  const { found } = await planned("Hello, can you check what's happening with iOS Trailboard rewrite", trailPlan('Trailboard current work'));
   assert.ok(found.results.some(item => /Profile-first journal navigation/.test(item.text)));
   assert.ok(found.results.every(record => record.session_id === 'trailboard' && record.at <= cutoff));
   assert.ok(!found.results.some(record => record.kind === 'discussion' || /only a small SwiftUI|future record must/.test(record.text)));
   const packet = historyPacket(found, evidenceDependencies.cleanText, 7000, 1200); assert.ok(Buffer.byteLength(packet.text) <= 7000);
   assert.match(packet.text, /old dismissal callbacks/);
-  const follow = voiceHistoryQuery(db, 'What are we uploading here? Images or what exactly?', plan.focus);
-  const upload = await index.search({ ...follow.query, before: cutoff }, undefined, true);
+  const { found: upload } = await planned('What are we uploading here? Images or what exactly?', trailPlan('Trailboard upload payload'), ['Tell me about Trailboard']);
   assert.ok(upload.results.some(record => /GPS points and recording events/.test(record.text)));
   assert.ok(upload.results.every(record => record.session_id === 'trailboard'));
   const conversation = await index.search({ question: 'Trailboard', kind: 'conversation', before: cutoff }, undefined, true);
@@ -69,9 +83,7 @@ test('project candidates include recent work and exclude other projects, discuss
 test('multi-topic questions include original definitions, not just recent incidental keyword matches', async () => {
   fixture(); entry('Missing relative document links: []\nUnrelated simulator progress.', 'trailboard', '2026-01-07T21:30:00.000Z', 'toolResult');
   await index.prepare({ before: cutoff });
-  const prior = voiceHistoryQuery(db, 'Check Trailboard.').focus;
-  const plan = voiceHistoryQuery(db, 'What does it mean upload safety and missing links?', prior);
-  const found = await index.search({ ...plan.query, before: cutoff }, undefined, true);
+  const { found } = await planned('What does it mean upload safety and missing links?', trailPlan('upload safety missing links', false), ['Check Trailboard.']);
   const packet = historyPacket(found, evidenceDependencies.cleanText, 7000, 1200);
   assert.match(packet.text, /GPS points and recording events/); assert.match(packet.text, /Terms\/EULA and Privacy Policy/);
   assert.ok(Buffer.byteLength(packet.text) <= 7000);
@@ -102,7 +114,7 @@ test('explicit source requests support deeper prepared-only readback without cor
   try {
     const packet = await require('../dist/evidence').prepareEvidence({ question: `${ref} offset 2000`, before: cutoff,
       signal: new AbortController().signal, scope: { session_ids: ['trailboard'] },
-      ask: async () => '{"scope":"project","selected":["S1"]}' }, evidenceDependencies);
+      ask: async payload => payload.task === 'plan_evidence' ? JSON.stringify({ scope: 'project', sessions: [], query: 'original context', kind: 'sources', recent: false }) : '{"scope":"project","selected":["S1"]}' }, evidenceDependencies);
     assert.equal(JSON.parse(packet.text).sources[0].offset, 2000); assert.match(packet.text, /GPS points and recording events/);
     assert.equal(cache.prepare('SELECT total_changes() n').get().n, changes);
   } finally { service.readHistory = original; service.searchPreparedHistory = search; }

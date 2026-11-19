@@ -11,6 +11,14 @@ Choose evidence relevant to the question, not merely passages repeating its word
 For current-state questions, prefer relevant later outcomes over earlier plans, but retain unresolved issues and contradictions. For historical questions, respect the requested time. Dates and sequence are context, not a reason to select unrelated recent records. Sequence is comparable only within one session.
 Include evidence for each part of the question and distinguish projects. Do not assume that missing matches prove absence. Select IDs only from supplied candidates; never invent them. Missing evidence affects selection, not whether an engineering request is in scope.`;
 
+export function scopeReply(scope: 'unrelated' | 'unclear'): EvidenceResult {
+  const message = scope === 'unrelated'
+    ? 'I’m here to help you understand and discuss your engineering work. That request looks unrelated to the current project.'
+    : 'Which project or part of your engineering work would you like to discuss?';
+  return { kind: scope === 'unrelated' ? 'unrelated' : 'clarify', message, refs: [],
+    text: JSON.stringify({ type: 'engineering_scope', scope, message, instruction: 'Give this short scope message, not a substantive answer. No historical citations are needed.' }) };
+}
+
 /** Selection uses the same paid call/accounting path as summarization. */
 export async function selectHistory(found: EvidenceCandidates, query: EvidenceQuery, before: string,
   ask: (payload: unknown, system: string) => Promise<string>, signal: AbortSignal, dependencies: EvidenceDependencies,
@@ -34,13 +42,7 @@ export async function selectHistory(found: EvidenceCandidates, query: EvidenceQu
       new Set(value.selected).size !== value.selected.length) throw Error();
     selected = value.selected; scope = value.scope;
   } catch { throw new Error('Evidence selection returned invalid source IDs or JSON. No answer was generated; retry the message.'); }
-  if (scope !== 'project') {
-    const message = scope === 'unrelated'
-      ? 'I’m here to help you understand and discuss your engineering work. That request looks unrelated to the current project.'
-      : 'Which project or part of your engineering work would you like to discuss?';
-    return { kind: scope === 'unrelated' ? 'unrelated' : 'clarify', message, refs: [],
-      text: JSON.stringify({ type: 'engineering_scope', scope, message, instruction: 'Give this short scope message, not a substantive answer. No historical citations are needed.' }) };
-  }
+  if (scope !== 'project') return scopeReply(scope);
   const results: EvidenceCandidates['results'] = [], context: EvidenceCandidates['results'] = [];
   for (const id of selected) {
     signal.throwIfAborted();

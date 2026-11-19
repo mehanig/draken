@@ -65,7 +65,7 @@ test('text and native voice use public preparation with external application wir
     assert.ok(dependencies.some(item => item.name === '../evidence-adapter'));
     for (const item of dependencies) {
       if (!item.name) continue;
-      assert.doesNotMatch(item.name, /memory\/(?:context|selection|packet)$/);
+      assert.doesNotMatch(item.name, /memory\/(?:context|selection|packet|focus)$/);
       if (item.name.endsWith('/memory/service')) {
         const names = item.code.match(/\{([^}]+)\}/)?.[1].split(',').map(name => name.trim());
         assert.ok(names?.length, 'No namespace imports that could bypass evidence preparation');
@@ -95,10 +95,11 @@ test('the evidence folder compiles and runs alone with two independent injected 
         const record = { ref: id, kind: 'original', session_id: id, sync_id: null, title: id, workspace: id,
           role: 'toolResult', at: '2026-01-07T00:00:00Z', qualification: 'Verified by host', text: 'private result '+id };
         const dependencies = {
+          sessions: async () => [{ id, workspace: id, title: id }],
           cleanText: (text, limit) => text.replaceAll('private', '[redacted]').slice(0, limit),
           search: async (query, actualSignal) => {
             assert.equal(actualSignal, signal); assert.equal(query.before, before); assert.equal(query.limit, 64);
-            assert.equal(query.question, '[redacted] question '+id);
+            assert.equal(query.question, 'original outcomes');
             return { mode: 'other-host', results: [{ ...record, offset: 0 }], limitations: '' };
           },
           read: async (ref, offset, actualSignal, cutoff) => {
@@ -108,6 +109,11 @@ test('the evidence folder compiles and runs alone with two independent injected 
         };
         const result = await prepareEvidence({ question: 'private question '+id, before, signal,
           ask: async payload => {
+            if (payload.task === 'plan_evidence') {
+              assert.equal(payload.question, '[redacted] question '+id);
+              assert.deepEqual(payload.sessions, [{ id: 'P1', workspace: id, title: id }]);
+              return JSON.stringify({ scope: 'project', sessions: ['P1'], query: 'original outcomes', kind: 'sources', recent: true });
+            }
             assert.equal(payload.candidates[0].ref, id); assert.ok(!JSON.stringify(payload).includes('private'));
             await Promise.resolve(); return '{"scope":"project","selected":["S1"]}';
           } }, dependencies);

@@ -45,13 +45,13 @@ test('chat requires prepared history, deduplicates delivery and retains the user
  fs.writeFileSync(control,JSON.stringify({delay:300}));const key=randomUUID();const active=launchChat(id,'What remains?',key);
  assert.equal(active.busy,true);assert.equal(active.messages.at(-1).content,'What remains?');assert.equal(active.tree.run.request_id,key);
  assert.equal(launchChat(id,'What remains?',key).tree.run.id,active.tree.run.id);assert.throws(()=>launchChat(id,'Another question',key),/already used/);
- await idle();const done=store.getSync(id);assert.equal(done.messages.length,2);assert.equal(done.tree.run.status,'completed');assert.equal(calls().length-before,2);
- closeDb();assert.equal(launchChat(id,'What remains?',key).messages.length,2);assert.equal(calls().length-before,2,'Reloaded delivery cannot pay twice');
+ await idle();const done=store.getSync(id);assert.equal(done.messages.length,2);assert.equal(done.tree.run.status,'completed');assert.equal(calls().length-before,3);
+ closeDb();assert.equal(launchChat(id,'What remains?',key).messages.length,2);assert.equal(calls().length-before,3,'Reloaded delivery cannot pay twice');
  assert.equal(store.homeOverview().covered,coverage);assert.equal(store.getSync(id).status,'open');assert.equal(getDb().prepare('SELECT COUNT(*) n FROM live_calls').get().n,0);
 });
 
 test('actual chat route survives appended/scanned originals and adopts newly indexed H evidence only on the next turn',async()=>{
- require('./fixtures/fake-memory.cjs').useIndexedHistory();const {id,trail}=await ready(),api=await http();
+ require('./fixtures/fake-memory.cjs').useIndexedHistory();const {id,trail,beacon}=await ready(),api=await http();
  const initial=store.getSync(id),originalItems=JSON.stringify(initial.items),before=initial.conversation.history_before;
  assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'What remains in Trailboard?',request_id:randomUUID()})).status,202);await idle();
  await new Promise(r=>setTimeout(r,5));const timestamp=new Date().toISOString();
@@ -60,7 +60,7 @@ test('actual chat route survives appended/scanned originals and adopts newly ind
  assert.equal(require('../dist/sync/preparation').callReadiness(id,true).ready,true);
  assert.equal(require('../dist/sync/preparation').callReadiness(id,false).ready,true,'New source evidence cannot block prepared voice readiness either');
  assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'What remains in Trailboard?',request_id:randomUUID()})).status,202);await idle();
- assert.equal(store.getSync(id).tree.run.status,'completed');assert.equal(store.getSync(id).conversation.history_before,before);
+ assert.equal(store.getSync(id).tree.run.status,'completed',store.getSync(id).tree.run.error);assert.equal(store.getSync(id).conversation.history_before,before);
  await memory.prepareHistory(new Date().toISOString(),new AbortController().signal);
  const next=memory.historyReadiness(true).before;assert.ok(next>before);
  assert.equal(store.getSync(id).conversation.history_before,before,'Polling never adopts new history');
@@ -71,9 +71,11 @@ test('actual chat route survives appended/scanned originals and adopts newly ind
  assert.ok(done.messages.some(item=>/\[H[a-f0-9]{24}\]/.test(item.content))||calls().at(-1).historical_evidence.sources.length>0);
  // Damage outside the supplied evidence is not a chat admission veto.
  fs.writeFileSync(path.join(root,'sessions',trail+'.jsonl'),'damaged original\n');
- assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'Continue',request_id:randomUUID()})).status,202);await idle();
- assert.equal(store.getSync(id).tree.run.status,'completed');
- assert.deepEqual(calls().at(-1).historical_evidence.sources,[]);
+ const sessions=getDb().prepare('SELECT id FROM agent_sessions ORDER BY id').all().map(row=>row.id);
+ fs.writeFileSync(control,JSON.stringify({evidencePlan:{scope:'project',sessions:['P'+(sessions.indexOf(beacon)+1)],query:'Beacon outcomes',kind:'sources',recent:true}}));
+ assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'Switch to Beacon',request_id:randomUUID()})).status,202);await idle();
+ assert.equal(store.getSync(id).tree.run.status,'completed',store.getSync(id).tree.run.error);
+ assert.ok(calls().at(-1).historical_evidence.sources.every(item=>item.session_id===beacon));
 });
 
 test('history cutoff stays pinned for the whole answer; unavailable search fails without substitution',async()=>{
@@ -106,11 +108,11 @@ test('prepared chat never traverses the summary tree, reads the frozen corpus or
  assert.equal((await api(`/syncs/${id}/chat/messages`,{message:'What remains?',request_id:key})).status,202);await idle();
  const done=await(await api(`/syncs/${id}?evidence=false`)).json();
  assert.equal(done.tree.run.status,'completed');assert.equal(done.messages.length,2);
- assert.equal(done.briefing,initial.briefing);assert.equal(calls().length-before,2);
+ assert.equal(done.briefing,initial.briefing);assert.equal(calls().length-before,3);
  assert.equal(calls().at(-1).opening_briefing,initial.briefing.replace(/\[([EC]\d+)\]/g,'(quoted reference $1)'));assert.deepEqual(calls().at(-1).summary_tree,[]);
  assert.equal(done.item_count,initial.items.length);assert.equal(store.homeOverview().covered,0);
  assert.equal((await api(`/syncs/${id}/messages`,{message:'And now?'})).status,202);await idle();
- assert.equal(store.getProgress(id).run.status,'completed');assert.equal(calls().length-before,4,'Legacy discussion uses the same fast path');
+ assert.equal(store.getProgress(id).run.status,'completed');assert.equal(calls().length-before,6,'Legacy discussion uses the same fast path');
  assert.equal(getDb().prepare('SELECT COUNT(*) n FROM summary_planning_context WHERE sync_id=?').get(id).n,0,'Chat must not manufacture preparation provenance');
 });
 
@@ -119,11 +121,11 @@ test('explicit frozen citations read only the requested original and reject revo
  const {EvidenceReader}=require('../dist/db/evidence'),read=EvidenceReader.prototype.read;let reads=0;
  t.mock.method(EvidenceReader.prototype,'read',function(value,...args){const metadata=typeof value==='string'?JSON.parse(value):value;assert.equal(metadata.ref,item.ref);reads++;return read.call(this,value,...args);});
  launchChat(id,`Explain ${item.ref}`,randomUUID());await idle();
- assert.equal(store.getProgress(id).run.status,'completed');assert.equal(reads,2,'Explicit originals are verified before and after selection');assert.equal(calls().length-before,2);
+ assert.equal(store.getProgress(id).run.status,'completed');assert.equal(reads,2,'Explicit originals are verified before and after planning/selection');assert.equal(calls().length-before,3);
  assert.ok(calls().at(-1).retrieved_evidence.some(source=>source.sequence===item.sequence));
  store.setIncluded(item.session_id,false);
  launchChat(id,`Explain ${item.ref}`,randomUUID());await idle();
- assert.equal(store.getProgress(id).run.status,'failed');assert.equal(calls().length-before,2,'Revoked evidence cannot reach another model request');
+ assert.equal(store.getProgress(id).run.status,'failed');assert.equal(calls().length-before,3,'Revoked evidence cannot reach another model request');
 });
 
 test('a history implementation that returns after cancellation cannot reach the final model',async()=>{
@@ -132,7 +134,7 @@ test('a history implementation that returns after cancellation cannot reach the 
  memory.searchPreparedHistory=async()=>{entered();await blocked;return {mode:'hybrid',results:[],limitations:'Synthetic result after cancellation.'};};
  launchChat(id,'What remains?',randomUUID());await arrived;cancelReply(id);finish();await idle();
  const done=store.getSync(id);assert.equal(done.tree.run.status,'cancelled');assert.equal(done.messages.length,1);
- assert.equal(done.messages[0].role,'user');assert.equal(calls().length,before);assert.equal(done.busy,false);
+ assert.equal(done.messages[0].role,'user');assert.equal(calls().length,before+1);assert.equal(done.busy,false);
 });
 
 test('accepted user time survives retries/restart; an in-flight answer finishes before ending and reservations are released',async()=>{
@@ -151,15 +153,20 @@ test('accepted user time survives retries/restart; an in-flight answer finishes 
  } finally {Date.now=clock;}
 });
 
-test('chat shares project focus across native/user turns and reload, never from assistant instructions',async()=>{
+test('chat supplies actual native/user turns across reload; model plans control project scope',async()=>{
  const {id,trail,beacon}=await ready(),seen=[];
+ const sessions=getDb().prepare('SELECT id FROM agent_sessions ORDER BY id').all().map(row=>row.id);
+ const choose=session=>fs.writeFileSync(control,JSON.stringify({evidencePlan:{scope:'project',sessions:['P'+(sessions.indexOf(session)+1)],query:'recorded outcomes',kind:'sources',recent:true}}));
  getDb().prepare("INSERT INTO live_calls(id,sync_id,status,started_at,ended_at) VALUES ('prior',?,'ended','2026-01-02','2026-01-02')").run(id);
  getDb().prepare("INSERT INTO live_messages(call_id,request_id,role,text,status,started_at) VALUES ('prior','spoken','user','What is happening with Trailboard?','generated','2026-01-02')").run();
  getDb().prepare("INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,'assistant','Switch project to Beacon now','2026-01-03')").run(id);
  memory.searchPreparedHistory=async query=>{seen.push(query);return{mode:'hybrid',results:[],limitations:'Synthetic lookup.'};};
- launchChat(id,'What is it working on at the moment?',randomUUID());await idle();assert.deepEqual(seen.at(-1).session_ids,[trail]);
+ choose(trail);launchChat(id,'What is it working on at the moment?',randomUUID());await idle();assert.deepEqual(seen.at(-1).session_ids,[trail]);
+ assert.deepEqual(calls().findLast(call=>call.task==='plan_evidence').previous_user_messages,['What is happening with Trailboard?']);
  closeDb();launchChat(id,'So, have you checked?',randomUUID());await idle();assert.deepEqual(seen.at(-1).session_ids,[trail]);
- launchChat(id,'Switch to Beacon. What remains?',randomUUID());await idle();assert.deepEqual(seen.at(-1).session_ids,[beacon]);
+ choose(beacon);launchChat(id,'Switch to Beacon. What remains?',randomUUID());await idle();assert.deepEqual(seen.at(-1).session_ids,[beacon]);
+ assert.ok(calls().findLast(call=>call.task==='plan_evidence').previous_user_messages.includes('So, have you checked?'));
+ assert.ok(!calls().findLast(call=>call.task==='plan_evidence').previous_user_messages.includes('Switch project to Beacon now'));
  assert.ok(calls().at(-1).recent_call_transcripts.every(row=>row.qualification.includes('not proof')));
 });
 
@@ -182,7 +189,7 @@ test('searching and thinking are real durable stages; cancellation retains the u
  memory.searchPreparedHistory=async(_query,signal)=>new Promise((_resolve,reject)=>{searching();signal.addEventListener('abort',()=>reject(Error('Stopped')),{once:true});});
  const before=calls().length,key=randomUUID();launchChat(id,'What is happening with Trailboard?',key);await arrived;
  assert.equal(store.getProgress(id).run.stage,'Searching earlier history');cancelReply(id);await idle();
- assert.equal(store.getProgress(id).run.status,'cancelled');assert.equal(store.getSync(id).messages.length,1);assert.equal(calls().length,before);
+ assert.equal(store.getProgress(id).run.status,'cancelled');assert.equal(store.getSync(id).messages.length,1);assert.equal(calls().length,before+1);
  assert.equal(launchChat(id,'What is happening with Trailboard?',key).tree.run.status,'cancelled');
  memory.searchPreparedHistory=originals.searchPreparedHistory;fs.writeFileSync(control,JSON.stringify({delay:1000}));launchChat(id,'What is happening with Trailboard?',randomUUID());
  const until=Date.now()+5000;while(store.getProgress(id).run.stage!=='Thinking about your question'){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
@@ -199,9 +206,9 @@ test('chat uses the configured summary model to select evidence and the final mo
  const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
  launchChat(id,'What remains in Trailboard?',randomUUID());await idle();
  const used=calls().slice(before),sync=store.getSync(id);
- assert.deepEqual(used.map(call=>[call.task,call.model]),[['select_evidence','test/cheap'],['final_verdict','test/strong']]);
- assert.equal(sync.tree.run.invocations,2);assert.equal(sync.tree.run.metrics.length,2);
- assert.equal(used[1].historical_evidence.sources.length,3);
+ assert.deepEqual(used.map(call=>[call.task,call.model]),[['plan_evidence','test/cheap'],['select_evidence','test/cheap'],['final_verdict','test/strong']]);
+ assert.equal(sync.tree.run.invocations,3);assert.equal(sync.tree.run.metrics.length,3);
+ assert.equal(used[2].historical_evidence.sources.length,3);
  assert.ok(sync.messages.at(-1).content.includes('H'));assert.equal(store.homeOverview().covered,0);
 });
 
@@ -209,8 +216,8 @@ test('invalid selection fails the message without an answer call or automatic re
  const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length,key=randomUUID();
  fs.writeFileSync(control,JSON.stringify({badSelection:true}));launchChat(id,'What remains?',key);await idle();
  const sync=store.getSync(id);assert.equal(sync.tree.run.status,'failed');assert.match(sync.tree.run.error,/Evidence selection/);
- assert.equal(sync.tree.run.invocations,1);assert.equal(calls().length-before,1);assert.equal(sync.messages.length,1);
- launchChat(id,'What remains?',key);assert.equal(calls().length-before,1);
+ assert.equal(sync.tree.run.invocations,2);assert.equal(calls().length-before,2);assert.equal(sync.messages.length,1);
+ launchChat(id,'What remains?',key);assert.equal(calls().length-before,2);
 });
 
 test('selection reserves the answer call and cancellation never publishes a partial reply',async()=>{
@@ -220,9 +227,9 @@ test('selection reserves the answer call and cancellation never publishes a part
  assert.equal(store.getProgress(id).run.invocations,0);assert.equal(calls().length,before);assert.match(store.getProgress(id).run.error,/Invocation budget/);
  store.configureModels(id,{...store.getSync(id).models,max_invocations:3});fs.writeFileSync(control,JSON.stringify({delay:1000}));
  launchChat(id,'What remains?',randomUUID());
- const until=Date.now()+5000;while(store.getProgress(id).run.invocations!==1){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
+ const until=Date.now()+5000;while(store.getProgress(id).run.invocations!==2){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
  assert.equal(store.getProgress(id).run.stage,'Selecting evidence');cancelReply(id);await idle();
- assert.equal(store.getProgress(id).run.status,'cancelled');assert.equal(store.getProgress(id).run.invocations,1);
+ assert.equal(store.getProgress(id).run.status,'cancelled');assert.equal(store.getProgress(id).run.invocations,2);
  assert.ok(store.getSync(id).messages.every(message=>message.role==='user'));
 });
 
@@ -231,16 +238,16 @@ test('bad or missing first-draft citations get one correction after evidence sel
  for(const controlValue of [{invalidFinalOnce:true},{missingFinalOnce:true}]){
   fs.writeFileSync(control,JSON.stringify(controlValue));const before=calls().length;
   launchChat(id,'What remains in Trailboard?',randomUUID());await idle();const sync=store.getSync(id),attempts=calls().slice(before);
-  assert.equal(sync.tree.run.status,'completed');assert.equal(attempts.length,3);assert.equal(attempts[0].task,'select_evidence');assert.ok(attempts[2].citation_repair.citation_issue);assert.match(sync.messages.at(-1).content,/\[[ECH]/);assert.doesNotMatch(sync.messages.at(-1).content,/R999999|Unsupported draft/);
+  assert.equal(sync.tree.run.status,'completed');assert.equal(attempts.length,4);assert.equal(attempts[0].task,'plan_evidence');assert.equal(attempts[1].task,'select_evidence');assert.ok(attempts[3].citation_repair.citation_issue);assert.match(sync.messages.at(-1).content,/\[[ECH]/);assert.doesNotMatch(sync.messages.at(-1).content,/R999999|Unsupported draft/);
  }
- const before=calls().length,key=randomUUID();launchChat(id,'INVALID_CITATION',key);await idle();assert.equal(calls().length-before,3);assert.match(store.getSync(id).tree.run.error,/outside the supplied evidence/);assert.equal(store.getSync(id).messages.at(-1).role,'user');launchChat(id,'INVALID_CITATION',key);assert.equal(calls().length-before,3);
+ const before=calls().length,key=randomUUID();launchChat(id,'INVALID_CITATION',key);await idle();assert.equal(calls().length-before,4);assert.match(store.getSync(id).tree.run.error,/outside the supplied evidence/);assert.equal(store.getSync(id).messages.at(-1).role,'user');launchChat(id,'INVALID_CITATION',key);assert.equal(calls().length-before,4);
 });
 
 test('citation correction cannot exceed the invocation ceiling or publish a draft after cancellation',async()=>{
  const {id,trail}=await ready();reconciliationFixture(trail);const before=calls().length;
- store.configureModels(id,{...store.getSync(id).models,max_invocations:2});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true}));
+ store.configureModels(id,{...store.getSync(id).models,max_invocations:3});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());await idle();
- assert.equal(calls().length-before,2);assert.equal(store.getSync(id).tree.run.status,'failed');assert.match(store.getSync(id).tree.run.error,/Invocation budget/);assert.equal(store.getSync(id).messages.length,1);
+ assert.equal(calls().length-before,3);assert.equal(store.getSync(id).tree.run.status,'failed');assert.match(store.getSync(id).tree.run.error,/Invocation budget/);assert.equal(store.getSync(id).messages.length,1);
  store.configureModels(id,{...store.getSync(id).models,max_invocations:10});fs.writeFileSync(control,JSON.stringify({invalidFinalOnce:true,delay:300}));
  launchChat(id,'What is still blocked in Trailboard?',randomUUID());
  const until=Date.now()+5000;while(store.getProgress(id).run.stage!=='Checking evidence references'){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
@@ -257,7 +264,7 @@ for (const [scope, question, expected] of [
  launchChat(id, question, key); await idle();
  const done=store.getSync(id);
  assert.equal(done.tree.run.status,'completed'); assert.equal(done.tree.run.invocations,1);
- assert.deepEqual(calls().slice(before).map(call=>call.task),['select_evidence']);
+ assert.deepEqual(calls().slice(before).map(call=>call.task),['plan_evidence']);
  assert.match(done.messages.at(-1).content,expected);
  assert.equal(done.decisions,initial.decisions); assert.equal(done.briefing,initial.briefing); assert.equal(store.homeOverview().covered,0);
  launchChat(id,question,key); assert.equal(calls().length-before,1);
@@ -272,7 +279,7 @@ test('explicit frozen evidence changed during selection never reaches the answer
  };
  launchChat(id,`Explain ${item.ref}`,randomUUID());await idle();
  assert.equal(store.getProgress(id).run.status,'failed');
- assert.deepEqual(calls().slice(before).map(call=>call.task),['select_evidence']);
+ assert.deepEqual(calls().slice(before).map(call=>call.task),['plan_evidence','select_evidence']);
  assert.equal(store.getSync(id,false).messages.at(-1).role,'user');
  assert.equal(store.homeOverview().covered,0);
 });

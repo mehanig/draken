@@ -50,7 +50,7 @@ test('prior sync and call history are frozen, summarized cheaply and carried as 
  const recapCalls=calls().filter(call=>call.task==='sync_recap');assert.ok(recapCalls.length);assert.ok(recapCalls.every(call=>call.model==='test/cheap'));assert.match(JSON.stringify(recapCalls),/HISTORICAL_QUESTION/);assert.doesNotMatch(JSON.stringify(recapCalls),/ARRIVED_AFTER_SNAPSHOT/);
  const native=JSON.parse(require('../dist/voice/live-context').liveEvidence(ready,'',true).text);assert.ok(native.previous_sync_memory[0].recap);assert.equal(native.historical_quotes_not_current_requests,undefined);assert.doesNotMatch(JSON.stringify(native),/HISTORICAL_QUESTION/);
  const lookup=JSON.parse(require('../dist/voice/live-context').liveEvidence({...ready,messages:[{role:'user',content:'NOT THE PREVIOUS SYNC',created_at:'2026-01-04'}]},'What did we discuss in the previous sync?').text);
- assert.ok(lookup.previous_sync_memory[0].recap);assert.deepEqual(lookup.historical_quotes_not_current_requests,[]);assert.match(lookup.historical_quotes_scope,/not exact/);assert.ok(Buffer.byteLength(JSON.stringify(lookup))<=3500);
+ assert.equal(lookup.previous_sync_memory,undefined);assert.equal(lookup.historical_quotes_not_current_requests,undefined);assert.doesNotMatch(JSON.stringify(lookup),/NOT THE PREVIOUS SYNC/);assert.ok(Buffer.byteLength(JSON.stringify(lookup))<=3500); // Recall now goes through shared preparation, not a phrase-triggered local fallback.
  assert.notEqual(store.getSync(first.id).recap_state,'ready','Frozen prior memory must not replace a newer conversation recap');
 });
 test('recaps visit every transcript fragment, keep roles, cache reductions and reject overlong outputs',async()=>{

@@ -9,7 +9,6 @@ const { getDb, closeDb } = require('../dist/db/schema');
 const { scanSessions } = require('../dist/sync/collector');
 const store = require('../dist/sync/store');
 const { generateReply, cancelReply, validateVerdict } = require('../dist/sync/manager');
-const { retrieveEvidence } = require('../dist/sync/retrieval');
 const { defaultModels } = require('../dist/sync/models');
 const { SummaryTree, validateSummary, validateGroups, repairSummaryCitations } = require('../dist/sync/tree');
 const { prepareModelInput } = require('../dist/sync/references');
@@ -120,7 +119,7 @@ test('cache hits across retries/syncs are source-addressed, not tied to old E re
   await generateReply(first.id);
   const firstCount = calls().length;
   await generateReply(first.id, 'Explain');
-  assert.equal(calls().length - firstCount, 2, 'discussion selects evidence and answers without rebuilding the tree');
+  assert.equal(calls().length - firstCount, 3, 'discussion plans, selects evidence and answers without rebuilding the tree');
   store.discardSync(first.id);
   const second = store.startSync();
   for (const row of getDb().prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(second.id)) {
@@ -244,7 +243,6 @@ test('restart marks an unfinished run interrupted and leaves original evidence/c
 
 test('question retrieval can reach raw evidence omitted by summaries and final citations are checked', async () => {
   const sync = await begin(220);
-  assert.ok(retrieveEvidence(sync, 'Show me E220').some(item => item.ref === 'E220'));
   assert.throws(() => validateVerdict('A claim [E999]', new Set(['E1'])), /outside the supplied evidence/);
   assert.throws(() => validateVerdict('A claim without evidence', new Set(['E1'])), /lacked evidence citations/);
   await generateReply(sync.id);
