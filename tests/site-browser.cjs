@@ -6,7 +6,7 @@ const root=path.join(__dirname,'../site');
 const version=require('../package.json').version,anchor=version.replaceAll('.','');
 test('public release copy and documentation match the npm version',()=>{
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
- assert.equal(version,'0.9.2');
+ assert.equal(version,'0.9.3');
  const lock=require('../package-lock.json');assert.equal(lock.version,version);assert.equal(lock.packages[''].version,version);
  require('../scripts/site-release.cjs').validateCopy(version,html);
  assert.ok(html.includes(`Version ${version} / Available on npm`));
@@ -51,6 +51,9 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
+  assert.match(notes,/session lists now scroll with the page on desktop and mobile/);
+  assert.match(notes,/Ignored sessions are hidden by default; use Show ignored sessions/);
+  assert.match(notes,/only changes visibility, not source permissions or preparation settings/);
   assert.match(notes,/share an isolated evidence module/);
   assert.match(notes,/interprets your question before search, replacing intent regexes/);
   assert.match(notes,/planning, selection and answer calls; citation correction can add a fourth/);

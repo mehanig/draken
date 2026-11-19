@@ -23,7 +23,13 @@ test('activity window shows ignored sessions, requires confirmation before widen
     await dialog.getByText('Agents & sessions', { exact: true }).click();
     const select = dialog.getByRole('combobox', { name: 'Session activity window', exact: true });
     const row = dialog.locator('.session-source').filter({ hasText: id });
-    await expect(select).toHaveValue('7'); await expect(row).toContainText('Outside activity window');
+    await expect(select).toHaveValue('7'); await expect(row).toHaveCount(0);
+    const pi = dialog.getByRole('region', { name: 'pi', exact: true });
+    const show = pi.getByRole('button', { name: 'Show ignored sessions', exact: true });
+    await expect(show).toHaveAttribute('aria-expanded', 'false');
+    await show.focus(); await page.keyboard.press('Enter');
+    await expect(pi.getByRole('button', { name: 'Hide ignored sessions', exact: true })).toHaveAttribute('aria-expanded', 'true');
+    await expect(row).toContainText('Outside activity window');
     await expect(row).toHaveClass(/session-ignored/); await expect(row).toContainText('First message:');
     await expect(row).toContainText('Last message:'); await expect(row).toContainText('Old window fixture');
     page.once('dialog', async confirm => { expect(confirm.message()).toContain('additional discovered sessions'); await confirm.dismiss(); });

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.3
+
+- Let session lists in Settings flow with the page instead of using an inner scrollbar, on desktop and mobile.
+- Hide ignored sessions by default. Each agent list shows an ignored count and a keyboard-accessible **Show ignored sessions** / **Hide ignored sessions** button below the list. Visibility choices survive inventory polling and do not change source permissions or preparation settings.
+- Keep the existing ignored states: disabled agents, manual exclusions, unavailable logs and sessions outside the activity window. Showing a session does not enable it or prepare its history.
+- No backend, schema, dependency or model-call changes. Existing histories, notes, review state, caches and vectors are unchanged.
+- All 61 UI tests passed, including page scrolling at desktop and mobile widths, keyboard controls, polling, source selection and activity-window consent.
+
 ## 0.9.2
 
 - Move question interpretation into the existing isolated evidence module. The configured summary model plans the query, project scope, conversation recall and recency before search, then selects original evidence. Remove the caller-side intent regexes and voice-only quote-ranking fallback. Text and native voice share this flow; the module still has no external imports.
