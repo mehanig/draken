@@ -69,9 +69,10 @@ test('snapshot totals distinguish carried unreviewed entries from newly included
   const { sync, observed } = await fixture(page);
   sync.item_count = 12; sync.previously_included_count = 8;
   await page.reload();
-  await expect(page.getByLabel('Snapshot carry-forward')).toContainText('4 newly included · 8 carried forward (unreviewed at capture)');
-  await expect(page.getByLabel('Snapshot carry-forward')).toContainText('Valid cached summaries and embeddings are reused');
-  await expect(page.getByLabel('Snapshot carry-forward')).toContainText('missing or changed work still needs preparation');
+  await expect(page.getByLabel('Snapshot carry-forward')).not.toBeVisible();
+  await page.getByLabel('About this sync', { exact: true }).click();
+  await expect(page.getByLabel('Snapshot carry-forward')).toBeVisible();
+  await expect(page.getByLabel('Snapshot carry-forward')).toContainText('4 newly included · 8 carried forward, unreviewed');
   expect(observed.mutations).toEqual([]);
 });
 

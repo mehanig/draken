@@ -1,3 +1,4 @@
+import { InfoDisclosure } from './InfoDisclosure';
 import { useEffect, useRef, useState } from 'react';
 import { Settings, X } from 'lucide-react';
 import { autoIndexSettings, setAutoIndex } from '../api';
@@ -34,8 +35,10 @@ export function IndexSettings() {
         try { setSettings(await setAutoIndex(enabled)); } catch (error) { setSettings(previous); setError(error instanceof Error ? error.message : 'Could not save settings'); }
         finally { setSaving(false); }
       }} /><span><strong>Automatically prepare history</strong><span className="small muted">Index locally, then cache summaries using your configured provider and its quota or API billing.</span></span></label>
-    <p className="small muted">On by default; saved opt-outs are preserved until you enable this option. At idle minute checks, index new or changed activity, then prepare reusable summaries. Foreground work takes priority. Disabling stops both stages and retains completed work. Provider failures pause paid retries until you explicitly retry; invocation limits still apply.</p>
-    <p className="small muted">Local embeddings use CPU, memory and disk; first use may download about 136 MB of pinned search model files. Only your Sync with Draken or Chat instead action creates a snapshot and opening briefing. Changed inputs may still need preparation. Nothing is marked reviewed; conversations, notes, exclusions and frozen evidence are preserved.</p>
+    <InfoDisclosure label="About automatic preparation">
+      <p>Preparation runs while Draken is idle. Turning it off keeps completed work. Provider failures pause summaries until you explicitly retry.</p>
+      <p>Local search uses CPU, memory and disk, and may download about 136 MB on first use. Starting a chat or call creates its briefing. Preparation never starts a call or marks work reviewed.</p>
+    </InfoDisclosure>
     {saving && <p role="status">Saving…</p>}
     {(error || readError) && <p className="small" role="alert">{error || readError}</p>}
     {open && settings && <AutomaticProgress settings={settings} />}

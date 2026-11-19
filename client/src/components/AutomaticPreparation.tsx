@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { autoIndexSettings } from '../api';
 import type { AutoIndexSettings } from '../types';
 import { HistoryProgress } from './HistoryProgress';
+import { InfoDisclosure } from './InfoDisclosure';
 
 export function AutomaticProgress({ settings }: { settings: AutoIndexSettings }) {
   const phase = {
@@ -14,12 +15,11 @@ export function AutomaticProgress({ settings }: { settings: AutoIndexSettings })
   }[settings.phase];
   return <section className="history-progress" aria-label="Automatic preparation">
     <p role="status"><strong>{phase}</strong></p>
-    {settings.enabled && <>
+    {settings.enabled && !settings.summary_enabled && <p role="status">Indexing only: summary preparation is off. Enable automatic preparation in Settings to run both.</p>}
+    {settings.enabled && <InfoDisclosure label="Preparation details">
       <p className="small muted">{settings.pending_records.toLocaleString()} source changes waiting for local indexing. {settings.last_completed_at && `Last completed indexing batch: ${new Date(settings.last_completed_at).toLocaleString()}.`}</p>
-      {!settings.summary_enabled && <p role="status">Indexing only: summary preparation is off. Enable automatic preparation in Settings to run both.</p>}
       {settings.summary?.last_completed_at && <p className="small muted">Last successful summary pass: {settings.summary.prepared_entries.toLocaleString()} entries, {new Date(settings.summary.last_completed_at).toLocaleString()}. Later changes may still need preparation.</p>}
-      <p className="small muted">History accumulates without creating snapshots or briefings.</p>
-    </>}
+    </InfoDisclosure>}
     {settings.error && <p role="alert">{settings.error}</p>}
     <HistoryProgress enabled={settings.enabled && settings.phase === 'indexing'} backgroundOnly />
   </section>;

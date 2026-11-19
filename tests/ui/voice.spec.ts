@@ -70,7 +70,15 @@ test('ChatGPT-only call: local test peer audio, dragon, controls, sources, histo
     if (/\/notes$|\/complete$/.test(request.url()) && request.method() !== 'GET') writes.push(request.url());
     if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== 'http://127.0.0.1:41889') external.push(request.url());
   });
-  await nativePeer(page); await openCall(page, syncId);
+  await nativePeer(page); await page.goto(`/syncs/${syncId}`);
+  await expect(page.getByText('Audio is sent to OpenAI.', { exact: true })).toBeVisible();
+  const help = page.getByText('ChatGPT receives your audio and relevant history.', { exact: false });
+  await expect(help).not.toBeVisible();
+  await page.getByLabel('About voice calls', { exact: true }).click(); await expect(help).toBeVisible();
+  await page.keyboard.press('Escape'); await expect(help).not.toBeVisible();
+  expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
+  await page.screenshot({ path: '.test-artifacts/minimal-voice-desktop.png', fullPage: true });
+  await openCall(page, syncId);
   await expect(page.locator('.dp-stage')).toHaveAttribute('data-renderer', 'webgl');
   await expect(page.locator('.dp-stage button, .dp-stage figcaption')).toHaveCount(0);
   await page.getByRole('button', { name: 'Mute', exact: true }).click(); expect(await tracksStopped(page)).toBe(true);

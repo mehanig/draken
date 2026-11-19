@@ -7,6 +7,7 @@ import type { HomeOverview } from '../types';
 import { SyncCost } from '../components/SyncCost';
 import { SetupPanel } from '../components/SetupPanel';
 import { AutomaticPreparation } from '../components/AutomaticPreparation';
+import { InfoDisclosure } from '../components/InfoDisclosure';
 
 import { linkClick, type Navigate } from '../navigation';
 const date = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -49,21 +50,14 @@ export function Home({ navigate }: { navigate: Navigate }) {
       <div className="conversation-actions"><button className="btn btn-secondary" disabled={!home || !textReady || Boolean(work || home?.busy || home?.active_call)} onClick={() => void start('chat')}><MessageSquare size={17} />Chat instead</button>
       {secureUrl ? <a className="btn btn-primary" href={secureUrl}>Open secure Draken<ArrowRight size={17} /></a> : <button className="btn btn-primary" disabled={!home || disabled || !window.isSecureContext} onClick={() => void start()}><Phone size={17} />Sync with Draken</button>}</div></div>
     {!window.isSecureContext && <p className="small muted">Use trusted HTTPS or localhost for the combined sync and call.</p>}
-    <p className="home-hint muted small">Automatic preparation indexes history locally, then caches summaries through your configured provider. Click Sync with Draken or Chat instead to create the snapshot and opening briefing. Active conversations receive prepared updates between turns and end after 30 minutes without a user message. Nothing is marked reviewed until you confirm it.</p>
     <div className="home-counts" aria-label="New activity"><span><strong>{home?.new_entries ?? '—'}</strong> new entries to prepare</span></div>
-    <p className="small muted">New means indexed entries not included in an earlier sync. Cached work is reused; unfinished work and the final briefing may still need processing.</p>
-    <details className="home-tracking-details">
-      <summary>Details: carried-forward entries and review</summary>
+    <InfoDisclosure label="About activity and preparation">
+      <p>New entries have not been included in an earlier sync. Starting a chat or call prepares a briefing; completed preparation is reused.</p>
       <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.new_entries === undefined ? '—' : home.available - home.new_entries}</strong> carried forward, unreviewed</span><span><strong>{home?.available ?? '—'}</strong> available for a new sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> reserved, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
-      <p className="small muted">These are entry counts, not a cache check or a bill. Mark reviewed on a completed sync to cover all entries in its snapshot; ending a conversation does not mark them reviewed.</p>
-    </details>
+      <p>Review is manual. Ending a conversation does not mark its entries reviewed.</p>
+      <p>Automatic preparation uses your configured provider and its quota or API billing. Manage it in Settings; Preparation usage shows estimates, not invoices or total chat and voice spending.</p>
+    </InfoDisclosure>
     <AutomaticPreparation />
-    <details className="home-preparation-info">
-      <summary>Automatic indexing and cost tracking</summary>
-      <p><strong>Settings → Automatically prepare history</strong> controls local indexing followed by paid summary caching at idle minute checks, including small tails. Saved opt-outs are preserved. Disabling stops both stages and keeps completed work. Failures are visible; paid failures require an explicit retry. Changed inputs and the opening briefing may still take time. No background option creates a sync, starts audio, edits originals or notes, or marks work reviewed.</p>
-      <p><strong>Preparation spending estimates:</strong> open <strong>Settings → Preparation usage</strong> for estimated USD cost, completed batches and model requests over time. Preparation history, including past automatic work, retries and failed work, is retained; missing prices remain unavailable or partial.</p>
-      <p className="small muted">Not total spending, a provider invoice or account quota. Chat, voice, standalone post-conversation recaps and local machine/network costs are excluded. Opening this explanation or the usage dashboard does not start preparation.</p>
-    </details>
     {work && <p role="status" className="working"><span className="spinner" />{work}</p>}
     {home?.busy && !work && <p className="small muted" role="status">Draken is updating a sync. Open its card to follow progress.</p>}
     {home?.active_call && <p className="small muted">A call is active. End it before starting another sync.</p>}
@@ -74,9 +68,9 @@ export function Home({ navigate }: { navigate: Navigate }) {
         <div className="sync-tile-heading"><strong>Sync #{item.id}</strong><span className={`status ${item.status}`}>{item.busy ? 'working' : item.active_call ? 'in call' : item.needs_retry ? 'needs retry' : item.status === 'completed' ? 'reviewed' : item.status === 'open' ? item.conversation?.ended_at ? 'session ended' : 'open' : 'discarded'}</span><ArrowRight size={17} aria-hidden="true" /></div>
         <div className="small muted">{date(item.created_at)} · {item.item_count} {item.item_count === 1 ? 'entry' : 'entries'} · {item.calls} {item.calls === 1 ? 'call' : 'calls'}{item.aggregation_cost && <> · <SyncCost cost={item.aggregation_cost} /></>}</div>
         <p className="sync-tile-preview">{item.preview || (item.needs_retry ? 'Preparation stopped. Open this sync to retry; its entries and cached work are retained.' : item.busy ? 'Bringing the new activity together. Open this sync to follow preparation.' : item.conversation?.ended_at ? 'Session ended. Its transcript is retained; start a new sync to continue.' : 'No recap yet. Open this sync to continue the conversation.')}</p>
-        <span className="sync-tile-kind small muted">{item.preview_kind === 'recap' ? 'Conversation recap · not saved decisions' : item.preview_kind === 'previous_recap' ? 'Earlier recap · conversation changed' : item.preview_kind === 'briefing' ? 'Briefing preview' : 'Frozen snapshot'}</span>
+        <span className="sync-tile-kind small muted">{item.preview_kind === 'recap' ? 'Recap' : item.preview_kind === 'previous_recap' ? 'Earlier recap' : item.preview_kind === 'briefing' ? 'Briefing' : 'Sync'}</span>
       </a>)}
-      {home && !home.syncs.length && <div className="card welcome"><h2>Your next conversation starts here.</h2><p>Draken keeps track of the work you’ve already brought into a sync. Start above; the details can wait until you need them.</p></div>}
+      {home && !home.syncs.length && <div className="card welcome"><h2>Your next conversation starts here.</h2><p>Start a chat or call to discuss your work.</p></div>}
     </section>
     {home?.next_cursor && <button className="btn btn-secondary" onClick={async () => {
       try { const older = await api.home(home.next_cursor!); setHome(current => current ? { ...current, syncs: [...current.syncs, ...older.syncs.filter(item => !current.syncs.some(old => old.id === item.id))], next_cursor: older.next_cursor } : older); }

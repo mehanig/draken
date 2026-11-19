@@ -21,10 +21,12 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(progress).toContainText('30 / 64 new or changed passages ready');
   await expect(progress).toContainText('128 unchanged passages reused');
   await expect(progress).toContainText('64 source changes waiting for local indexing');
-  await expect(progress).toContainText('History accumulates without creating snapshots or briefings');
+  await expect(progress.getByText('64 source changes waiting for local indexing.', { exact: false })).not.toBeVisible();
+  await progress.getByLabel('Preparation details', { exact: true }).click();
+  await expect(progress.getByText('64 source changes waiting for local indexing.', { exact: false })).toBeVisible();
   await expect(page.getByLabel('New activity')).toContainText('64 new entries to prepare');
   await expect(page.getByLabel('Sync tracking')).not.toBeVisible();
-  await page.getByText('Details: carried-forward entries and review', { exact: true }).click();
+  await page.getByLabel('About activity and preparation', { exact: true }).click();
   for (const width of [390, 1440]) { await page.setViewportSize({ width, height: 900 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
   for (const entries of [64, 128, 131]) {
     state = { ...state, phase: 'waiting', pending_records: entries === 131 ? 3 : 0, pending_entries: entries, last_completed_at: new Date().toISOString() };
@@ -50,8 +52,9 @@ test('Home shows accumulated local history without automatic sync links, summari
   await expect(dialog.getByRole('switch', { name: /Automatically prepare history/ })).toBeChecked();
   await expect(dialog.getByRole('button', { name: 'Retry automatic preparation' })).toBeVisible();
   await expect(dialog).toContainText('quota or API billing');
-  await expect(dialog).toContainText('Local embeddings use CPU, memory and disk');
-  await expect(dialog).toContainText('Foreground work takes priority');
+  await dialog.getByLabel('About automatic preparation', { exact: true }).click();
+  await expect(dialog.getByText('Local search uses CPU, memory and disk', { exact: false })).toBeVisible();
+  await expect(dialog.getByText('Preparation runs while Draken is idle.', { exact: false })).toBeVisible();
   await page.keyboard.press('Escape');
   unavailable = true; await expect(page.getByRole('status').filter({ hasText: 'Automatic preparation status is temporarily unavailable' })).toBeVisible({ timeout: 8000 });
   expect(mutations).toBe(0); expect(await page.evaluate(() => (window as any).__captures)).toBe(0);
