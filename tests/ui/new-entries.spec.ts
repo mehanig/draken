@@ -12,12 +12,12 @@ for (const newEntries of [1253, 0, undefined]) {
     await expect(page.getByLabel('New activity')).toHaveText(`${newEntries ?? '—'} new entries to prepare`);
     await expect(page.getByLabel('New activity')).not.toContainText('25592');
     await expect(page.getByLabel('Sync tracking')).not.toBeVisible();
-    await expect(page.getByText('New means indexed entries not included in an earlier sync.', { exact: false })).toBeVisible();
-    await expect(page.getByText('unfinished work and the final briefing may still need processing.', { exact: false })).toBeVisible();
-    await page.getByText('Details: carried-forward entries and review', { exact: true }).click();
+    await expect(page.getByText('New entries have not been included in an earlier sync.', { exact: false })).not.toBeVisible();
+    await page.getByLabel('About activity and preparation', { exact: true }).click();
+    await expect(page.getByText('completed preparation is reused.', { exact: false })).toBeVisible();
     await expect(page.getByLabel('Sync tracking')).toContainText(`${newEntries === undefined ? '—' : 25592 - newEntries} carried forward, unreviewed`);
     await expect(page.getByLabel('Sync tracking')).toContainText('619 reviewed');
-    await expect(page.getByText('Mark reviewed on a completed sync', { exact: false })).toBeVisible();
+    await expect(page.getByText('Review is manual.', { exact: false })).toBeVisible();
     await page.waitForTimeout(4200);
     expect(mutations).toBe(0);
   });

@@ -81,9 +81,6 @@ p { line-height: 1.7; }
 .usage-chart line { stroke: var(--rule); vector-effect: non-scaling-stroke; }
 .usage-chart .usage-gridline { stroke-dasharray: 3 4; }
 .usage-chart-axis { grid-column: 2; margin-top: 10px; font-variant-numeric: tabular-nums; }
-.home-preparation-info { margin: 16px 0; padding: 12px; border: 1px solid var(--rule); }
-.home-preparation-info summary { cursor: pointer; font-weight: 700; }
-.home-preparation-info p { margin-top: 12px; }
 .usage-details { margin-top: 16px; }
 .usage-details summary { cursor: pointer; font-weight: 700; }
 .usage-table-wrap { overflow: auto; max-height: 320px; margin-top: 12px; }
@@ -235,7 +232,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .chat-compose textarea { width: 100%; resize: vertical; min-height: 82px; }
 .chat-compose-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
 .chat-refresh { margin-top: 14px; }
-.chat-boundary { margin: 18px 0 0; }
 @media (max-width: 600px) {
   .text-chat { padding: 16px; }
   .chat-heading > .btn { width: 100%; }
@@ -306,7 +302,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .brand { color: inherit; text-decoration: none; }
 .sync-home, .sync-detail { width: min(100%, 1060px); margin: auto; padding: 40px 30px 72px; min-width: 0; }
 .sync-detail { width: min(100%, 1180px); }
-.home-hint { max-width: 75ch; margin: 22px 0; }
 .setup-panel { margin-block: 24px; padding: 18px; border: 2px solid var(--line); background: var(--panel); overflow-wrap: anywhere; }
 .settings-dialog .setup-panel { padding: 14px; margin-bottom: 0; }
 .setup-panel h2 { font-size: 18px; }

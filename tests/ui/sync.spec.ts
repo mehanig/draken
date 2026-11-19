@@ -134,9 +134,13 @@ test('settings persist both preparation stages without sync creation, browser ca
  try {
   await toggle.check();await expect.poll(async()=>(await(await page.request.get('/api/settings/auto-index')).json()).enabled).toBe(true);
   await page.reload();await button.click();await expect(toggle).toBeChecked();
-  await expect(dialog).toContainText('At idle minute checks');
-  await expect(dialog).toContainText('quota or API billing');
-  await expect(dialog).toContainText('conversations, notes, exclusions and frozen evidence are preserved');
+  await expect(dialog.locator('.index-toggle').getByText('quota or API billing', {exact:false})).toBeVisible();
+  await dialog.getByLabel('About automatic preparation',{exact:true}).click();
+  await expect(dialog.getByText('Preparation runs while Draken is idle.',{exact:false})).toBeVisible();
+  await expect(dialog).toContainText('Turning it off keeps completed work');
+  await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('About automatic preparation',{exact:true})).toBeFocused();
+  await expect(dialog.getByText('Preparation runs while Draken is idle.',{exact:false})).not.toBeVisible();
   expect((await (await page.request.get('/api/settings/auto-index')).json()).summary.enabled).toBe(true);
   await page.setViewportSize({width:320,height:700});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   expect(await dialog.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);

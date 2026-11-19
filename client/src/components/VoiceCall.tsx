@@ -3,6 +3,7 @@ import { AudioLines, ArrowUp, ExternalLink, Headphones, Keyboard, MessageSquare,
 import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText, SnapshotSource } from './EvidenceList';
 import { ConversationInfo } from './ConversationInfo';
+import { InfoDisclosure } from './InfoDisclosure';
 import { HistorySource } from './HistorySource';
 import { HistoryProgress } from './HistoryProgress';
 import { VoiceCaptions } from './VoiceCaptions';
@@ -139,14 +140,17 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
     <section className="card voice-entry" aria-label="Voice calls">
       <div className="voice-entry-main">
         <div className="voice-entry-icon" aria-hidden="true"><Phone size={22} /></div>
-        <div><h2>Talk it through. Out loud.</h2><p className="muted small">Live voice through ChatGPT. Audio goes to OpenAI; replies may paraphrase.</p><ConversationInfo state={sync.conversation} unavailable={updatesUnavailable} /></div>
+        <div><h2>Talk it through. Out loud.</h2><p className="muted small">Audio is sent to OpenAI.</p><ConversationInfo state={sync.conversation} unavailable={updatesUnavailable} /></div>
         <div className="conversation-actions"><button className="btn btn-secondary" disabled={open || checking} onClick={onChat}><MessageSquare size={16} />Chat instead</button>
         {!secure && status?.httpsPort ? <a className="btn btn-primary" href={httpsUrl.href}>Open secure call page <ExternalLink size={15} /></a> :
           <button className="btn btn-primary" disabled={disabled || checking || !prepared || !status?.installed || Boolean(status?.activeCall) || !secure} onClick={() => void start()}><Phone size={16} />Call Draken</button>}</div>
       </div>
-      <p className="small muted">Relevant earlier history is found automatically. Retrieved excerpts go to ChatGPT, separately from this frozen snapshot; no review or saved decisions change.</p>
+      <InfoDisclosure label="About voice calls">
+        <p>ChatGPT receives your audio and relevant history. Transcripts are saved here; raw audio is not recorded.</p>
+        <p>AI can mishear or make mistakes. Sources show the context supplied, not proof of every claim. Calls do not save decisions or mark work reviewed.</p>
+      </InfoDisclosure>
       {!secure && <p className="small muted">The microphone needs trusted HTTPS. {status?.httpsPort ? 'The secure page uses your existing dashboard login. Install the local certificate once on this device before opening it.' : 'Use localhost, or enable HTTPS on the server.'}</p>}
-      {status?.certificateAvailable && <details className="voice-history"><summary>First-time browser setup</summary>
+      {!secure && status?.certificateAvailable && <details className="voice-history"><summary>First-time browser setup</summary>
         <p className="small">Trust only your own Draken server’s certificate. This is a one-time device setup, not another account or voice subscription.</p>
         <button className="btn btn-secondary" onClick={() => void downloadCertificate()}>Download local certificate</button>
         <ul className="small"><li><strong>Windows:</strong> open the downloaded certificate → Install Certificate → Current User → place in Trusted Root Certification Authorities.</li>
@@ -154,7 +158,7 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
           <li><strong>Firefox/Linux:</strong> Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import. Trust it to identify websites.</li></ul>
         <p className="small muted">Restart the browser if needed, open the secure page, sign in, and allow the microphone when you start a call. Keep the server’s private keys private. See <code>VOICE.md</code> for an SSH-tunnel alternative.</p>
       </details>}
-      {sync.status === 'open' && !conversationEnded && <p className="small muted" role="status">{prepared ? `Ready to call. History cutoff: ${readiness?.before ? new Date(readiness.before).toLocaleString() : 'prepared snapshot'}. Prepared updates become available between turns.` : !readiness ? 'Checking call readiness…' : readiness.preparing ? 'Preparing history before calling. Your microphone is off.' : !readiness.briefingReady ? 'Prepare the briefing first.' : 'History needs preparation before you can call.'}</p>}
+      {sync.status === 'open' && !conversationEnded && <p className="small muted" role="status">{prepared ? 'Ready to call.' : !readiness ? 'Checking call readiness…' : readiness.preparing ? 'Preparing history before calling. Your microphone is off.' : !readiness.briefingReady ? 'Prepare the briefing first.' : 'History needs preparation before you can call.'}</p>}
       {sync.status === 'open' && !conversationEnded && readiness?.briefingReady && !readiness.preparing && <button className="btn btn-secondary" disabled={disabled || checking} onClick={onPrepareHistory}>{prepared ? 'Refresh history' : 'Prepare history'}</button>}
       {readiness?.error && <p className="small" role="alert">{readiness.error}</p>}
       {sync.status !== 'open' && <p className="small muted">This sync is closed. Start a new sync for another call.</p>}
@@ -167,10 +171,10 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
         }}>End previous call</button></div>}
       <details className="voice-history" onToggle={event => { if (event.currentTarget.open) void loadHistory(); }}>
         <summary>Call history</summary>
-        {history?.length === 0 && <p className="muted small">No calls yet. Transcripts are saved here; raw audio is not recorded.</p>}
+        {history?.length === 0 && <p className="muted small">No calls yet.</p>}
         {history?.map(item => <details key={item.id} className="voice-history-call"><summary>{new Date(item.started_at).toLocaleString()} · {item.turns.length} {item.mode === 'native' ? 'messages' : 'turns'} · {item.status}</summary>
           <p className="small muted">{item.end_reason || 'Call in progress'}</p>
-          {item.mode === 'native' ? <p className="small muted">Ordered live transcripts, not verified question–answer pairs. Sources are supplied context, not verified citations. Exact playback is not confirmed.</p> : <p className="small muted">Historical call from the retired local speech engine. These records are preserved; this engine cannot start new calls.</p>}
+          {item.mode !== 'native' && <p className="small muted">Historical call from the retired local speech engine. These records are preserved; this engine cannot start new calls.</p>}
           {item.turns.map(turn => <div className="voice-history-turn" key={turn.id}>
             {turn.question && <><strong className="message-author">You</strong><p className="prose">{turn.question}</p></>}
             {(turn.answer || !turn.question || item.mode !== 'native') && <><strong className="message-author">Draken · {turn.status}</strong>
@@ -224,7 +228,6 @@ export function VoiceCall({ sync, readiness, onPrepareHistory, disabled, beforeS
             {turn.answer && <><strong>Draken · generated reply</strong><p className={turn.id === call.turnId ? 'voice-answer' : undefined}>{turn.answer}</p></>}
           </div>)}</div>
           {!transcript.length && <p className="small muted">No transcript yet.</p>}
-          <p className="small muted">Live generated transcripts, not word-timed subtitles. Exact playback and agreement are not confirmed. Full text is retained here even when the scene shows only its latest lines.</p>
           {call.evidence.length > 0 && <details className="voice-history"><summary>Sources supplied ({call.evidence.length})</summary><p className="small muted">Context available to the voice model, not verified citations for every spoken claim.</p><div className="voice-sources">{call.evidence.map(ref => <button className="citation" key={ref} onClick={event => { const list = event.currentTarget.closest('details'); if (list) list.open = false; setSource(source === ref ? '' : ref); }}>{ref.startsWith('H') ? `History ${ref.slice(-6)}` : `Source ${ref}`}</button>)}</div></details>}
           {open && /^H[a-f0-9]{24}$/.test(source) && <section className="voice-source" ref={sourcePanel}><button className="btn btn-secondary" onClick={() => setSource('')}>Close historical source</button><HistorySource reference={source} /></section>}
           {open && /^[EC]\d+$/.test(source) && <section className="voice-source" ref={sourcePanel}><button className="icon-button" aria-label="Close source" onClick={() => setSource('')}><X size={16} /></button><SnapshotSource key={source} syncId={sync.id} reference={source} /></section>}

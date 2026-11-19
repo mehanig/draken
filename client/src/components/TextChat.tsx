@@ -3,6 +3,7 @@ import { ArrowUp, Square } from 'lucide-react';
 import type { CallReadiness, SyncDetail } from '../types';
 import { CitedText } from './EvidenceList';
 import { ConversationInfo } from './ConversationInfo';
+import { InfoDisclosure } from './InfoDisclosure';
 
 export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, onSend, onCancel, onPrepareHistory, onVoice, updatesUnavailable = false }: {
   sync: SyncDetail; readiness: CallReadiness | null; draft: string; setDraft: (text: string) => void;
@@ -21,21 +22,25 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
   const sendDisabled = disabled || !open || !prepared;
   return <section className="card text-chat" aria-label="Chat with Draken">
     <header className="chat-heading"><img className="chat-avatar" src="/persona/chat-avatar.webp" alt="Draken" width="52" height="52" />
-      <div><h2>Chat with Draken</h2><p className="small muted">Same conversation. No microphone or audio.</p><ConversationInfo state={sync.conversation} unavailable={updatesUnavailable} /></div>
+      <div><h2>Chat with Draken</h2><ConversationInfo state={sync.conversation} unavailable={updatesUnavailable} /></div>
       <button type="button" className="btn btn-ghost" onClick={onVoice}>Voice &amp; call history</button>
     </header>
+    <InfoDisclosure label="About chat">
+      <p>Ask about your projects, decisions or next steps. Prepared updates are used on your next turn.</p>
+      <p>Messages are saved here. Chat does not use your microphone, save decisions or mark work reviewed.</p>
+    </InfoDisclosure>
     <div className="chat-thread" ref={thread} onScroll={() => { const element = thread.current; if (element) bottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
-      {!sync.messages.length && !question && <div className="chat-welcome"><h3>What would you like to pick up?</h3><p>Ask about a project, a decision, or what still needs your attention. Draken will use the snapshot and prepared original history.</p></div>}
+      {!sync.messages.length && !question && <div className="chat-welcome"><h3>What would you like to pick up?</h3><p>Ask about your work or what to do next.</p></div>}
       {sync.messages.map(message => <article className={`chat-message ${message.role}`} key={message.id}>
         {message.role === 'assistant' && <img className="chat-avatar" src="/persona/chat-avatar.webp" alt="" width="36" height="36" />}
         <div className="chat-bubble"><div className="chat-author"><strong>{message.role === 'user' ? 'You' : 'Draken'}</strong><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time></div><CitedText text={message.content} /></div>
       </article>)}
       {question && !(run?.request_id && (pending || (failed && !sending))) && <article className="chat-message user"><div className="chat-bubble"><strong>You</strong><p className="prose">{question}</p></div></article>}
-      {thinking && <div className="chat-message assistant"><img className="chat-avatar" src="/persona/chat-avatar.webp" alt="" width="36" height="36" /><div className="chat-bubble chat-thinking" role="status" aria-label="Chat status" aria-live="polite"><span className="spinner" aria-hidden="true" />{stage}<span className="small muted">Your answer will appear here when it’s ready.</span></div></div>}
+      {thinking && <div className="chat-message assistant"><img className="chat-avatar" src="/persona/chat-avatar.webp" alt="" width="36" height="36" /><div className="chat-bubble chat-thinking" role="status" aria-label="Chat status" aria-live="polite"><span className="spinner" aria-hidden="true" />{stage}</div></div>}
       {failed && <div className="alert warning" role="alert"><strong>{run?.status === 'failed' ? 'Reply failed.' : 'Reply stopped.'}</strong><p>{run?.error || 'The question is retained. Nothing was marked reviewed.'}</p><button className="btn btn-secondary" disabled={sendDisabled} onClick={() => onSend(run?.question || '')}>Retry chat reply</button></div>}
     </div>
     {open && <>
-      {!thinking && <p className="small muted" role="status">{prepared ? 'Newly prepared information is used on your next turn. You can keep chatting while updates are prepared.' : sync.busy ? 'Preparing the briefing and history for chat…' : readiness?.briefingReady ? 'Prepare history before sending a message.' : 'Prepare the briefing and history first.'}</p>}
+      {!thinking && !prepared && <p className="small muted" role="status">{sync.busy ? 'Preparing the briefing and history for chat…' : readiness?.briefingReady ? 'Prepare history before sending a message.' : 'Prepare the briefing and history first.'}</p>}
       {readiness?.error && <p role="alert" className="small">{readiness.error}</p>}
       <form className="chat-compose" onSubmit={event => { event.preventDefault(); if (!sendDisabled && draft.trim()) { bottom.current = true; onSend(); } }}>
         <label htmlFor="chat-question" className="sr-only">Message Draken</label>
@@ -50,6 +55,5 @@ export function TextChat({ sync, readiness, draft, setDraft, disabled, sending, 
     </>}
     {!open && <p className="small muted">{ended && sync.status === 'open' ? 'Session ended after 30 minutes without a user message. Your chat is preserved; start a new sync to continue. Nothing was marked reviewed.' : 'This sync is closed. Its chat is preserved; start a new sync to continue.'}</p>}
     {!open && draft.trim() && <div className="chat-compose"><label htmlFor="ended-chat-draft">Unsent message — copy it into a new sync</label><textarea id="ended-chat-draft" rows={3} readOnly value={draft} /></div>}
-    <p className="small muted chat-boundary">Messages stay with this sync. Calls remain in call history. Chatting never marks anything reviewed or saves decisions for you.</p>
   </section>;
 }
