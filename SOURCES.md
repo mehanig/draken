@@ -4,6 +4,8 @@ Draken reads **pi, Codex CLI and Claude Code** JSONL histories. These are source
 
 ## Session activity window
 
+The Settings page is at `/settings`. You can also choose the saved window when starting a stopped server with `draken --history-days 30` or `draken --history-days all`. Widening requires confirmation (`--yes` for scripts). A second server launch cannot change the running server's settings; use the page while it is running.
+
 By default, Draken prepares sessions whose **last message was within 7 days**. Change **Settings → Agents & sessions → Prepare sessions active in** to another period or **All history**. This selects sessions, not individual messages: an active session includes its older messages, subject to existing source choices and any saved installation baseline.
 
 Discovery checks the first and last messages before importing the transcript. Unchanged file metadata reuses that result. It reads complete records from the file edges; it may need to read farther through metadata-only records. Modification dates and compaction summaries do not count as new messages. Inactive sessions remain listed with their first/last message dates, a cleaned last-message preview of at most 240 characters, and an explicit ignored status. This preview is inventory metadata, not evidence. Disabled agents are still not scanned.

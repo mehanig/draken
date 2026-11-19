@@ -5,6 +5,7 @@ import https from 'https';
 import { randomUUID } from 'crypto';
 import { rememberServer } from './server-state';
 import { getDataDir } from './data-dir';
+import { configureStartupWindow } from './sources/activity-startup';
 import { ownServerDirectory } from './server-ownership';
 import { activity } from './sync/activity';
 import { getDb, closeDb } from './db/schema';
@@ -58,7 +59,7 @@ export function createApp(options: { staticDir?: string; instanceId?: string } =
   return app;
 }
 
-export function startServer(trayOwned = false): void {
+export function startServer(trayOwned = false, options: { historyDays?: number | null; yes?: boolean } = {}): void {
   if (trayOwned && (!process.send || !process.connected)) throw new Error('The tray launcher disconnected. No server was started.');
   validateAuthConfig();
   validateVoiceConfig();
@@ -79,11 +80,14 @@ export function startServer(trayOwned = false): void {
   const app = express();
   app.use((_req, res, next) => ready ? next() : res.status(503).json({ error: 'Draken is starting or stopping.' }));
   app.use(createApp({ instanceId }));
-  const bound = () => {
+  const bound = async () => {
     if (++listening !== (tls ? 2 : 1) || stopping) return;
     try {
       releaseDirectory = ownServerDirectory(getDataDir());
-      getDb(); recoverInterruptedRuns(); recoverLegacyCalls(); recoverLiveCalls();
+      const db = getDb();
+      if (options.historyDays !== undefined) await configureStartupWindow(db, options.historyDays, options.yes);
+      if (stopping) return;
+      recoverInterruptedRuns(); recoverLegacyCalls(); recoverLiveCalls();
       const httpAddress = server.address(), secureAddress = secureServer?.address();
       if (!httpAddress || typeof httpAddress === 'string' || typeof secureAddress === 'string') throw new Error('Cannot record the listening address');
       const target = rememberServer(instanceId, httpAddress, secureAddress || undefined);

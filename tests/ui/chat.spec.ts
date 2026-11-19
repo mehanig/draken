@@ -116,6 +116,8 @@ test('a lost accepted-send response recovers the same job, and multiline drafts 
   expect((await (await page.request.get(`/api/syncs/${id}`)).json()).messages).toHaveLength(2);
   await input.fill('Unsent follow-up'); page.once('dialog', dialog => dialog.dismiss()); await page.getByRole('button', { name: 'Voice & call history', exact: true }).click();
   await expect(page).toHaveURL(/\/chat$/); await expect(input).toHaveValue('Unsent follow-up');
+  page.once('dialog', dialog => dialog.dismiss()); await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page).toHaveURL(/\/chat$/); await expect(input).toHaveValue('Unsent follow-up');
 });
 
 test('failed replies are retryable and sending chat never implicitly saves note edits', async ({ page }) => {

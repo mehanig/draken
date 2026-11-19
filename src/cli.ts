@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import path from 'path';
+import { parseHistoryDays } from './sources/activity-startup';
 import { startServer } from './server';
 import { serverTarget } from './server-state';
 import { probeServer } from './server-status';
@@ -11,6 +12,9 @@ const version = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json
 const args = process.argv.slice(2);
 async function main() {
   if (!args.length) return startServer();
+  if (args[0] === '--history-days' && (args.length === 2 || args.length === 3 && args[2] === '--yes')) {
+    return startServer(false, { historyDays: parseHistoryDays(args[1]), yes: args[2] === '--yes' });
+  }
   if (args.length === 1 && args[0] === 'tray') return launchTray();
   if (args.length === 1 && args[0] === '--tray-server' && process.send) return startServer(true);
   if (args.length === 1 && args[0] === '--tray-worker' && process.send) {
@@ -23,6 +27,9 @@ async function main() {
 
 Usage:
   draken                  Start the server in this terminal; Ctrl+C stops it
+  draken --history-days N  Save a session activity window before starting (1–36500 or all)
+                          Widening asks for confirmation; --yes accepts it for scripts.
+                          Without the flag, use the saved window or the 7-day default.
   draken tray             Background tray companion (macOS / Windows desktop)
   draken status           Find and check this data directory's last server
   draken doctor           Check pi/model credential configuration, without inference

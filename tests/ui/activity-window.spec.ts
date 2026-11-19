@@ -18,8 +18,8 @@ test('activity window shows ignored sessions, requires confirmation before widen
   let writes = 0;
   page.on('request', request => { if (request.method() === 'PATCH' && request.url().includes('/settings/activity-window')) writes++; });
   try {
-    await page.goto('/'); await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+    await page.goto('/'); await page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true }).click();
+    const dialog = page.getByRole('main', { name: 'Settings', exact: true });
     await dialog.getByText('Agents & sessions', { exact: true }).click();
     const select = dialog.getByRole('combobox', { name: 'Session activity window', exact: true });
     const row = dialog.locator('.session-source').filter({ hasText: id });
