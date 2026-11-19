@@ -13,7 +13,8 @@ async function selectHistory(found, query, before, ask, signal) {
     assert.equal(request.before, before); assert.equal(request.limit, 64);
     return found;
   };
-  try { return await prepareEvidence({ question: query.question, scope: query, before, ask, signal }, evidenceDependencies); }
+  try { return await prepareEvidence({ question: query.question, scope: query, before, signal,
+    ask: (payload, system) => payload.task === 'plan_evidence' ? Promise.resolve(JSON.stringify({ scope: 'project', sessions: [], query: query.question, kind: query.kind || 'sources', recent: true })) : ask(payload, system) }, evidenceDependencies); }
   finally { service.searchPreparedHistory = search; }
 }
 const service = require('../dist/memory/service');

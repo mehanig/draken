@@ -6,7 +6,7 @@ const root=path.join(__dirname,'../site');
 const version=require('../package.json').version,anchor=version.replaceAll('.','');
 test('public release copy and documentation match the npm version',()=>{
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
- assert.equal(version,'0.9.1');
+ assert.equal(version,'0.9.2');
  const lock=require('../package-lock.json');assert.equal(lock.version,version);assert.equal(lock.packages[''].version,version);
  require('../scripts/site-release.cjs').validateCopy(version,html);
  assert.ok(html.includes(`Version ${version} / Available on npm`));
@@ -51,9 +51,13 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/share one internal evidence-preparation module/);
-  assert.match(notes,/Empty candidate sets still need the relevance call/);
-  assert.match(notes,/text scope messages skip the answer call/);
+  assert.match(notes,/share an isolated evidence module/);
+  assert.match(notes,/interprets your question before search, replacing intent regexes/);
+  assert.match(notes,/planning, selection and answer calls; citation correction can add a fourth/);
+  assert.match(notes,/Early unrelated or unclear requests stop after planning/);
+  assert.match(notes,/sessions active within seven days/);
+  assert.match(notes,/startup-only --history-days flag/);
+  assert.match(notes,/Widening requires confirmation/);
   assert.match(notes,/Model decisions and candidate coverage can still be wrong/);
   assert.match(notes,/newly prepared original history between user turns as dated H evidence/);
   assert.match(notes,/Each answer pins one history cutoff/);

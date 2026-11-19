@@ -105,8 +105,8 @@ test('ChatGPT-only call: local test peer audio, dragon, controls, sources, histo
   }
   await dialog(page).screenshot({ path: '.test-artifacts/voice-native-mobile.png' });
   const selections = piLog().slice(before.length).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-  expect(selections).toHaveLength(2);
-  expect(selections.map(call => [call.task, call.model])).toEqual([['select_evidence', 'test/cheap'], ['select_evidence', 'test/cheap']]);
+  expect(selections).toHaveLength(4);
+  expect(selections.map(call => [call.task, call.model])).toEqual([['plan_evidence', 'test/cheap'], ['select_evidence', 'test/cheap'], ['plan_evidence', 'test/cheap'], ['select_evidence', 'test/cheap']]);
   await end(page);
   const history = await (await page.request.get(`/api/voice/syncs/${syncId}/history`)).json();
   expect(history[0].mode).toBe('native'); expect(history[0].status).toBe('ended');

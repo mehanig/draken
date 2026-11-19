@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.2
+
+- Move question interpretation into the existing isolated evidence module. The configured summary model plans the query, project scope, conversation recall and recency before search, then selects original evidence. Remove the caller-side intent regexes and voice-only quote-ranking fallback. Text and native voice share this flow; the module still has no external imports.
+- A normal project text reply uses three model calls: planning, selection and answer. Citation correction can add a fourth. Early scope refusals stop after planning. Native voice uses two summary-model calls per project lookup and keeps its native answering model. Existing invocation limits, cancellation and accounting still apply; invalid planning or selection fails without automatic retries.
+- Default preparation to sessions with a message in the last seven days. Settings offers other periods and All history, with confirmation before widening. Eligible sessions retain their older messages; inactive cached work, notes, history and citations are not deleted. Existing source exclusions and installation baselines still apply.
+- Read and cache first/last-message metadata before importing transcripts. Show activity dates, a short preview and inclusion status for discovered sessions, including ignored sessions. Unchanged ignored files do not need transcript reads.
+- Add startup-only `draken --history-days N|all`, using the same saved setting as Settings. Widening asks for confirmation (`--yes` for scripts). Existing port and directory-ownership checks succeed before any setting changes; a second instance cannot reconfigure the running server.
+- Give Settings its own `/settings` page with direct loading, reload and browser Back. Simplify repeated UI copy and keep optional help in accessible disclosures without hiding errors, progress, setup commands or cost consent.
+- Apply shared plain-English instructions to summaries, briefings, recaps, chat and native voice without rebuilding cached work merely to restyle it.
+- Preserve histories, notes, review state, original-byte checks, source permissions, caches and vectors. Session activity metadata is an additive schema change; no dependency or provider changes are required.
+- Qualification includes 672 unit tests, 60 UI tests, browser/runtime/package checks and limited real-provider replays. The original current-status failure now retrieves deployment evidence. Model interpretation, candidate coverage and JSON compliance remain fallible; invalid responses stop visibly. These checks do not establish exhaustive retrieval or physical native-audio quality.
+
 ## 0.9.1
 
 - Give text and native voice one internal evidence-preparation module for prepared candidate search, project relevance, source selection and verified-original packets. The module owns its contracts and has no imports from other application code; search, verified reads, text cleaning and model calls are injected. CI checks imports and compiles/runs the folder in isolation. Conversation state, answering models, accounting and review remain outside it.

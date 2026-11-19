@@ -14,11 +14,10 @@ interface EvidenceSource {
 }
 interface EvidenceScope {
   session_ids?: string[];
-  kind?: 'sources' | 'conversation';
-  recent?: boolean;
-  topics?: string[];
 }
 export interface EvidenceQuery extends EvidenceScope {
+  kind?: 'sources' | 'conversation';
+  recent?: boolean;
   question: string;
   before: string;
   limit: number;
@@ -34,6 +33,8 @@ interface EvidencePage {
   neighbors: EvidenceSource[];
 }
 export interface EvidenceDependencies {
+  /** Currently permitted sessions; metadata only, never a transcript scan. */
+  sessions(signal: AbortSignal): Promise<{ id: string; workspace: string; title: string }[]>;
   /** Search already prepared records only; honor source consent and the cutoff. */
   search(query: EvidenceQuery, signal: AbortSignal): Promise<EvidenceCandidates>;
   /** Recheck consent and original bytes on each read, including neighbors. */
@@ -47,6 +48,7 @@ export interface EvidenceRequest {
   lookupQuestion?: string;
   before: string;
   signal: AbortSignal;
+  /** Explicit host restriction, not a guess about the user's intent. */
   scope?: EvidenceScope;
   previousQuestions?: string[];
   briefing?: string;
