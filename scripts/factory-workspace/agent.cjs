@@ -1,12 +1,13 @@
 // Host-only Pi SDK session. The CLI owning Docker is also this session's supervisor.
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
 const {selectedPi}=require('../../dist/pi/runtime');
+const {defaultModels}=require('../../dist/sync/models');
 function sdkConfiguration(){
  const entry=process.env.DRAKEN_FACTORY_PI_SDK;
  if(!entry||!path.isAbsolute(entry))throw Error('Configure DRAKEN_FACTORY_PI_SDK with the qualified Pi SDK dist/index.js');
  const actual=fs.realpathSync(entry),pkg=JSON.parse(fs.readFileSync(path.resolve(actual,'../../package.json'),'utf8'));
  if(pkg.name!=='@earendil-works/pi-coding-agent'||pkg.version!=='1.4.0')throw Error('Factory agent requires the qualified Pi 1.4.0 SDK');
- const model=process.env.DRAKEN_FACTORY_AGENT_MODEL;if(!model||!model.includes('/'))throw Error('Configure DRAKEN_FACTORY_AGENT_MODEL explicitly');
+ const model=defaultModels().final;if(!model||!model.includes('/'))throw Error('Configure the final summarization model as provider/model');
  return {entry:actual,version:pkg.version,model,agent:selectedPi().agent};
 }
 function createTools(sdk,invoke,authorize,signal){

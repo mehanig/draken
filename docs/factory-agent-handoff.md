@@ -32,10 +32,11 @@ The integration explicitly qualifies **Pi SDK 1.4.0**. Draken's managed CLI pin 
 
 ```sh
 export DRAKEN_FACTORY_PI_SDK=/absolute/path/to/@earendil-works/pi-coding-agent/dist/index.js
-export DRAKEN_FACTORY_AGENT_MODEL=provider/model
+# Factory uses defaultModels().final: the configured final summarization model.
+export DRAKEN_PI_FINAL_MODEL=openai/gpt-6-astra
 ```
 
-Credentials/model definitions come from the selected Pi configuration, only on the host. No paid work occurs on GET or refresh. The agent form appears on workflows matching the operator-approved repository. It asks for the task and commit/ref and uses the existing workspace start/cancel/log endpoints. The plain **Repository checks** form remains a zero-model recipe run.
+Factory shares the final summarization model selection (`DRAKEN_PI_FINAL_MODEL`, then `DRAKEN_PI_MODEL`, then `openai/gpt-6-astra`). The former separate `DRAKEN_FACTORY_AGENT_MODEL` override is ignored. Credentials/model definitions come from the selected Pi configuration, only on the host. No paid work occurs on GET or refresh. The agent form appears on workflows matching the operator-approved repository. It asks for the task and commit/ref and uses the existing workspace start/cancel/log endpoints. The plain **Repository checks** form remains a zero-model recipe run.
 
 The CLI also accepts an explicit fourth argument containing `{plan, authorization}`. `authorization.kind: "operator"` is for operator-authored local trials; it is not a public API escape from discovery checks. Browser requests cannot select this authority. Discovery runs revalidate the authenticated Factory source before model/tool work and after completion; source-derived runs and logs are hidden after revocation, including revocation of uncited dependencies.
 

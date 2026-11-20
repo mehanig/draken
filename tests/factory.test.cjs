@@ -119,7 +119,7 @@ test('execution reads saved progress without invoking a model and withholds it a
 });
 test('agent workspace results and logs require fresh workflow source access, including uncited dependencies',async()=>{
  require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);const {id}=await seed();const {readDiscovery}=require('../dist/factory/enrichment');const {readWorkspaces,workspaceLog,startWorkspace}=require('../dist/factory/workspace');const discovery=await readDiscovery(id,signal());
- Object.assign(process.env,{DRAKEN_WORKSPACE_REPO:path.join(dir,'work'),DRAKEN_WORKSPACE_ALLOWED_IMAGES:'["approved"]',DRAKEN_DOCKER_BIN:'/not-called',DRAKEN_DOCKER_HOST:'unix:///not-called',DRAKEN_FACTORY_PI_SDK:__filename,DRAKEN_FACTORY_AGENT_MODEL:'fixture/test'});
+ Object.assign(process.env,{DRAKEN_WORKSPACE_REPO:path.join(dir,'work'),DRAKEN_WORKSPACE_ALLOWED_IMAGES:'["approved"]',DRAKEN_DOCKER_BIN:'/not-called',DRAKEN_DOCKER_HOST:'unix:///not-called',DRAKEN_FACTORY_PI_SDK:__filename,DRAKEN_PI_FINAL_MODEL:'fixture/test'});
  const requestId='12345678-1234-4234-8234-123456789abc',run=path.join(dir,'factory-workspaces',requestId);fs.mkdirSync(path.join(run,'work'),{recursive:true});
  fs.writeFileSync(path.join(run,'request.json'),JSON.stringify({id:requestId,ref:'HEAD',propose:false,workflowId:id,revision:discovery.revision,task:'Repair the parser',location:discovery.locationKey,createdAt:new Date().toISOString()}));
  fs.writeFileSync(path.join(run,'work/result.json'),JSON.stringify({status:'completed',modelCalls:2,sessionId:'fixture'}));fs.writeFileSync(path.join(run,'work/events.jsonl'),JSON.stringify({type:'stage-result',name:'Test',code:0,stdout:'Verified fixture output'})+'\n');

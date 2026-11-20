@@ -22,7 +22,7 @@ function config() {
   const location = repository ? workflowLocation(repository) : null;
   const available = process.platform !== 'win32' && location?.kind === 'repository' && !!process.env.DRAKEN_WORKSPACE_ALLOWED_IMAGES
     && !!process.env.DRAKEN_DOCKER_BIN && !!process.env.DRAKEN_DOCKER_HOST && fs.existsSync(entry);
-  return { repository, location, available: !!available, agentAvailable: !!available && !!process.env.DRAKEN_FACTORY_PI_SDK && fs.existsSync(process.env.DRAKEN_FACTORY_PI_SDK) && !!process.env.DRAKEN_FACTORY_AGENT_MODEL };
+  return { repository, location, available: !!available, agentAvailable: !!available && !!process.env.DRAKEN_FACTORY_PI_SDK && fs.existsSync(process.env.DRAKEN_FACTORY_PI_SDK) };
 }
 function requests(): Request[] {
   return fs.existsSync(root()) ? fs.readdirSync(root()).filter(validId).map(id => read<Request>(path.join(root(), id, 'request.json'))).filter((r): r is Request => !!r).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];

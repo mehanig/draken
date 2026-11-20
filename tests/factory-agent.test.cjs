@@ -23,8 +23,8 @@ test('all four tools delegate operations, serialize mutations, and refuse revoke
 });
 async function sdkFixture(fn){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'agent-sdk-')),prior={...process.env};fs.mkdirSync(path.join(dir,'dist'));fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify({type:'module',name:'@earendil-works/pi-coding-agent',version:'1.4.0'}));fs.copyFileSync('tests/fixtures/factory-agent-sdk.mjs',path.join(dir,'dist/index.js'));
- Object.assign(process.env,{DRAKEN_FACTORY_PI_SDK:path.join(dir,'dist/index.js'),DRAKEN_FACTORY_AGENT_MODEL:'fixture/test',DRAKEN_PI_BIN:'/not-called'});
- try{await fn(dir);}finally{for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(dir,{recursive:true,force:true});}
+ Object.assign(process.env,{DRAKEN_FACTORY_PI_SDK:path.join(dir,'dist/index.js'),DRAKEN_PI_FINAL_MODEL:'fixture/test',DRAKEN_FACTORY_AGENT_MODEL:'obsolete/ignored',DRAKEN_PI_BIN:'/not-called'});
+ try{assert.equal(require('../scripts/factory-workspace/agent.cjs').sdkConfiguration().model,'fixture/test');await fn(dir);}finally{for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(dir,{recursive:true,force:true});}
 }
 test('provider requests are durably reserved before dispatch and stop at the invocation allowance',async()=>sdkFixture(async dir=>{
  const output=path.join(dir,'run'),controller=new AbortController();
