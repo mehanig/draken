@@ -15,6 +15,15 @@ interface DockerOptions {
   record(value: unknown): Promise<void>;
 }
 
+export function dockerIsolation(name: string, network: string, run: string, engineering = false): string[] {
+  return ['--name', name, '--label', `draken.factory.run=${run}`, '--read-only', '--user', '65532:65532', '--cap-drop=ALL',
+    '--security-opt=no-new-privileges', `--pids-limit=${engineering ? 512 : 128}`, `--memory=${engineering ? 4096 : 768}m`,
+    `--memory-swap=${engineering ? 4096 : 768}m`, `--cpus=${engineering ? 2 : 1}`,
+    '--log-driver=json-file', '--log-opt', 'max-size=8m', '--log-opt', 'max-file=1', '--ulimit', engineering ? 'nofile=1024:1024' : 'nofile=256:256',
+    '--network', network, '--ipc=private', '--init', '--tmpfs', engineering ? '/tmp:rw,nosuid,nodev,size=1024m' : '/tmp:rw,nosuid,nodev,noexec,size=256m',
+    '--env', 'HOME=/tmp/home', '--env', 'DRAKEN_DATA_DIR=/tmp/data', '--env', 'DRAKEN_PI_SESSIONS_DIR=/tmp/no-sessions'];
+}
+
 /** Every capability, including checks, gets a fresh unprivileged container. No host-command fallback. */
 export class DockerExecutor {
   private readonly prefix = `draken-factory-${randomUUID()}`;
@@ -56,11 +65,7 @@ export class DockerExecutor {
     await this.command(['image', 'inspect', this.options.image], '', signal);
   }
   private isolation(name: string, network: string): string[] {
-    return ['--name', name, '--label', `draken.factory.run=${this.prefix}`, '--read-only', '--user', '65532:65532', '--cap-drop=ALL',
-      '--security-opt=no-new-privileges', '--pids-limit=128', '--memory=768m', '--memory-swap=768m', '--cpus=1',
-      '--log-driver=json-file', '--log-opt', 'max-size=8m', '--log-opt', 'max-file=1',
-      '--ulimit', 'nofile=256:256', '--network', network, '--ipc=private', '--init', '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=256m',
-      '--env', 'HOME=/tmp/home', '--env', 'DRAKEN_DATA_DIR=/tmp/data', '--env', 'DRAKEN_PI_SESSIONS_DIR=/tmp/no-sessions'];
+    return dockerIsolation(name, network, this.prefix);
   }
   async invoke(id: string, invocation: Invocation, signal: AbortSignal): Promise<Outcome> {
     signal.throwIfAborted();

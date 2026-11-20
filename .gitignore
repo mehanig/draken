@@ -15,7 +15,9 @@ public/persona/
 *.db-wal
 *.db-shm
 data/
-.draken/
+# Only the reviewed repository environment belongs in source control.
+.draken/*
+!.draken/environment.json
 .test-artifacts/
 
 # Local speech runtimes/models and TLS private material
