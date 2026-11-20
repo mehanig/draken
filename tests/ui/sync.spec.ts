@@ -144,9 +144,12 @@ test('settings persist both preparation stages without sync creation, browser ca
   expect((await (await page.request.get('/api/settings/auto-index')).json()).summary.enabled).toBe(true);
   await page.setViewportSize({width:320,height:700});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   expect(await dialog.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
+  await page.getByRole('button',{name:'Menu',exact:true}).click();
   await page.getByRole('link',{name:'Search history',exact:true}).click();await expect(page).toHaveURL(/\/history$/);
+  await page.getByRole('button',{name:'Menu',exact:true}).click();
   await button.click();await expect(toggle).toBeChecked();await page.goBack();await expect(page).toHaveURL(/\/history$/);
   expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);const after=await(await page.request.get('/api/home')).json();expect(after.covered).toEqual(before.covered);expect(after.syncs.map((sync:any)=>sync.id)).toEqual(before.syncs.map((sync:any)=>sync.id));
+  await page.getByRole('button',{name:'Menu',exact:true}).click();
   await button.click();await expect(toggle).toBeEnabled();await expect(toggle).toBeChecked();await toggle.uncheck();await expect.poll(async()=>(await(await page.request.get('/api/settings/auto-index')).json()).enabled).toBe(false);
  }finally{await page.request.patch('/api/settings/auto-index',{data:{enabled:false}});}
 });
@@ -158,6 +161,7 @@ test('sync cost distinguishes unknown, partial and tiny estimates without mobile
   let cost: { usd: number | null; complete: boolean } = { usd: null, complete: false };
   await page.route(`**/api/syncs/${sync.id}`, async route => { const response = await route.fetch(); await route.fulfill({ response, json: { ...await response.json(), aggregation_cost: cost } }); });
   await page.setViewportSize({ width: 320, height: 700 }); await page.goto(`/syncs/${sync.id}`);
+  await page.getByRole('button',{name:'Menu',exact:true}).click();
   await page.getByRole('banner').getByRole('link',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('main',{name:'Settings',exact:true})).toBeVisible();await page.goBack();
   await expect(page.locator('.sync-cost')).toHaveText('Est. cost: unavailable');

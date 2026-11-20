@@ -27,7 +27,7 @@ process.stdin.on('end', () => {
     recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, citation_repair: value.citation_repair, reference_labels: value.reference_labels,
     allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair, citation_repairs: value.citation_repairs,
   }) + '\n');
-  if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage)) {
+  if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage) || (control.failRepair && value.repair)) {
     console.error('provider unavailable'); process.exit(1);
   }
   if (value.user_question === 'TIMEOUT') { setTimeout(() => console.log('too late'), 10000); return; }
@@ -53,6 +53,8 @@ process.stdin.on('end', () => {
     if (control.badCitationSelection) return emit({ selections: value.citation_repairs.map(item => ({ observation: item.observation, evidence: item.candidate_source_ids })) });
     return emit({ selections: value.citation_repairs.map(item => ({ observation: item.observation, evidence: [item.candidate_source_ids[0], item.candidate_source_ids.at(-1)] })) });
   }
+  if (value.task === 'select_workflow_candidates') return emit({ selected: control.workflowSelection ?? value.candidates.slice(0, 1).map(c => c.id) });
+  if (value.task === 'compare_workflow_identity') return emit(control.workflowAssessment || { relation: 'same_workflow_candidate', workflow: { purpose: 'Repair a parser defect', method: ['Reproduce the defect and add a regression test', 'Correct the parser and verify compatibility'], appliesWhen: 'A reproducible parser defect must be repaired without changing the format' }, stagePairs: [{ left: 'S1', right: 'S1' }, { left: 'S2', right: 'S2' }], reason: 'Same purpose and method', limitations: [] });
   if (value.task === 'summarize') {
     let observations;
     if (value.stage === 'chunk') {
@@ -78,7 +80,22 @@ process.stdin.on('end', () => {
     if (control.expandedReferences && value.stage === 'chunk') observations = Array.from({ length: 96 }, (_, index) => ({
       topic: `Synthetic dense task ${index}`, state: 'blocked', summary: 'Unresolved work; deployment was NOT checked. '.repeat(10), evidence: value.allowed_source_ids.slice(0, 16),
     }));
-    emit({ observations, limitations: [] });
+    let process;
+    if (value.stage === 'chunk') {
+      process = { summary: 'No procedural facts asserted by the default synthetic provider', fragments: [], limitations: ['Synthetic default has no workflow'] };
+      if (control.workflowProcess) {
+        const refs = { U: value.input.evidence[0]?.id, I: value.input.evidence[1]?.id, O: value.input.evidence[2]?.id };
+        const remap = (v, key) => Array.isArray(v) ? v.map(x => typeof x === 'string' && ['refs','triggerRefs','outcomeRefs'].includes(key) ? refs[x] : remap(x, key)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, remap(x, k)])) : v;
+        process = remap(control.workflowProcess, '');
+      }
+      if (control.invalidProcess || (control.repairableProcess && !value.repair)) process = { invented: true };
+      if (control.repairableProcess && value.repair) observations[0].summary = 'Changed by process repair';
+    }
+    emit({ observations, limitations: [], ...(process ? { process } : {}) });
+  } else if (value.task === 'prepare_workflow_process') {
+    const refs = { U: value.records[0]?.ref, I: value.records[1]?.ref, O: value.records[2]?.ref };
+    const remap = (v, key) => Array.isArray(v) ? v.map(x => typeof x === 'string' && ['refs','triggerRefs','outcomeRefs'].includes(key) ? refs[x] : remap(x, key)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, remap(x, k)])) : v;
+    emit(control.invalidProcess || (control.repairableCachedProcess && !value.repair) ? { invented: true } : remap(control.workflowProcess, ''));
   } else if (value.task === 'group_topics') {
     const groups = new Map();
     for (const item of value.input.observations) {

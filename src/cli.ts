@@ -15,6 +15,18 @@ async function main() {
   if (args[0] === '--history-days' && (args.length === 2 || args.length === 3 && args[2] === '--yes')) {
     return startServer(false, { historyDays: parseHistoryDays(args[1]), yes: args[2] === '--yes' });
   }
+  if (args[0] === 'matching-pilot') {
+    const { matchingPilot } = await import('./workflow-pilot/matching-cli');
+    return matchingPilot(args.slice(1));
+  }
+  if (args[0] === 'process-pilot') {
+    const { processPilot } = await import('./workflow-pilot/process-cli');
+    return processPilot(args.slice(1));
+  }
+  if (args[0] === 'workflow-pilot') {
+    const { workflowPilot } = await import('./workflow-pilot/cli');
+    return workflowPilot(args.slice(1));
+  }
   if (args.length === 1 && args[0] === 'tray') return launchTray();
   if (args.length === 1 && args[0] === '--tray-server' && process.send) return startServer(true);
   if (args.length === 1 && args[0] === '--tray-worker' && process.send) {
@@ -32,6 +44,9 @@ Usage:
                           Without the flag, use the saved window or the 7-day default.
   draken tray             Background tray companion (macOS / Windows desktop)
   draken status           Find and check this data directory's last server
+  draken workflow-pilot   Help for the small, opt-in workflow extraction pilot
+  draken process-pilot    Test v2 process summaries and matching (seven calls maximum)
+  draken matching-pilot   Evaluate workflow identity (two eight-case model runs)
   draken doctor           Check pi/model credential configuration, without inference
   draken setup [--yes]     Install and select Draken's private, pinned pi runtime
   draken login             Open pi's own /login interface for the selected runtime

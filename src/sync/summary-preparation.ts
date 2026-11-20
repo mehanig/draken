@@ -7,6 +7,9 @@ import { assertEvidenceAvailable, previewSummaryInput } from './store';
 import { SummaryTree, summaryPreparationKey } from './tree';
 import { digest } from './normalize';
 import { defaultModels } from './models';
+import { learnSummaryWorkflows } from '../factory/learning';
+import { pendingWorkflows } from '../factory/learning-store';
+import { prepareCachedProcesses } from '../factory/prepare';
 
 const FAILURE = 'Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
@@ -69,7 +72,8 @@ export function summaryPreparationSettings(): SummaryPreparationSettings {
 /** Prepare only reusable summaries. No sync identity, snapshot, briefing or verdict.
  * A successful receipt suppresses repeated work; a failure blocks all automatic
  * paid retries until explicit consent/retry. Cancellation retains its allowance. */
-export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void): Promise<void> {
+export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void, processLeaves?: readonly string[]): Promise<void> {
+  if (processLeaves && (!processLeaves.length || processLeaves.length > 6 || new Set(processLeaves).size !== processLeaves.length || processLeaves.some(key => !/^[a-f0-9]{64}$/.test(key)))) throw Error('Select one to six distinct saved summary keys');
   if (signal.aborted || !summaryPreparationEnabled() || !indexingEnabled() || !idle() || setting('auto_summary_error')) return;
   if (active) return active.done;
   const controller = new AbortController();
@@ -90,14 +94,15 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
       // committed. Never silently replace that run with a fresh allowance.
       const orphan = db.prepare("SELECT id,invocations,max_invocations FROM background_runs WHERE status='running' LIMIT 1").get() as Run | undefined;
       if (orphan) { run = orphan; throw new Error('Background ownership was not recovered'); }
-      const input = previewSummaryInput(); assertEvidenceAvailable(input);
-      const key = summaryPreparationKey(input);
+      const input = processLeaves ? { items: [], context: [], models: defaultModels() } : previewSummaryInput(); assertEvidenceAvailable(input);
+      const key = summaryPreparationKey(input) + (processLeaves ? digest(JSON.stringify(processLeaves)) : input.items.length ? '' : digest(JSON.stringify(db.prepare("SELECT id FROM process_extractions WHERE kind='summary' AND status='completed' AND json_extract(source_dependencies_json,'$.format')='summary-workflows-v1' ORDER BY id").all())));
       const receipt = matching(key);
-      if (receipt && cacheIntact(receipt.cache_receipt_json)) return;
-      if (!input.items.length) return;
+      const summariesReady = !!receipt && cacheIntact(receipt.cache_receipt_json);
+      if ((summariesReady || (processLeaves && receipt)) && !pendingWorkflows()) return;
+      if (!processLeaves && !input.items.length && !pendingWorkflows()) return;
       check();
       run = db.prepare(`SELECT id,invocations,max_invocations FROM background_runs WHERE input_key=?
-        AND status IN ('cancelled','interrupted') ORDER BY id DESC LIMIT 1`).get(key) as Run | undefined;
+        AND (status IN ('cancelled','interrupted') OR (?=1 AND status='completed')) ORDER BY id DESC LIMIT 1`).get(key, Number(summariesReady)) as Run | undefined;
       // Never resurrect an older interrupted allowance after an explicitly retried attempt.
       const latest = db.prepare('SELECT id FROM background_runs WHERE input_key=? ORDER BY id DESC LIMIT 1').get(key) as { id: number } | undefined;
       if (run && latest?.id !== run.id) run = undefined;
@@ -119,14 +124,17 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
         if (final) throw new Error('Background preparation cannot request a verdict');
         return call(payload, system, false);
       };
-      await tree.build();
+      if (input.items.length) await tree.build();
+      if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
+      check();
+      await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
       // This receipt describes the captured input, not later arrivals. Verify its
       // originals and permissions without rebuilding the entire live snapshot.
       tree.verifyFinal();
       if (JSON.stringify(defaultModels()) !== JSON.stringify(input.models)) { controller.abort(); throw new Error('Models changed'); }
       const cacheReceipt = tree.cacheReceipt();
-      if (!cacheIntact(cacheReceipt)) throw new Error('Summary cache changed before completion');
+      if (input.items.length && !cacheIntact(cacheReceipt)) throw new Error('Summary cache changed before completion');
       db.prepare("UPDATE background_runs SET status='completed',stage='Cached',error='',completed_at=?,cache_receipt_json=? WHERE id=?")
         .run(new Date().toISOString(), JSON.stringify(cacheReceipt), run.id);
     } catch {
