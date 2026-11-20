@@ -22,6 +22,11 @@ export function Factory() {
     } finally { if (!controller.signal.aborted) setLoading(false); }
   }, []);
   useEffect(() => { void load(); return () => request.current?.abort(); }, [load]);
+  const groups = new Map<string, { location: FactoryPage['proposals'][number]['location']; proposals: FactoryPage['proposals'] }>();
+  for (const proposal of data?.proposals || []) {
+    if (!groups.has(proposal.location.key)) groups.set(proposal.location.key, { location: proposal.location, proposals: [] });
+    groups.get(proposal.location.key)!.proposals.push(proposal);
+  }
   return <main className="factory-page" aria-label="Factory" aria-busy={loading}>
     <div className="factory-heading"><div className="factory-line"><h1>Factory</h1>
       <InfoDisclosure label="About workflow learning"><p>New summaries retain process records. Background learning compares them and saves workflow proposals here. No manual sync or page visit is needed.</p><p>Proposals need comparable records; waiting alone does not guarantee a match. Existing cached summaries are not reprocessed. Refresh only reads saved results.</p></InfoDisclosure></div>
@@ -34,7 +39,12 @@ export function Factory() {
       {data.failedExtractions > 0 && <div className="factory-line" role="status"><span>{data.failedExtractions} failed {data.failedExtractions === 1 ? 'attempt' : 'attempts'}</span><InfoDisclosure label="About process extraction failures"><p>Failed extraction attempts are kept for diagnosis, even when a later attempt succeeds. Ordinary summaries are retained. Failed records are not used for matching.</p></InfoDisclosure></div>}
       {data.unavailable > 0 && <div className="factory-line" role="status"><span>{data.unavailable} saved {data.unavailable === 1 ? 'result' : 'results'} unavailable</span><InfoDisclosure label="About unavailable results"><p>Source access or saved evidence could not be verified. Those results are not shown.</p></InfoDisclosure></div>}
       {!data.proposals.length && <section className="factory-card"><h2>No workflows yet</h2></section>}
-      {data.proposals.map(proposal => {
+      {[...groups.values()].map(group => <section className="factory-group" key={group.location.key} aria-label={group.location.path}>
+        <header className="factory-group-heading"><div className="factory-line"><h2>{group.location.name}</h2>
+          <span className="muted small">{group.location.kind === 'repository' ? 'Git repository' : group.location.kind === 'folder' ? 'Not a Git repository' : 'Location unavailable'}</span>
+          <InfoDisclosure label={`About location ${group.location.name}`}><p>Location comes from the session’s recorded working folder, not guesses from its text. Subfolders and Git worktrees share their repository. Separate repositories and non-Git folders are not compared. This does not infer where individual commands ran. Older records use the current layout of their recorded folder.</p></InfoDisclosure></div>
+          <p className="muted small factory-location-path">{group.location.path}</p></header>
+      {group.proposals.map(proposal => {
         const workflow = proposal.decision.assessment.workflow;
         if (!workflow) return null;
         return <article className="factory-card" key={proposal.id}>
@@ -55,7 +65,7 @@ export function Factory() {
             <p className="muted small">Model: {proposal.model} · Saved {new Date(proposal.createdAt).toLocaleString()}</p>
           </details>
         </article>;
-      })}
+      })}</section>)}
       {data.nextCursor !== null && <button type="button" disabled={loading} onClick={() => void load(data.nextCursor!)}>Load older saved results</button>}
     </>}
   </main>;

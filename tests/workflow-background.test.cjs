@@ -24,10 +24,11 @@ beforeEach(()=>{
  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();controller=new AbortController();controls({});
 });
 afterEach(async()=>{controller.abort();await stopBackgroundIndexing();closeDb();for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(root,{recursive:true,force:true});});
-function history(count=2){
+function history(count=2,locations=[]){
+ fs.mkdirSync(root+'/work',{recursive:true});
  const records=[...examples()[0].left.records,{ref:'X',role:'toolResult',text:'Uncited context'}];
  for(let s=0;s<count;s++){
-  const session='job-'+s,rows=[{type:'session',version:3,id:session,cwd:'/synthetic/workflow',timestamp:'2026-01-01T00:00:00.000Z'}];
+  const session='job-'+s,rows=[{type:'session',version:3,id:session,cwd:locations[s]||root+'/work',timestamp:'2026-01-01T00:00:00.000Z'}];
   records.forEach((r,i)=>rows.push({type:'message',id:session+'-'+i,parentId:i?session+'-'+(i-1):null,timestamp:new Date(Date.UTC(2026,0,1,s,i)).toISOString(),message:{role:r.role,content:r.text+' Instance '+session}}));
   fs.writeFileSync(root+'/sessions/'+session+'.jsonl',rows.map(JSON.stringify).join('\n')+'\n');
  }
@@ -48,6 +49,50 @@ test('normal background tick saves process records with summaries and detects a 
  const count=calls().length;const page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].decision.sameWorkflow,true);assert.equal(calls().length,count);
  for(const row of db.prepare("SELECT source_dependencies_json FROM process_extractions WHERE kind='summary'").all()){assert.ok(row.source_dependencies_json.includes('source_pointer'));assert.doesNotMatch(row.source_dependencies_json,/"text":/);}
  await warm();assert.equal(calls().length,count,'unchanged ticks do not repeat paid work');
+});
+test('different repositories never reach candidate selection or workflow matching',async()=>{
+ const {execFileSync}=require('node:child_process');const a=root+'/a',b=root+'/b';
+ for(const p of [a,b])execFileSync('git',['init','-q',p]);history(2,[a,b]);await scanSessions();await warm();
+ assert.equal(calls().filter(c=>['select_workflow_candidates','compare_workflow_identity'].includes(c.task)).length,0);
+ assert.equal((await factory()).proposals.length,0);
+});
+test('different non-Git folders never reach candidate selection',async()=>{
+ const a=root+'/a',b=root+'/b';for(const p of [a,b])fs.mkdirSync(p);history(2,[a,b]);await scanSessions();await warm();
+ assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,0);assert.equal((await factory()).proposals.length,0);
+});
+test('subdirectories of the same repository can produce a proposal',async()=>{
+ require('node:child_process').execFileSync('git',['init','-q',root+'/repo']);const a=root+'/repo/a',b=root+'/repo/b';
+ for(const p of [a,b])fs.mkdirSync(p);history(2,[a,b]);await scanSessions();await warm();
+ const page=await factory();assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].location.path,root+'/repo');assert.equal(page.proposals[0].location.kind,'repository');
+});
+test('other folders cannot crowd same-folder candidates out of the 24-record selection',async()=>{
+ const a=root+'/a',b=root+'/b';for(const p of [a,b])fs.mkdirSync(p);
+ history(2,[a,b]);await scanSessions();await warm();const db=getDb();
+ const original=db.prepare("SELECT id,output_json FROM process_extractions WHERE kind='summary' AND json_extract(source_dependencies_json,'$.input.workspace')=?").get(b);
+ const fragment=JSON.parse(original.output_json).fragments[0];
+ for(let i=0;i<25;i++){
+  const id='other-folder-'+i;
+  db.prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,usage_json,created_at,completed_at)
+    SELECT ?,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,usage_json,created_at,completed_at FROM process_extractions WHERE id=?`).run(id,original.id);
+  db.prepare("INSERT INTO work_episodes(id,state,description_json,learning_status) VALUES (?,'partial',?,'completed')").run(id,JSON.stringify(fragment));
+  db.prepare('INSERT INTO episode_extractions(episode_id,extraction_id,fragment_key) VALUES (?,?,?)').run(id,id,fragment.key);
+ }
+ history(3,[a,b,a]);await scanSessions();await warm();
+ const page=await factory();assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].location.path,a);
+ assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,1);
+});
+test('repository changes during extraction do not relabel the resulting process record',async()=>{
+ history(1);await scanSessions();controls({taskDelays:{summarize:400}});
+ const done=warm();await waitFor(()=>calls().some(c=>c.task==='summarize'));
+ require('node:child_process').execFileSync('git',['init','-q',root+'/work']);await done;
+ const db=getDb();assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,0);
+ assert.match(JSON.parse(db.prepare("SELECT output_json FROM process_extractions WHERE status='failed'").get().output_json).failure.message,/Repository or folder changed/);
+});
+test('repository changes during selection stop matching',async()=>{
+ history();await scanSessions();controls({taskDelays:{select_workflow_candidates:400}});
+ const done=warm();await waitFor(()=>calls().some(c=>c.task==='select_workflow_candidates'));
+ require('node:child_process').execFileSync('git',['init','-q',root+'/work']);await done;
+ assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,0);assert.equal((await factory()).proposals.length,0);
 });
 test('resummarizing the same originals with another model is not a second workflow example',async()=>{
  history(1);await scanSessions();await warm();process.env.DRAKEN_PI_SUMMARY_MODEL='synthetic/new-summary';await warm();

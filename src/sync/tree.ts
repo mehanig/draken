@@ -1,5 +1,6 @@
 import { getDb } from '../db/schema';
 import { SUMMARY_PROCESS_PROMPT, preparedProcess } from '../workflow-learning';
+import { workflowLocation } from '../factory/location';
 import { saveSummaryProcess } from '../factory/learning-store';
 import { readWorkflowOriginals } from '../evidence-adapter';
 import { assertRecentSessions } from '../sources/activity-window';
@@ -411,6 +412,7 @@ export class SummaryTree {
     }
     if (spec.reuseOnly) throw new HttpError(409, 'A completed leaf changed during planning. No paid replacement was requested; retry after checking the cache.');
     setStatus('running');
+    const processLocation = spec.leafInput ? workflowLocation(spec.leafInput.workspace) : undefined;
     try {
       let output: T;
       if (derived !== undefined) { verify(); output = validate(derived, spec.allowed); }
@@ -489,7 +491,7 @@ export class SummaryTree {
         if (processInput) {
           const references = [...spec.allowed];
           const roles = new Map([...dependencies].map(item => [sourceKey(item), item.role]));
-          saveSummaryProcess(spec.key, this.sync.models.summary, { table: this.runTable, id: this.runId }, processInput, processValue, references, references.map(ref => roles.get(ref) || 'unknown'), { sourceError: processSourceError });
+          saveSummaryProcess(spec.key, this.sync.models.summary, { table: this.runTable, id: this.runId }, processInput, processValue, references, references.map(ref => roles.get(ref) || 'unknown'), { sourceError: processSourceError, location: processLocation });
         }
       })();
       return output;

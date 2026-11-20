@@ -21,6 +21,14 @@ Factory shows purpose, applicability, proposed steps, outcome qualifications and
 
 `GET /api/factory` uses the existing authenticated, same-origin, no-store API boundary. All supplied source dependencies—including uncited originals and unselected candidates seen during selection—are revalidated before inference, after inference and before serving a proposal. Unavailable derived content is withheld entirely. Source reads use the public evidence contract and application wiring in `src/evidence-adapter.ts`; the production reader no longer imports the pilot reader or opens external experiment databases.
 
+## Repository and folder groups
+
+Factory groups proposals by the Git repository containing the session’s recorded working folder. Subdirectories and linked worktrees share the common Git directory identity. Nested repositories and separate clones stay separate, even if their names or remotes match. No Git commands or remote requests are used to determine the location.
+
+Candidate selection filters by this location **before** taking up to 24 candidates. Different repositories and different non-Git folders are never compared. Existing comparisons with a pair spanning locations are withheld. Non-Git directories are labelled **Not a Git repository** and show their full path; missing or unreadable locations are withheld, not guessed to be non-Git.
+
+New records retain their location identity, and location changes during extraction or matching reject the result. Older records without that metadata use the current layout of their verified recorded folder. This is session-location attribution, not an inference about where individual commands ran. The distinction is also available through the page’s info icon.
+
 ## Storage and limits
 
 The three additive tables remain `process_extractions`, `work_episodes` and `episode_extractions`. Episode queue state is stored alongside the existing fragment records. Summary extractions link to their shared summary invocation; selection and comparison attempts link to their owning background run.
@@ -44,8 +52,8 @@ npx playwright test tests/ui/factory.spec.ts tests/ui/settings.spec.ts tests/ui/
 
 Other tests cover original-byte/permission checks, unselected dependencies, schema/reference validation, independently compiled pure modules, old summary-cache reconstruction, authentication, read-only page requests, mobile layouts and inert rendering of model text.
 
-Local validation passed 757 automated tests and 14 selected browser tests, plus typechecks, unused-code checks and server/client builds.
+Local validation passed 771 automated tests and 15 selected browser tests, plus typechecks, unused-code checks and server/client builds.
 
-Two real-provider smoke runs used the same two controlled parser-repair examples in separate isolated data directories, not user history. Each completed the background pipeline and produced one source-verified Factory proposal using `openai/gpt-6-luna` in four calls. Total cost was $0.0023014 across eight calls. Unchanged repeats made no further calls; the final saved proposal was also verified with the current reader while no provider was available. This is integration evidence, not a general accuracy benchmark. Private smoke-test stores and transcripts are not part of the PR.
+Two real-provider smoke runs used the same two controlled parser-repair examples in separate isolated data directories, not user history. Each completed the background pipeline and produced one source-verified Factory proposal using `openai/gpt-6-luna` in four calls. Total cost was $0.0023014 across eight calls. Unchanged repeats made no further calls; the final saved proposal was also verified with the then-current reader while no provider was available. This is integration evidence, not a general accuracy benchmark. Private smoke-test stores and transcripts are not part of the PR.
 
 An explicitly requested local preparation of four saved leaves from real release history produced two verified proposals. Two earlier extraction-format failures were retained; after clarifying the string-array contract, the successful run used 14 calls. This was a selected starting set, not automatic discovery across all history. The live page was checked at desktop and mobile widths with its explanations collapsed.

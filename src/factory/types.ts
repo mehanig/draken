@@ -1,6 +1,13 @@
 import type { ContractDecision, ContractMatchInput } from '../workflow-learning';
 
+export interface WorkflowLocation {
+  kind: 'repository' | 'folder' | 'unavailable';
+  key: string;
+  path: string;
+  name: string;
+}
 interface FactoryProposal {
+  location: WorkflowLocation;
   id: string;
   model: string;
   createdAt: string;

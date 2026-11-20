@@ -12,17 +12,17 @@ let dir,db,prior,server;
 const signal=()=>new AbortController().signal;
 beforeEach(()=>{
  closeDb();dir=fs.mkdtempSync(path.join(os.tmpdir(),'factory-'));prior={...process.env};
- Object.assign(process.env,{DRAKEN_DATA_DIR:dir,DRAKEN_PI_SESSIONS_DIR:path.join(dir,'sessions'),DRAKEN_NO_AUTH:'true',DRAKEN_HOST:'127.0.0.1',DRAKEN_PI_BIN:'/no-provider',DRAKEN_USERNAME:'test',DRAKEN_PASSWORD:'test-password',DRAKEN_JWT_SECRET:'factory-test-secret'});db=getDb();
+ Object.assign(process.env,{DRAKEN_DATA_DIR:dir,DRAKEN_PI_SESSIONS_DIR:path.join(dir,'sessions'),DRAKEN_NO_AUTH:'true',DRAKEN_HOST:'127.0.0.1',DRAKEN_PI_BIN:'/no-provider',DRAKEN_USERNAME:'test',DRAKEN_PASSWORD:'test-password',DRAKEN_JWT_SECRET:'factory-test-secret'});db=getDb();fs.mkdirSync(path.join(dir,'work'));
 });
 afterEach(async()=>{if(server){await new Promise(r=>server.close(r));server=undefined;}closeDb();for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(dir,{recursive:true,force:true});});
-async function seed(){
+async function seed(locations=[]){
  const c=examples()[0],parents=[];
  for(const [i,side] of [c.left,c.right].entries()){
   const session='episode-'+i,records=[...side.records,{ref:'X',role:'toolResult',text:'Uncited dependency'}];
-  const pointers=records.map(r=>frozenEvidence(db,path.join(dir,'sessions'),r.text,{ref:r.ref,session,role:r.role,timestamp:'2020-01-02T00:00:00.000Z'}));
+  const pointers=records.map(r=>frozenEvidence(db,path.join(dir,'sessions'),r.text,{ref:r.ref,session,cwd:locations[i]||path.join(dir,'work'),role:r.role,timestamp:'2020-01-02T00:00:00.000Z'}));
   const refs={U:'S1',I:'S2',O:'S3'};
   function remap(v,key){if(Array.isArray(v))return v.map(x=>typeof x==='string'&&['refs','triggerRefs','outcomeRefs'].includes(key)?refs[x]:remap(x,key));if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,remap(x,k)]));return v;}
-  saveSummaryProcess('parent-'+i,'fake/model',{table:'sync_runs',id:1},JSON.stringify({session,workspace:'/demo',evidence:pointers,background:[]}),{summary:'Saved process',fragments:[remap(side.fragment,'')],limitations:[]},pointers.map(p=>p.source_key),records.map(r=>r.role));
+  saveSummaryProcess('parent-'+i,'fake/model',{table:'sync_runs',id:1},JSON.stringify({session,workspace:locations[i]||path.join(dir,'work'),evidence:pointers,background:[]}),{summary:'Saved process',fragments:[remap(side.fragment,'')],limitations:[]},pointers.map(p=>p.source_key),records.map(r=>r.role));
   const row=db.prepare("SELECT id FROM process_extractions WHERE json_extract(source_dependencies_json,'$.leaf')=?").get('parent-'+i);
   parents.push({extraction:row.id,fragment:'example'});
  }
@@ -40,7 +40,17 @@ test('Factory reads verified saved proposals without syncs, provider calls or ne
  const result=await readFactory(undefined,signal());assert.equal(result.learning,'enabled');assert.equal(result.proposals.length,1);assert.equal(result.proposals[0].decision.sameWorkflow,true);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n,before);
  for(const table of ['syncs','sync_runs','background_runs'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
- assert.ok(!JSON.stringify(result).includes(dir));
+ assert.equal(result.proposals[0].location.path,path.join(dir,'work'));
+ assert.equal(result.proposals[0].location.kind,'folder');
+ assert.ok(!JSON.stringify(result).includes(path.join(dir,'sessions')));
+});
+test('old saved comparisons cannot expose a workflow spanning different folders',async()=>{
+ const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);
+ const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
+});
+test('changing a recorded folder into a repository withholds its old proposal',async()=>{
+ await seed();require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);
+ const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
 });
 test('revoking an uncited original withholds the complete proposal',async()=>{
  await seed();db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();

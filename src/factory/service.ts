@@ -18,9 +18,9 @@ export async function readFactory(cursor: number | undefined, signal: AbortSigna
     learning: !enabled ? 'paused' : setting('auto_summary_error') ? 'error' : 'enabled', failedExtractions };
   for (const row of rows.slice(0, 20)) {
     try {
-      const { decision, evidence } = await readWorkflowComparison(row, signal);
+      const { decision, evidence, location } = await readWorkflowComparison(row, signal);
       signal.throwIfAborted();
-      if (decision.sameWorkflow) result.proposals.push({ id: row.id, model: row.model, createdAt: row.created_at, decision, evidence });
+      if (decision.sameWorkflow) result.proposals.push({ id: row.id, model: row.model, createdAt: row.created_at, decision, evidence, location });
     } catch {
       signal.throwIfAborted();
       result.unavailable++;

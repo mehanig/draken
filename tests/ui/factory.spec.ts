@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const empty = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', failedExtractions: 0 };
 const proposal = {
+  location: { kind: 'repository', key: 'repo-a', path: '/projects/backup', name: 'backup' },
   id: 'proposal-1', model: 'test/model', createdAt: '2026-01-01T00:00:00.000Z',
   decision: { sameWorkflow: true, relation: 'same_workflow_candidate', coverage: [], assessment: {
     relation: 'same_workflow_candidate', workflow: { purpose: 'Verify a database backup', method: ['Restore into an isolated target', 'Compare restored rows with the manifest'], appliesWhen: 'A backup needs a recovery rehearsal; do not change production.' },
@@ -29,6 +30,21 @@ test('Factory is read-only, direct-linkable and does not change shared navigatio
   await expect(page.getByText('No workflows yet')).toBeVisible();
   await page.reload(); await expect(page.getByRole('main', { name: 'Factory' })).toBeVisible();
   expect(mutations).toEqual([]);
+});
+
+test('Factory groups repositories and non-Git folders, including older pages', async ({ page }) => {
+  const folder = { ...proposal, id: 'folder-proposal', location: { kind: 'folder', key: 'folder', path: '/notes/backup', name: 'backup' } };
+  const older = { ...proposal, id: 'older-proposal' };
+  await page.route('**/api/factory*', route => route.fulfill({ json: new URL(route.request().url()).searchParams.has('before')
+    ? { ...empty, proposals: [older] } : { ...empty, proposals: [proposal, folder], nextCursor: 7 } }));
+  await page.goto('/factory');
+  await expect(page.getByRole('region', { name: '/projects/backup', exact: true })).toContainText('Git repository');
+  await expect(page.getByRole('region', { name: '/notes/backup', exact: true })).toContainText('Not a Git repository');
+  await page.getByRole('button', { name: 'Load older saved results' }).click();
+  await expect(page.locator('.factory-group')).toHaveCount(2);
+  await expect(page.getByRole('region', { name: '/projects/backup', exact: true }).locator('article')).toHaveCount(2);
+  await expect(page.getByRole('region', { name: '/notes/backup', exact: true }).locator('article')).toHaveCount(1);
+  await expect(page.getByText('Location comes from the session', { exact: false }).first()).toBeHidden();
 });
 
 test('Factory shows qualifications and source labels without executing model text; mobile layout fits', async ({ page }) => {
