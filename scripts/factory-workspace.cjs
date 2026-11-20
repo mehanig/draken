@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Repository snapshots and Docker control only. Repository setup/check commands never run on the host.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
-const {validate,pinned,fingerprint,prompt}=require('./factory-workspace/environment.cjs');
+const {validate,pinned,fingerprint}=require('./factory-workspace/environment.cjs');
 const {DockerExecutor,dockerIsolation}=require('../dist/factory/docker');
 const {workflowLocation}=require('../dist/factory/location');
 function processCall(binary,args,{input,signal,env=process.env,limit=128_000_000,timeout=120000,onLine,group=false}={}){
@@ -28,7 +28,7 @@ async function snapshot(repo,ref,signal){
  if(entries.some(e=>/(^|\/)(?:\.env(?:\.(?!example$|sample$|template$)[^/]+)?|\.npmrc|id_rsa|id_ed25519|credentials(?:\.json)?|[^/]+\.(?:pem|key))$/.test(e.file)))throw Error('Potential credential file is tracked; review it before granting workspace access');
  const files={};for(const entry of entries){
   if(entry.file.endsWith('.gitattributes')){const text=(await git(['show',commit+':'+entry.file])).toString();if(/filter\s*=\s*lfs/.test(text))throw Error('Git LFS requires an explicit snapshot policy; refusing pointer-only source');}
-  if(['.draken/environment.json','package.json','client/package.json','.nvmrc','.node-version','pyproject.toml','Cargo.toml','go.mod'].includes(entry.file)||/^\.github\/workflows\/[^/]+\.ya?ml$/.test(entry.file)){
+  if(entry.file==='.draken/environment.json'){
    if(entry.mode!=='100644'&&entry.mode!=='100755')throw Error('Environment inputs must be regular committed files');
    const content=(await git(['show',commit+':'+entry.file])).toString();if(content.length>80000)throw Error('Environment input exceeds 80 KB');files[entry.file]=content;
   }
@@ -53,19 +53,9 @@ async function main(){
  const resources=[];let outcome,modelCalls=0,source,image,checkoutComplete=false,retainVolume=false;
  try{
   source=await snapshot(repo,ref,controller.signal);save('source.json',{repo,locationKey:source.locationKey,commit:source.commit,objectFormat:source.objectFormat,fileCount:source.fileCount,packSHA256:crypto.createHash('sha256').update(source.pack).digest('hex'),uncommittedIncluded:false,historyIncluded:false});fs.writeFileSync(path.join(output,'source.pack'),source.pack,{mode:0o600,flag:'wx'});
-  // Check the engine and locally available approved bases before any paid proposal.
-  for(const image of approved){const info=JSON.parse((await docker(['image','inspect',image],{signal:controller.signal})).toString())[0];await new DockerExecutor({binary,host,image:info.Id,stages:{},record:async()=>{}}).check(controller.signal);}
-  let environment;
-  if(source.files['.draken/environment.json'])environment=validate(JSON.parse(source.files['.draken/environment.json']),approved);
-  else{
-   if(process.env.DRAKEN_WORKSPACE_PROPOSE!=='true')throw Error('No committed .draken/environment.json. Allow one environment proposal or commit a declaration first.');
-   if(!process.env.DRAKEN_PI_BIN)throw Error('Missing environment declaration and no explicit model runtime configured');
-   const payload={task:'propose_factory_environment',commit:source.commit,files:source.files,lockfiles:source.paths.filter(name=>/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|uv\.lock|poetry\.lock|go\.sum)$/.test(name)),approvedImages:approved};save('model-request.json',{payload,system:prompt});
-   const env={};for(const key of ['PATH','HOME','LANG','PI_CODING_AGENT_DIR','DRAKEN_PI_BIN','DRAKEN_PI_SUMMARY_MODEL','DRAKEN_PI_FINAL_MODEL'])if(process.env[key])env[key]=process.env[key];env.DRAKEN_DATA_DIR=path.join(output,'model-accounting');
-   modelCalls=null;
-   const response=JSON.parse((await processCall(process.execPath,[path.join(__dirname,'factory-enrichment-model.cjs')],{input:JSON.stringify({payload,system:prompt}),env,signal:controller.signal,timeout:240000,limit:2_000_000,group:true})).toString());
-   save('model-response.json',response);modelCalls=response.receipt.invocations;environment=validate(JSON.parse(response.raw),approved);
-  }
+  if(!Object.hasOwn(source.files,'.draken/environment.json'))throw Error('Missing required file: .draken/environment.json. Add and commit it to the selected branch or commit before running repository checks.');
+  const environment=validate(JSON.parse(source.files['.draken/environment.json']),approved);
+  const info=JSON.parse((await docker(['image','inspect',environment.image],{signal:controller.signal})).toString())[0];await new DockerExecutor({binary,host,image:info.Id,stages:{},record:async()=>{}}).check(controller.signal);
   save('environment.json',environment);
   const worker=fs.readFileSync(path.join(__dirname,'factory-workspace/worker.cjs')),broker=fs.readFileSync(path.join(__dirname,'factory-container/proxy.cjs'));
   const key=fingerprint({environment,commit:source.commit,worker:crypto.createHash('sha256').update(worker).digest('hex'),broker:crypto.createHash('sha256').update(broker).digest('hex'),platform:process.arch,wrapper:2});

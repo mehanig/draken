@@ -60,22 +60,22 @@ export function workspaceLog(id: string): { text: string } {
 }
 export async function startWorkspace(body: unknown): Promise<WorkspaceRun> {
   const input = body as { requestId?: unknown; ref?: unknown; propose?: unknown } | null;
-  if (!input || !validId(input.requestId) || typeof input.ref !== 'string' || !input.ref || input.ref.startsWith('-') || input.ref.length > 200 || /[\0\r\n]/.test(input.ref) || typeof input.propose !== 'boolean') throw new HttpError(400, 'Provide a commit or branch and a run request ID.');
+  if (!input || !validId(input.requestId) || typeof input.ref !== 'string' || !input.ref || input.ref.startsWith('-') || input.ref.length > 200 || /[\0\r\n]/.test(input.ref) || (input.propose !== undefined && input.propose !== false)) throw new HttpError(400, 'Provide a commit or branch and a run request ID.');
   if (starting || stopping) throw new HttpError(409, 'Workspace execution is busy.');
   starting = true;
   try {
     const settings = config(); if (!settings.available) throw new HttpError(409, 'Repository workspace is not configured or is unavailable.');
     const existing = requests(), prior = existing.find(r => r.id === input.requestId);
     if (prior) {
-      if (prior.ref !== input.ref || prior.propose !== input.propose || prior.location !== settings.location!.key) throw new HttpError(409, 'Run request ID already used.');
+      if (prior.ref !== input.ref || prior.propose !== false || prior.location !== settings.location!.key) throw new HttpError(409, 'Run request ID already used.');
       return view(prior);
     }
     if (jobs.size || existing.some(r => ['running', 'interrupted'].includes(view(r).status))) throw new HttpError(409, 'A workspace is running or needs cleanup.');
     fs.mkdirSync(root(), { recursive: true, mode: 0o700 }); const dir = path.join(root(), input.requestId); fs.mkdirSync(dir, { mode: 0o700 });
-    const request: Request = { id: input.requestId, ref: input.ref, propose: input.propose, location: settings.location!.key, createdAt: new Date().toISOString() }; save(path.join(dir, 'request.json'), request);
+    const request: Request = { id: input.requestId, ref: input.ref, propose: false, location: settings.location!.key, createdAt: new Date().toISOString() }; save(path.join(dir, 'request.json'), request);
     const log = fs.openSync(path.join(dir, 'run.log'), 'wx', 0o600);
     const child = spawn(process.execPath, [entry, settings.repository, input.ref, path.join(dir, 'work')], { cwd: path.resolve(__dirname, '../..'),
-      env: { ...process.env, DRAKEN_WORKSPACE_PROPOSE: input.propose ? 'true' : 'false', DRAKEN_WORKSPACE_LOCATION_KEY: request.location }, stdio: ['ignore', log, log] }); fs.closeSync(log);
+      env: { ...process.env, DRAKEN_WORKSPACE_PROPOSE: 'false', DRAKEN_WORKSPACE_LOCATION_KEY: request.location }, stdio: ['ignore', log, log] }); fs.closeSync(log);
     let cancelled = false;
     const stopped = new Promise<void>(resolve => {
       const done = (code: number | null) => { try { if (!fs.existsSync(path.join(dir, 'exit.json'))) save(path.join(dir, 'exit.json'), { code, cancelled }); } catch { console.error('Workspace exit could not be recorded.'); } jobs.delete(request.id); resolve(); };

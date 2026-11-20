@@ -5,9 +5,9 @@ import type { WorkspacePage } from '../../../src/factory/workspace-types';
 
 export function FactoryWorkspace() {
   const [data, setData] = useState<WorkspacePage | null>(null), [error, setError] = useState('');
-  const [ref, setRef] = useState('HEAD'), [propose, setPropose] = useState(false), [busy, setBusy] = useState(false);
+  const [ref, setRef] = useState('HEAD'), [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<Record<string, string>>({});
-  const pending = useRef<{ id: string; ref: string; propose: boolean } | null>(null), request = useRef<AbortController | null>(null);
+  const pending = useRef<{ id: string; ref: string } | null>(null), request = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
     try { const state = await factoryWorkspaces(controller.signal); if (!controller.signal.aborted) { setData(state.available ? state : null); if (!state.available) setLogs({}); } }
@@ -18,8 +18,8 @@ export function FactoryWorkspace() {
   useEffect(() => { const timer = setInterval(() => void load(), active ? 1500 : 15000); return () => clearInterval(timer); }, [active, load]);
   async function start() {
     setBusy(true); setError('');
-    if (!pending.current || pending.current.ref !== ref || pending.current.propose !== propose) pending.current = { id: requestId(), ref, propose };
-    try { await runWorkspace(ref, propose, pending.current.id); pending.current = null; await load(); }
+    if (!pending.current || pending.current.ref !== ref) pending.current = { id: requestId(), ref };
+    try { await runWorkspace(ref, pending.current.id); pending.current = null; await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not start workspace.'); } finally { setBusy(false); }
   }
   async function cancel(id: string) {
@@ -37,7 +37,6 @@ export function FactoryWorkspace() {
     <p>Build and test committed code in a separate workspace. Uncommitted changes are not included.</p>
     <form className="factory-run-form" onSubmit={event => { event.preventDefault(); void start(); }}>
       <label>Commit or branch<input className="input" value={ref} onChange={event => setRef(event.target.value)} required maxLength={200} disabled={blocked} /></label>
-      <label className="factory-plan-choice"><input type="checkbox" checked={propose} onChange={event => setPropose(event.target.checked)} disabled={blocked} />Propose an environment if missing (1 model call)</label>
       <button className="btn btn-primary" type="submit" disabled={blocked}>Run</button>
     </form>
     {error && <p role="alert">{error}</p>}

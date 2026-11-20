@@ -27,9 +27,9 @@ The host must separately approve the exact base image. Version one requires a Li
 
 ## Missing declarations
 
-When explicitly permitted, one accounted model call proposes an environment from committed manifests, toolchain files and CI configuration. It can select only a host-approved image. The response is validated before building or running anything. No automatic paid retry occurs.
+A committed `.draken/environment.json` is required. If it is missing from the selected commit, the run stops with: **Missing required file: .draken/environment.json. Add and commit it to the selected branch or commit before running repository checks.**
 
-The proposal, raw model response and accounting are retained in the private run directory. The workflow can use that proposal immediately within the existing host permissions. It does not silently edit the host repository. Commit a reviewed declaration to reuse it without generating another proposal.
+Draken does not infer an image from manifests or CI, propose an environment, or call a model. The missing-file check happens before Docker is invoked. The former `DRAKEN_WORKSPACE_PROPOSE` flag no longer enables proposals.
 
 ## Checkout and isolation
 
@@ -56,9 +56,7 @@ export DRAKEN_WORKSPACE_ALLOWED_IMAGES='["node@sha256:APPROVED_DIGEST"]'
 node scripts/factory-workspace.cjs /path/to/repository HEAD /private/new-run-directory
 ```
 
-To permit one proposal if the declaration is missing, set `DRAKEN_WORKSPACE_PROPOSE=true` and the configured `DRAKEN_PI_BIN`/model settings. Without that permission, missing declarations stop before inference.
-
-For the browser, additionally set `DRAKEN_WORKSPACE_REPO` on the server. Factory's **Repository checks** section accepts a commit or branch and an optional one-call proposal permission. **Run** starts the job; **Cancel run** stops it. Refresh and reopening the page only read saved state. Request IDs prevent accidental duplicate starts; uncertain interrupted jobs are not automatically replayed.
+For the browser, additionally set `DRAKEN_WORKSPACE_REPO` on the server. Factory's **Repository checks** section accepts a commit or branch. **Run** starts the job; **Cancel run** stops it. Refresh and reopening the page only read saved state. Request IDs prevent accidental duplicate starts; uncertain interrupted jobs are not automatically replayed.
 
 Results persist under the private data directory's `factory-workspaces/`. The run retains the resolved commit, source-pack hash, environment definition, built image ID, actual container configuration, command logs, patch and outcome. Generated build artifacts and dependency directories ignored by Git are not delivery patches.
 
@@ -66,7 +64,7 @@ Results persist under the private data directory's `factory-workspaces/`. The ru
 
 - A real Draken checkout at `7320eeb4fe99fe8d3acd0a1b86090337341b1962` contained all **376 committed files**. Dependency setup, native SQLite compilation, type/unused-code checks, application build and **805 automated tests** passed inside Docker. No tests were weakened or skipped. The patch was empty and there were no model calls because the environment was declared.
 - The browser-started run at `2a4d7057212285b76d3fdb49cdc24e235967805c` checked out **382 committed files** and passed all seven stages, including **806 automated tests**. It used zero model calls and produced an empty patch. The fresh collector mounted the workspace read-only; no run containers, volumes or networks remained afterward. Reopening Factory showed the saved result and test log without starting another run. Desktop and 390px mobile checks reported no page errors or horizontal overflow.
-- A separate small repository without a declaration received a real Luna-generated environment, then installed its locked dependencies and passed its tests. That used one accounted model call (506 input tokens, 92 output tokens, $0.0000966), not a simulated response.
+- Before automatic proposals were removed, a separate small repository received a real Luna-generated environment and passed its tests (one call, 506 input tokens, 92 output tokens, $0.0000966). Those historical receipts remain retained; this is no longer an available execution path.
 - Host validation also passed 806 automated tests, 73 browser tests, type checking and unused-code checking.
 - `tests/factory-workspace-live.cjs` checked real edits across stages, an unchanged host checkout, excluded host credentials/Git remotes, read-only patch collection and preservation of edits on cancellation.
 - Development failures were retained: generated image scripts initially lacked read permission for the non-root worker; the first full test run exposed non-executable temporary files. Both environment problems were corrected rather than changing test assertions.

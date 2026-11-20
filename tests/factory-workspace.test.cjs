@@ -38,6 +38,16 @@ test('workspace API reads saved results without executing commands and refuses d
   delete process.env.DRAKEN_WORKSPACE_REPO;assert.equal(readWorkspaces().available,false);assert.deepEqual(readWorkspaces().runs,[]);
  }finally{for(const key of Object.keys(process.env))if(!(key in prior))delete process.env[key];Object.assign(process.env,prior);f.clean();}
 });
+test('missing declaration stops before Docker or inference even with the old proposal flag',()=>{
+ const f=fixture();try{
+  fs.writeFileSync(path.join(f.dir,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));f.commit();
+  const output=path.join(f.dir,'output');
+  const result=require('node:child_process').spawnSync(process.execPath,[path.resolve('scripts/factory-workspace.cjs'),f.dir,'HEAD',output],{encoding:'utf8',env:{...process.env,DRAKEN_DOCKER_BIN:'/must-not-run-docker',DRAKEN_DOCKER_HOST:'unix:///unused',DRAKEN_WORKSPACE_ALLOWED_IMAGES:JSON.stringify([image]),DRAKEN_WORKSPACE_PROPOSE:'true',DRAKEN_PI_BIN:'/must-not-run-model'}});
+  assert.equal(result.status,1);const saved=JSON.parse(fs.readFileSync(path.join(output,'result.json'),'utf8'));
+  assert.match(saved.detail,/Missing required file: \.draken\/environment\.json/);assert.equal(saved.modelCalls,0);
+  assert.equal(fs.existsSync(path.join(output,'model-request.json')),false);assert.equal(fs.existsSync(path.join(output,'image')),false);
+ }finally{f.clean();}
+});
 test('snapshot rejects tracked credential paths, submodules and LFS rather than silently omitting source',async()=>{
  for(const kind of ['secret','submodule','lfs']){const f=fixture();try{
   fs.writeFileSync(path.join(f.dir,'tracked'),'data');const commit=f.commit();
