@@ -39,7 +39,7 @@ The previous zero-model-call experiment was a hand-configured harness baseline. 
 
 ## Browser execution
 
-The Factory page now connects to this host. The approved proposal shows a release-version input, **Run in Docker**, its generated plan, stage progress, saved results and **Cancel run**. **Generate a new plan (1 model call)** is an explicit option, not something refresh does.
+The Factory page now connects to this host. The approved proposal shows a release-version input, **Run**, its generated plan, stage progress, saved results and **Cancel run**. **Generate a new plan (1 model call)** is an explicit option, not something refresh does.
 
 Enable the profile on the server with `DRAKEN_FACTORY_PROPOSAL_ID`, `DRAKEN_DOCKER_BIN`, `DRAKEN_DOCKER_HOST`, `DRAKEN_FACTORY_IMAGE` and explicit `DRAKEN_PI_BIN`. An optional `DRAKEN_FACTORY_PLAN_DIR` points to an existing real model-enrichment run. This integration requires the source checkout and authenticated API; it is not enabled by default in published installations. The proposal must belong to the checkout and the profile only verifies Draken releases.
 

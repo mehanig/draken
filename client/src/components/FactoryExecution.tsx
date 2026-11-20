@@ -60,7 +60,7 @@ export function FactoryExecutionPanel({ data, refresh }: { data: FactoryExecutio
         <label>Release version<input className="input" value={version} onChange={event => setVersion(event.target.value)} placeholder="0.10.0" required pattern="[0-9]+\.[0-9]+\.[0-9]+" maxLength={40} disabled={busy || blocked} /></label>
         {data.hasPlan && <label className="factory-plan-choice"><input type="checkbox" checked={regenerate} onChange={event => setRegenerate(event.target.checked)} disabled={busy || blocked} />Generate a new plan (1 model call)</label>}
         {!data.hasPlan && <p className="small">Generates a plan with one model call, then runs it in Docker.</p>}
-        <button className="btn btn-primary" type="submit" disabled={busy || blocked}>{busy ? 'Starting…' : regenerate || !data.hasPlan ? 'Generate & run' : 'Run in Docker'}</button>
+        <button className="btn btn-primary" type="submit" disabled={busy || blocked}>{busy ? 'Starting…' : regenerate || !data.hasPlan ? 'Generate & run' : 'Run'}</button>
       </form>
     </>}
     {error && <p role="alert">{error}</p>}

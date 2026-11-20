@@ -84,8 +84,8 @@ test('Factory runs the approved workflow, shows progress and cancels without tri
   });
   await page.route('**/api/factory/execution/runs/*/cancel', async route => { cancellations++; state.runs[0].status = 'cancelled'; state.runs[0].detail = 'Run cancelled'; await route.fulfill({ status: 204 }); });
   await page.setViewportSize({ width: 390, height: 900 }); await page.goto('/factory');
-  await expect(page.getByRole('button', { name: 'Run in Docker' })).toBeVisible(); expect(starts).toBe(0);
-  await page.getByLabel('Release version').fill('0.10.0'); await page.getByRole('button', { name: 'Run in Docker' }).click();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible(); expect(starts).toBe(0);
+  await page.getByLabel('Release version').fill('0.10.0'); await page.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Cancel run' })).toBeVisible(); expect(starts).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Cancel run' }).click(); await expect(page.getByText('Run cancelled', { exact: true })).toBeVisible(); expect(cancellations).toBe(1);
