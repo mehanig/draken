@@ -11,7 +11,7 @@ const proposal = {
   evidence: [{ goal: 'Rehearse recovery', context: 'Isolated target', complete: false, gaps: ['Initiating request missing'], stages: [], secondary: [], facts: [{ id: 'S1.C1', description: '<script>window.factoryInjected=true</script>', basis: 'reported', role: 'main', stage: 'S1', refs: ['R1'] }] }],
 };
 
-test('Factory is read-only, direct-linkable and does not change shared navigation', async ({ page }) => {
+test('Factory is read-only, direct-linkable and available in shared navigation', async ({ page }) => {
   const mutations: string[] = [];
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
   await page.route('**/api/factory', route => route.fulfill({ json: empty }));
@@ -21,7 +21,7 @@ test('Factory is read-only, direct-linkable and does not change shared navigatio
   await expect(page.locator('.factory-page .info-disclosure')).toHaveCount(0);
   await expect(page.getByText('Background learning enabled', { exact: true })).toHaveCount(0);
   await expect(page.getByText('New summaries retain process records.', { exact: false })).toHaveCount(0);
-  await expect(page.getByRole('banner').getByRole('link', { name: 'Factory', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('banner').getByRole('link', { name: 'Factory', exact: true })).toHaveAttribute('aria-current', 'page');
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByText('No workflows yet')).toBeVisible();
   await page.reload(); await expect(page.getByRole('main', { name: 'Factory' })).toBeVisible();

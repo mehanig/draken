@@ -38,6 +38,7 @@ test('Settings usage offers every range and bucket, honest partial costs and a w
   await panel.getByText('Bucket details', { exact: true }).click(); await expect(panel.getByRole('table')).toContainText('Unavailable (partial)');
   expect(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
   await page.getByRole('link', { name: 'Draken sync history', exact: true }).click(); const closed = requests; await page.waitForTimeout(16000); expect(requests).toBe(closed); expect(mutations).toBe(0);
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click(); await expect(panel.getByLabel('Look back')).toHaveValue('7d'); await expect(panel.getByLabel('Bucket size')).toHaveValue('1h'); await expect(panel.locator('.usage-totals')).toContainText('$1.25');
 });
 for (const usd of [0, 0.0000002, 0.000001, 1000000, 1e12, null]) test(`Y-axis stays readable for cost ${usd} and a single batch on a narrow screen`, async ({ page }) => {

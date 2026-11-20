@@ -62,6 +62,9 @@ p { line-height: 1.7; }
 .brand strong { display: block; font-size: 28px; font-weight: 900; letter-spacing: -.06em; text-transform: uppercase; line-height: 1; }
 .brand span { display: block; font-size: 10px; font-weight: 800; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; margin-top: 6px; }
 .header-right { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; min-width: 0; }
+.header .header-menu-button { display: none; }
+.header-right a[aria-current="page"] { font-weight: 700; text-underline-offset: 4px; }
+.header-username { overflow-wrap: anywhere; max-width: 160px; }
 .settings-page { width: min(960px, calc(100% - 32px)); margin: 32px auto; }
 .settings-page > h1 { margin-bottom: 24px; }
 .preparation-usage { border-bottom: 1px solid var(--rule); margin-bottom: 24px; padding-bottom: 16px; }
@@ -356,7 +359,11 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 }
 @media (max-width: 760px) {
   .header { padding: 14px 16px; flex-wrap: wrap; }
-  .header-right { gap: 10px; }
+  .header .header-menu-button { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  .header-right { display: none; flex-basis: 100%; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .header-right.is-open { display: flex; }
+  .header-right > a { flex-basis: 100%; min-height: 44px; display: flex; align-items: center; }
+  .header-username { max-width: calc(100% - 60px); }
   .brand strong { font-size: 24px; }
   .brand img { width: 36px; height: 36px; }
   .brand span { font-size: 9px; }
@@ -389,7 +396,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .history-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
 .history-source, .history-result { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 540px) {
-  .header-right { gap: 10px; font-size: 12px; }
+  .header-right { gap: 10px; }
   .history-actions { align-items: stretch; flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {

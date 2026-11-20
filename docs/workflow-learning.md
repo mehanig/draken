@@ -15,7 +15,7 @@ There is no independent scheduler, provider client or fresh allowance for the de
 
 ## Factory and source access
 
-Open `/factory` directly. Existing pages and shared navigation are unchanged. Reads and “Refresh saved results” start no inference, synchronization or jobs.
+Open Factory from the top bar or directly at `/factory`. On screens up to 760px wide, navigation and account controls sit in a hamburger menu. Reads and Refresh start no inference, synchronization or jobs.
 
 Factory shows purpose, applicability, proposed steps, outcome qualifications and compared evidence. It reports whether learning is enabled, paused or stopped by a preparation error. The main page shows repository groups, proposal counts, workflow applicability and steps. Generic explanations, info icons and historical failure counters are omitted. Actual limitations remain visible, evidence is expandable, and stopped learning has a short link to its retry settings. The page remains a proposal viewer, not an executor or an approval mechanism.
 
