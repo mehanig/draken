@@ -3,6 +3,7 @@ import type { Evidence, ConversationState, PreparationUsage, UsageRange, UsageBu
 import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from '../../../src/memory/types';
 
 import { authorizationHeaders, clearSession } from '../auth/session';
+import type { FactoryPage } from '../../../src/factory/types';
 
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -21,6 +22,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
   return data as T;
 }
 
+export const factory = (before?: number, signal?: AbortSignal) => request<FactoryPage>(`/factory${before === undefined ? '' : `?before=${before}`}`, 'GET', undefined, signal);
 export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir: string }>(`/setup${refresh ? '?refresh=1' : ''}`);
 export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);
 export const activityWindow = (days?: number | null) => request<ActivityWindowSettings>(`/settings/activity-window${days === undefined ? '' : `?days=${days ?? 'all'}`}`);

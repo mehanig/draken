@@ -13,6 +13,7 @@ import { authMiddleware, isLoopbackHost, isNoAuthMode, validateAuthConfig } from
 import authRouter from './routes/auth';
 import syncRouter from './routes/sync';
 import memoryRouter from './routes/memory';
+import factoryRouter from './routes/factory';
 import { shutdownHistory } from './memory/service';
 import { startBackgroundIndexing, stopBackgroundIndexing } from './sync/background';
 import voiceRouter from './routes/voice';
@@ -47,6 +48,7 @@ export function createApp(options: { staticDir?: string; instanceId?: string } =
   app.use('/api/auth', authRouter);
   app.use('/api/voice', authMiddleware, voiceRouter);
   app.use('/api/memory', authMiddleware, memoryRouter);
+  app.use('/api/factory', authMiddleware, factoryRouter);
   app.use('/api', authMiddleware, syncRouter);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found' }));
   app.use(express.static(staticDir));

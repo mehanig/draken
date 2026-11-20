@@ -3,6 +3,8 @@ import type { EvidenceDependencies, EvidenceQuery, EvidenceRequest, EvidenceResu
 
 export type { EvidenceDependencies, EvidenceRequest, EvidenceResult } from './contracts';
 export { DISCUSSION_HISTORY_BYTES } from './packet';
+export { prepareProcedureEvidence } from './procedures';
+export type { ProcedureRecord, ProcedurePacket, ProcedureEvidenceRequest, ProcedureEvidenceDependencies } from './procedures';
 
 const planning = `Interpret the user's engineering request and plan a read-only history search. Do not answer the question.
 Return exactly ONE JSON object and nothing else: no commentary, reasoning, analysis, markdown or code fences. Your response must start with { and end with }. Any text outside the object makes the request fail. For a project request use {"scope":"project","sessions":["P1"],"query":"specific search terms","kind":"sources","recent":true}. For a clearly unrelated request return {"scope":"unrelated"}; when the subject cannot be understood return {"scope":"unclear"}.

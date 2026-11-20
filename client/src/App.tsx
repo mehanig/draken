@@ -7,6 +7,7 @@ import { Home } from './pages/Home';
 import { linkClick } from './navigation';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
+import { Factory } from './pages/Factory';
 
 function AppContent() {
   const { isAuthenticated, isLoading, authEnabled, username, logout } = useAuth();
@@ -34,6 +35,7 @@ function AppContent() {
     </header>
     {id && Number.isSafeInteger(id) ? <Sync key={id} id={id} chat={Boolean(match?.[2])} callIntent={callIntent === id} consumeIntent={() => setCallIntent(null)} navigate={navigate} setGuard={setGuard} />
       : /^\/history(?:\/H[a-f0-9]{24})?\/?$/.test(path) ? <History key={path} navigate={navigate} reference={path.split('/')[2]} />
+      : /^\/factory\/?$/.test(path) ? <Factory />
       : /^\/settings\/?$/.test(path) ? <Settings />
       : path === '/' ? <Home navigate={navigate} /> : <main className="sync-home"><h1>Page not found</h1><a href="/" onClick={event => linkClick(event, navigate, '/')}>All syncs</a></main>}
   </div>;

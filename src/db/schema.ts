@@ -5,6 +5,7 @@ import fs from 'fs';
 import { entryTable, migratePointers } from './pointer-migration';
 import { migrateSnapshotPointers } from './snapshot-pointers';
 import { renameAgentTables, migrateAgents } from './agent-migration';
+import { initProcessSchema } from './process-schema';
 
 let db: Database.Database | null = null;
 
@@ -299,6 +300,7 @@ export function initSchema(database: Database.Database): void {
     finally { memory?.close(); }
   }
   migratePointers(database); migrateSnapshotPointers(database); migrateAgents(database);
+  initProcessSchema(database);
   const sessionColumns = new Set((database.prepare('PRAGMA table_info(agent_sessions)').all() as { name: string }[]).map(column => column.name));
   if (!sessionColumns.has('scanned_bytes')) database.exec('ALTER TABLE agent_sessions ADD COLUMN scanned_bytes INTEGER NOT NULL DEFAULT -1');
   for (const [name, type] of Object.entries({ first_message_at: 'TEXT', last_message_at: 'TEXT', last_message_preview: "TEXT NOT NULL DEFAULT ''", activity_stamp: "TEXT NOT NULL DEFAULT ''" })) {
