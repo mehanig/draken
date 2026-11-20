@@ -44,6 +44,14 @@ test('Factory reads verified saved proposals without syncs, provider calls or ne
  assert.equal(result.proposals[0].location.kind,'folder');
  assert.ok(!JSON.stringify(result).includes(path.join(dir,'sessions')));
 });
+test('enrichment uses verified proposals and rejects uncited source revocation during inference',async()=>{
+ const {discoveryFromProposal,proposeFactoryEnrichment}=require('../dist/factory/enrichment');
+ const {id}=await seed(),discovery=discoveryFromProposal((await readFactory(undefined,signal())).proposals[0]);
+ const policy={id:'test',revision:'v1',locationKey:discovery.locationKey,discoveryRevision:discovery.revision,endpoint:'Tested patch',inputCheck:'input',prepare:'prepare',completionCheck:'complete',allowedCapabilities:[],allowedEffects:[],maxAttempts:1,timeoutMs:1000};
+ let calls=0;const incomplete=await proposeFactoryEnrichment(id,policy,[],async()=>{calls++;return '{"bindings":[]}';},signal());assert.equal(incomplete.ready,false);assert.equal(calls,1);
+ await assert.rejects(proposeFactoryEnrichment(id,policy,[],async()=>{db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();return '{"bindings":[]}';},signal()));
+ const count=db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n;await readFactory(undefined,signal());assert.equal(db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n,count);
+});
 test('old saved comparisons cannot expose a workflow spanning different folders',async()=>{
  const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);
  const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
