@@ -15,7 +15,7 @@ export function discoveryFromProposal(proposal: FactoryPage['proposals'][number]
     limitations: [...new Set([...proposal.decision.assessment.limitations, ...proposal.evidence.flatMap(input => [...(input.limitations || []), ...input.gaps])])] };
 }
 
-async function readDiscovery(id: string, signal: AbortSignal): Promise<Discovery> {
+export async function readDiscovery(id: string, signal: AbortSignal): Promise<Discovery> {
   const row = getDb().prepare("SELECT * FROM process_extractions WHERE id=? AND kind='comparison' AND status='completed'").get(id) as LearningRow | undefined;
   if (!row) throw Error('Workflow proposal unavailable');
   const { decision, evidence, location } = await readWorkflowComparison(row, signal);

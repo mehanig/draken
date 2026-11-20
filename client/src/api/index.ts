@@ -4,6 +4,7 @@ import type { HistoryPage, HistoryProgress, HistoryQuery, HistoryResults } from 
 
 import { authorizationHeaders, clearSession } from '../auth/session';
 import type { FactoryPage } from '../../../src/factory/types';
+import type { FactoryExecution, FactoryRun } from '../../../src/factory/execution-types';
 
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -23,6 +24,9 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 }
 
 export const factory = (before?: number, signal?: AbortSignal) => request<FactoryPage>(`/factory${before === undefined ? '' : `?before=${before}`}`, 'GET', undefined, signal);
+export const factoryExecution = (signal?: AbortSignal) => request<FactoryExecution>('/factory/execution', 'GET', undefined, signal);
+export const runFactory = (version: string, regenerate: boolean, requestId: string) => request<FactoryRun>('/factory/execution/runs', 'POST', { version, regenerate, requestId });
+export const cancelFactoryRun = (id: string) => request<void>(`/factory/execution/runs/${encodeURIComponent(id)}/cancel`, 'POST');
 export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir: string }>(`/setup${refresh ? '?refresh=1' : ''}`);
 export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);
 export const activityWindow = (days?: number | null) => request<ActivityWindowSettings>(`/settings/activity-window${days === undefined ? '' : `?days=${days ?? 'all'}`}`);

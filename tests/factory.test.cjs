@@ -104,11 +104,35 @@ test('Factory rejects invalid cursors and cancellation without returning content
  for(const cursor of [0,-1,NaN,1.5])await assert.rejects(readFactory(cursor,signal()),/cursor/);
  const c=new AbortController();c.abort();await assert.rejects(readFactory(undefined,c.signal));
 });
+test('execution reads saved progress without invoking a model and withholds it after source exclusion',async()=>{
+ const {id}=await seed();const {readDiscovery}=require('../dist/factory/enrichment');const {readExecution,startExecution}=require('../dist/factory/execution');
+ const discovery=await readDiscovery(id,signal());Object.assign(process.env,{DRAKEN_FACTORY_PROPOSAL_ID:id,DRAKEN_DOCKER_BIN:'/not-invoked',DRAKEN_DOCKER_HOST:'unix:///test.sock',DRAKEN_FACTORY_IMAGE:'sha256:'+'a'.repeat(64)});
+ const requestId='12345678-1234-4234-8234-123456789abc',run=path.join(dir,'factory-runs',requestId);fs.mkdirSync(path.join(run,'work'),{recursive:true});
+ fs.writeFileSync(path.join(run,'request.json'),JSON.stringify({id:requestId,version:'0.10.0',proposalId:id,revision:discovery.revision,regenerate:false,createdAt:new Date().toISOString()}));
+ fs.writeFileSync(path.join(run,'work','result.json'),JSON.stringify({status:'completed',detail:'Verified fixture',modelCalls:0}));
+ fs.writeFileSync(path.join(run,'work','events.jsonl'),'{"type":"requested","capability":"registry"}\n{"type":"result","capability":"registry","outcome":{"ok":true}}\n');
+ const state=await readExecution(signal());assert.equal(state.runs[0].status,'completed');assert.equal(state.runs[0].steps[0].status,'passed');
+ assert.equal((await startExecution({requestId,version:'0.10.0',regenerate:false},'test-token',signal())).id,requestId);
+ await assert.rejects(startExecution({requestId,version:'0.11.0',regenerate:false},'test-token',signal()),/already used/);
+ for(const table of ['sync_runs','background_runs'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
+ db.prepare("UPDATE agent_sessions SET included=0 WHERE id='episode-1'").run();await assert.rejects(readExecution(signal()));
+});
+test('execution refuses invalid input, unauthenticated starts and unknown cancellations',async()=>{
+ const {startExecution,cancelExecution}=require('../dist/factory/execution');
+ await assert.rejects(startExecution({requestId:'../../escape',version:'0.10.0',regenerate:true},'token',signal()),/request ID/);
+ await assert.rejects(cancelExecution('../../escape'),/Invalid run ID/);
+ await assert.rejects(cancelExecution('12345678-1234-4234-8234-123456789abc'),/no longer active/);
+ assert.equal(fs.existsSync(path.join(dir,'factory-runs')),false);
+});
 test('Factory API uses existing authentication, same-origin and no-store policy; GET starts no work',async()=>{
  server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const url=`http://127.0.0.1:${server.address().port}/api/factory`;
  const response=await fetch(url);assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');assert.deepEqual((await response.json()).proposals,[]);
  assert.equal((await fetch(url+'?before=invalid')).status,400);
  assert.equal((await fetch(url,{headers:{Origin:'https://other.example'}})).status,403);
+ assert.equal((await fetch(url+'/execution')).status,200);
+ assert.equal((await fetch(url+'/execution/runs',{method:'POST',headers:{Origin:'https://other.example','Content-Type':'application/json'},body:'{}'})).status,403);
  process.env.DRAKEN_NO_AUTH='false';assert.equal((await fetch(url)).status,401);
+ assert.equal((await fetch(url+'/execution')).status,401);
+ assert.equal((await fetch(url+'/execution/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,0);
 });

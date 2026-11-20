@@ -13,7 +13,7 @@ async function main(){
  const origin=new URL(base);if(!['http:','https:'].includes(origin.protocol)||origin.username||origin.password||origin.pathname!=='/')throw Error('Use the authenticated Factory origin');
  const output=path.resolve(directory);fs.mkdirSync(output,{mode:0o700}); // A new private directory, never an existing directory or shared append target.
  const controller=new AbortController(),stop=()=>controller.abort();process.once('SIGINT',stop);process.once('SIGTERM',stop);
- const save=(name,value)=>{const fd=fs.openSync(path.join(output,name),'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}};
+ const save=(name,value)=>{const temporary=path.join(output,'.'+name+'.'+crypto.randomUUID()+'.tmp');const fd=fs.openSync(temporary,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}try{fs.linkSync(temporary,path.join(output,name));const directory=fs.openSync(output,'r');try{fs.fsyncSync(directory);}finally{fs.closeSync(directory);}}finally{fs.unlinkSync(temporary);}};
  const append=(name,value)=>{const fd=fs.openSync(path.join(output,name),'a',0o600);try{fs.writeFileSync(fd,JSON.stringify(value)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}};
  async function source(signal){let cursor;for(let i=0;i<50;i++){
   const r=await fetch(new URL('/api/factory'+(cursor?'?before='+cursor:''),origin),{signal,redirect:'error',cache:'no-store',headers:{Authorization:'Bearer '+token}});
@@ -84,6 +84,6 @@ async function main(){
   const report={...result,task,modelCalls:reuseDirectory?0:modelReceipt.invocations,enrichmentModelCalls:modelReceipt.invocations,model:modelReceipt.summary_model,bindingOrigin:'LLM response; no manual bindings',image,output};save('result.json',report);
   console.log(JSON.stringify(report,null,2));if(result.status!=='completed')process.exitCode=1;
  }catch(error){save('failure.json',{message:error.message,modelReceipt});throw error;}
- finally{try{await docker.dispose();}finally{process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);}}
+ finally{try{await docker.dispose();save('cleanup.json',{completed:true});}finally{process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);}}
 }
 main().catch(error=>{console.error(error.message);process.exitCode=1});

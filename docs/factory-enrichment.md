@@ -37,6 +37,18 @@ Package lifecycle scripts are disabled. This verifies package contents and the C
 
 The previous zero-model-call experiment was a hand-configured harness baseline. It is superseded by this real model-enriched example, not relabeled as an LLM result.
 
+## Browser execution
+
+The Factory page now connects to this host. The approved proposal shows a release-version input, **Run in Docker**, its generated plan, stage progress, saved results and **Cancel run**. **Generate a new plan (1 model call)** is an explicit option, not something refresh does.
+
+Enable the profile on the server with `DRAKEN_FACTORY_PROPOSAL_ID`, `DRAKEN_DOCKER_BIN`, `DRAKEN_DOCKER_HOST`, `DRAKEN_FACTORY_IMAGE` and explicit `DRAKEN_PI_BIN`. An optional `DRAKEN_FACTORY_PLAN_DIR` points to an existing real model-enrichment run. This integration requires the source checkout and authenticated API; it is not enabled by default in published installations. The proposal must belong to the checkout and the profile only verifies Draken releases.
+
+The authenticated execution API accepts a version, a request UUID and the decision to regenerate—not commands, Docker settings or filesystem paths. Reads verify source access and return saved state only. A browser disconnect does not cancel an accepted job. Explicit cancellation stops its controller and Docker containers; server shutdown waits for cleanup. Only one job can run at a time. An interrupted job with no cleanup confirmation blocks further execution rather than being replayed.
+
+`src/factory/execution.ts` supervises the existing tested CLI pipeline. Requests, plans, events, receipts and process exits persist under the private data directory's `factory-runs/`. Repeated request UUIDs do not create another paid call. Per-run model accounting remains in the pipeline's private one-call store and is shown in Factory; it is not presented as part of ordinary summary-preparation accounting.
+
+The live browser was tested for cancellation, saved-plan execution and fresh enrichment. The fresh UI run made one Luna call (2,005 input / 63 output tokens, estimated $0.000232) and passed all eleven stages. Desktop and 390px layouts were checked. No intermediate approval prompts were needed.
+
 ## Implementation
 
 - `src/factory-enrichment/`: portable enrichment contracts, model prompt/compiler and serial execution loop. No imports outside the folder.
@@ -69,7 +81,7 @@ The model call itself is a tool-free control-plane operation using the configure
 
 ## Validation
 
-- 800 automated tests, typechecks and unused-code checks passed.
+- 802 automated tests, 72 browser tests, typechecks and unused-code checks passed. Factory browser tests cover explicit execution, cancellation, generation consent, read-only refresh and source-access failure.
 - Existing standalone copy/compile/run and pure public-contract tests remain in normal CI.
 - New tests cover owner invocation limits, container arguments, absence of host fallback, artifact dependencies, network policy and cleanup.
 - `tests/factory-docker-live.cjs` was also run against real rootless Docker. It confirmed non-root execution, read-only root and previous-stage artifacts, absence of the Docker socket/credentials, permitted registry access, denied unapproved/metadata/direct egress, and removal of a running container on cancellation.
@@ -104,4 +116,4 @@ Docker preflight happens before the model call. Each new test directory permits 
 
 ## Still separate work
 
-Automatic background enrichment needs approved repository policies and separately persisted revisions wired into the existing preparation owner. Factory task submission, queue/restart recovery and a general coding-agent capability are not implemented here. The current test proves real LLM enrichment and containerized execution for one release-verification procedure—not an unattended general-purpose coding factory.
+Automatic background enrichment needs approved repository policies and separately persisted revisions wired into the existing preparation owner. Factory task submission is connected through the browser. Automatic queue/restart recovery and a general coding-agent capability are not implemented here. The current test proves real LLM enrichment and containerized execution for one release-verification procedure—not an unattended general-purpose coding factory.
