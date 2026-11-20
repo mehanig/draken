@@ -54,6 +54,7 @@ async function main(){
  const prefix='draken-workspace-'+crypto.randomUUID(),container=prefix+'-worker',proxy=prefix+'-broker',network=prefix+'-network',volume=prefix+'-files';
  save('resources.json',{prefix,container,proxy,network,volume,exporter:prefix+'-export',verifier:prefix+'-verify',verificationVolume:prefix+'-verification-files'});
  const resources=[];let outcome,modelCalls=0,source,image,environment,authorization,checkoutComplete=false,retainVolume=false,changedFiles=[];
+ const accounting=()=>{const file=path.join(output,'agent/status.json');if(!fs.existsSync(file))return {};try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return {modelCalls:null,accountingComplete:false};}};
  const receive=event=>{record(event);if(event.type==='stage-result'&&event.name==='Check out repository'&&event.commit===source.commit&&event.code===0)checkoutComplete=true;};
  async function runWorker(input,allowFailure=false){
   let result;try{await docker(['exec','-i',container,'node','/factory/worker.cjs'],{signal:controller.signal,timeout:900000,limit:64_000_000,input:JSON.stringify(input),onLine:line=>{const event=JSON.parse(line);receive(event);if(event.type==='result')result=event;}});}
@@ -99,7 +100,7 @@ async function main(){
   const state=JSON.parse((await docker(['inspect','--format','{{json .State}}',container])).toString());if(state.OOMKilled||!outcome||!['completed','failed'].includes(outcome.status)||(state.ExitCode!==0&&!(state.ExitCode===1&&outcome.status==='failed')))throw Error('Workspace exited without a confirmed result');
   outcome={...outcome,commit:source.commit,image,modelCalls,output};
   }
- }catch(error){outcome={status:controller.signal.aborted?'cancelled':'failed',detail:error.message,modelCalls,output};save('failure.json',outcome);}
+ }catch(error){outcome={status:controller.signal.aborted?'cancelled':'failed',detail:error.message,modelCalls,output,...accounting()};save('failure.json',outcome);}
  finally{
   if(checkoutComplete){
    const exporter=prefix+'-export';resources.push(['container',exporter]);
@@ -129,7 +130,8 @@ async function main(){
     await authorization.authorize(controller.signal);save('verification.json',{...verified,scope:'frozen-repository-checks',taskAcceptance:'not inferred from repository checks',checkDefinitionSHA256:fingerprint(environment.checks),patchSHA256:crypto.createHash('sha256').update(fs.readFileSync(path.join(output,'changes.patch'))).digest('hex')});outcome.detail='Workflow checks passed in a fresh workspace; patch retained for review';
    }catch(error){outcome={...outcome,status:controller.signal.aborted?'cancelled':'failed',detail:error.message};}
   }
-  const accounting=path.join(output,'agent/status.json');if(fs.existsSync(accounting))outcome={...outcome,...JSON.parse(fs.readFileSync(accounting,'utf8'))};
+  outcome={...outcome,...accounting()};
+  if(outcome.status==='completed'&&outcome.accountingComplete===false)outcome={...outcome,status:'failed',detail:'Agent usage is unconfirmed'};
   const errors=[];for(const [kind,name] of resources.reverse())try{if(kind==='volume'&&retainVolume)continue;await docker(kind==='container'?['rm','--force',name]:[kind,'rm',name]);}catch(error){if(!/No such|not found/.test(error.message))errors.push(error.message);}
   if(errors.length){outcome={...outcome,status:'interrupted',detail:'Workspace cleanup needs attention',cleanupErrors:errors};}
   save('result.json',outcome);clearTimeout(deadline);process.removeListener('SIGTERM',abort);process.removeListener('SIGINT',abort);
