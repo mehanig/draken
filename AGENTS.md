@@ -7,6 +7,14 @@
 - For example, say “search at most three times” instead of “bounded retrieval,” and “check source permissions before reading” instead of “guarded access.”
 - State what failed, why it failed, and what you will change. Do not substitute jargon for an explanation.
 
+## Keep UI content focused
+
+- Think like a product marketer: make the value clear and the page easy to scan, not crowded with explanations.
+- Design for a returning user who already knows how the product works. Prioritize their content, decisions and next actions—not descriptions of the implementation.
+- Remove text, labels, status messages and controls that do not help the user understand something important or take action. Avoid repeated disclaimers, obvious instructions and redundant headings.
+- Delete unnecessary explanations instead of moving them behind a collection of info icons. Use an info icon or disclosure only when the extra detail genuinely helps.
+- Keep real limitations, consequential warnings and actionable errors visible. Removing clutter must not hide problems or make unsupported claims.
+
 ## Keep evidence preparation separate
 
 - Application callers use only `src/evidence/index.ts`. Do not import its internals or add a separate text/voice search-and-selection path.
