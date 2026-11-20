@@ -29,9 +29,8 @@ export function loadMatchingCases(file: string): { manifest: Manifest; hash: str
   }
   return { manifest: value, hash: digest(text) };
 }
-export async function readMatchingSide(side: HistoricalSide | SyntheticSide, signal: AbortSignal, applicationDatabase?: string): Promise<{ input: ContractMatchInput; identity: string }> {
+async function readMatchingSide(side: HistoricalSide | SyntheticSide, signal: AbortSignal): Promise<{ input: ContractMatchInput; identity: string }> {
   signal.throwIfAborted();
-  if (applicationDatabase && (side.kind !== 'historical' || side.store !== applicationDatabase)) throw Error('Not application history');
   if (side.kind === 'synthetic') {
     const value = validateProcess(JSON.stringify({ summary: 'Controlled comparison fixture, not historical evidence', fragments: [side.fragment], limitations: ['Synthetic example'] }), side.records.map(r => r.ref));
     validateProcessEvidence(value, side.records);
@@ -42,7 +41,6 @@ export async function readMatchingSide(side: HistoricalSide | SyntheticSide, sig
     const row = store.prepare("SELECT output_json,source_dependencies_json FROM process_extractions WHERE id=? AND kind='summary' AND status='completed'").get(side.extraction) as { output_json: string; source_dependencies_json: string } | undefined;
     if (!row) throw Error('Missing completed historical extraction');
     const deps = JSON.parse(row.source_dependencies_json) as { source: string; captures: PilotCapture[] };
-    if (applicationDatabase && deps.source !== applicationDatabase) throw Error('Not application source data');
     const source = new Database(deps.source, { readonly: true, fileMustExist: true });
     try {
       const records = [];

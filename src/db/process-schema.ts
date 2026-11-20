@@ -31,4 +31,6 @@ export function initProcessSchema(db: Database.Database): void {
       PRIMARY KEY(episode_id,extraction_id,fragment_key)
     );
   `);
+  const columns = new Set((db.prepare('PRAGMA table_info(work_episodes)').all() as { name: string }[]).map(c => c.name));
+  if (!columns.has('learning_status')) db.exec("ALTER TABLE work_episodes ADD COLUMN learning_status TEXT NOT NULL DEFAULT 'pending' CHECK(learning_status IN ('pending','completed'))");
 }

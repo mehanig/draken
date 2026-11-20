@@ -1,4 +1,7 @@
 import { getDb } from '../db/schema';
+import { SUMMARY_PROCESS_PROMPT } from '../workflow-learning';
+import { saveSummaryProcess } from '../factory/learning-store';
+import { readWorkflowOriginals } from '../evidence-adapter';
 import { assertRecentSessions } from '../sources/activity-window';
 import { Evidence, NodeKind, NodeSummary, SyncDetail, TopicGroups } from '../types';
 import { cleanText, digest, sourceKey, sourceRepresentatives } from './normalize';
@@ -188,7 +191,7 @@ export function summaryPreparationKey(input: SummaryInput): string {
   }));
   return digest(JSON.stringify({
     recipe: 'summary-preparation-v2-verified-leaves',
-    prompts: { PROMPT_VERSION, legacySummarySystem, summarySystem, batchSummarySystem, citationRepairSystem, groupingSystem },
+    prompts: { PROMPT_VERSION, legacySummarySystem, summarySystem, batchSummarySystem, citationRepairSystem, groupingSystem, SUMMARY_PROCESS_PROMPT },
     budgets: { CHUNK_CHARS, MERGE_CHARS, OUTPUT_CHARS, BATCH_OUTPUT, LEGACY_OUTPUT, MAX_EVIDENCE, LUNA_BATCH },
     // Versions of the shared normalization, short-label transport and token estimator.
     dependencies: ['normalization-v2', 'references-v2', 'o200k_base-gpt-tokenizer-4.1.0', 'prompt-headroom-1.2-8192'],
@@ -385,6 +388,7 @@ export class SummaryTree {
       this.db.prepare(`UPDATE ${this.runTable} SET cache_hits = cache_hits + ?, processed_entries = processed_entries + ? WHERE id = ?`)
         .run(Number(cached), newlyProcessed.length, this.runId);
     };
+    let processValue: unknown;
     this.stage(spec.kind, spec.label);
     for (const cacheKey of [spec.key, spec.legacyKey].filter((key): key is string => Boolean(key))) {
       const cache = this.db.prepare('SELECT output_json,model,prompt_version FROM summary_cache WHERE key = ?').get(cacheKey) as { output_json: string; model: string; prompt_version: string } | undefined;
@@ -429,12 +433,14 @@ export class SummaryTree {
             [spec.kind === 'topics' ? 'allowed_observation_ids' : 'allowed_source_ids']: [...wire.allowed],
             ...(validationError ? { repair: { validation_error: validationError, ...(spec.batch && citationRepair ? {} : { previous_output: previousOutput }),
               instruction: citationRepair ? 'Return only selections for citation_repairs. Keep claims unchanged; select only sufficient supporting references from each observation’s candidates, at most 16 each. If max_distinct_sources is supplied, the UNION across all selections must also fit that total; repeated references count once. Never drop support for distinct claims or qualifications to meet the limit.' : 'Correct the previous output against the original input and allowed IDs. Do not invent or guess source references.' } } : {}) },
-          citationRepair ? citationRepairSystem : spec.kind === 'topics' ? groupingSystem : spec.batch ? batchSummarySystem + ((spec.payload as { goal?: string }).goal === 'current_project_briefing' ? `\nFor this final briefing selection, the exhaustive-history instructions above do not apply: ${BRIEFING_POLICY}` : '') : summarySystem);
+          (citationRepair ? citationRepairSystem : spec.kind === 'topics' ? groupingSystem : spec.batch ? batchSummarySystem + ((spec.payload as { goal?: string }).goal === 'current_project_briefing' ? `\nFor this final briefing selection, the exhaustive-history instructions above do not apply: ${BRIEFING_POLICY}` : '') : summarySystem) + (spec.leafInput && !citationRepair ? SUMMARY_PROCESS_PROMPT : ''));
           // A provider may yield to inclusion, agent, effective-record or file
           // changes. Never persist its result (or attempt repair) on stale proof.
           verify();
           try {
-            const local = citationRepair ? repairSummaryCitations(citationCandidate!, parseJson(response, limits.characters), wire.allowed, limits, maxSources) : validate(parseJson(response, limits.characters), wire.allowed);
+            const raw = parseJson(response, limits.characters + (spec.leafInput && !citationRepair ? 60000 : 0));
+            if (spec.leafInput && !citationRepair) processValue = (raw as { process?: unknown }).process;
+            const local = citationRepair ? repairSummaryCitations(citationCandidate!, raw, wire.allowed, limits, maxSources) : validate(raw, wire.allowed);
             parsed = validate(wire.decode(local), spec.allowed);
             break;
           } catch (error) {
@@ -448,10 +454,22 @@ export class SummaryTree {
         output = parsed;
       }
       if (this.signal.aborted) throw new HttpError(409, 'Generation cancelled');
+      const processInput = spec.leafInput && derived === undefined ? this.leafStore().encode(spec.leafInput) : undefined;
+      if (processInput && (processValue as { fragments?: unknown[] } | null)?.fragments?.length) {
+        const frozen = JSON.parse(processInput);
+        try { await readWorkflowOriginals([...frozen.evidence, ...frozen.background], this.signal); }
+        catch { this.signal.throwIfAborted(); processValue = undefined; }
+        verify();
+      }
       this.db.transaction(() => {
         this.db.prepare(`INSERT OR REPLACE INTO summary_cache(key, kind, model, prompt_version, output_json, created_at)
           VALUES (?, ?, ?, ?, ?, ?)`).run(spec.key, spec.kind, this.sync.models.summary, spec.batch ? LUNA_BATCH.version : PROMPT_VERSION, JSON.stringify(output), new Date().toISOString());
         finish(false);
+        if (processInput) {
+          const references = [...spec.allowed];
+          const roles = new Map([...dependencies].map(item => [sourceKey(item), item.role]));
+          saveSummaryProcess(spec.key, this.sync.models.summary, { table: this.runTable, id: this.runId }, processInput, processValue, references, references.map(ref => roles.get(ref) || 'unknown'));
+        }
       })();
       return output;
     } catch (error) {
@@ -646,7 +664,7 @@ export class SummaryTree {
           return digest(JSON.stringify([primary, input.context.map(item => sourceData(item, true))]));
         },
         legacy: (input, frozen) => [...this.chunkSpecs(false, input, frozen).values()].flat(),
-        batches: (input, keys, midpoint) => this.plannedBatches(input, false, spec => keys.has(spec.key), undefined, midpoint),
+        batches: (input, keys, midpoint) => this.plannedBatches(input, false, spec => keys.has(spec.key), undefined, midpoint, true),
         valid, discover,
       });
       for (const snapshot of snapshots) {
@@ -969,7 +987,7 @@ export class SummaryTree {
     return batches;
   }
 
-  private async plannedBatches(input: SummaryInput, register = true, cached = (spec: Spec) => this.cached(spec), retained?: RetainedLeaves, midpoint = false): Promise<Spec[]> {
+  private async plannedBatches(input: SummaryInput, register = true, cached = (spec: Spec) => this.cached(spec), retained?: RetainedLeaves, midpoint = false, historical = false): Promise<Spec[]> {
     const result: Spec[] = [];
     const sourceMap = sourceRepresentatives(input.items);
     const covered = new Set(retained ? [...retained.values()].flat().flatMap(spec => spec.sources) : []);
@@ -992,8 +1010,10 @@ export class SummaryTree {
             const refs = new Set([...prefix.evidence, ...background].map(item => item.id));
             const wire = prepareModelInput('chunk', prefix, refs);
             const prompt = JSON.stringify({ task: 'summarize', stage: 'chunk', allowed_source_ids: [...wire.allowed], input: wire.input });
-            return promptTokens(prompt, batchSummarySystem) <= LUNA_BATCH.plannedRequestTokens &&
-              Buffer.byteLength(prompt) + Buffer.byteLength(batchSummarySystem) <= LUNA_BATCH.inputBytes;
+            // Reconstruct old packing with its original prompt; only new inference needs the process field.
+            const system = batchSummarySystem + (historical ? '' : SUMMARY_PROCESS_PROMPT);
+            return promptTokens(prompt, system) <= LUNA_BATCH.plannedRequestTokens &&
+              Buffer.byteLength(prompt) + Buffer.byteLength(system) <= LUNA_BATCH.inputBytes;
           };
           if (!fits(batch.length)) {
             if (!fits(1)) throw new HttpError(400, 'One entry and its background exceed the summary budget; no evidence was dropped.');

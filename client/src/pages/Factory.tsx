@@ -22,15 +22,17 @@ export function Factory() {
   }, []);
   useEffect(() => { void load(); return () => request.current?.abort(); }, [load]);
   return <main className="factory-page" aria-label="Factory" aria-busy={loading}>
-    <div className="factory-heading"><div><p className="muted small">Learning preview · No execution</p><h1>Factory</h1></div>
+    <div className="factory-heading"><div><p className="muted small">Workflow learning · No execution</p><h1>Factory</h1></div>
       <button type="button" disabled={loading} onClick={() => void load()}>Refresh saved results</button></div>
     <p>Reusable ways of doing a job, learned from its purpose, method and conditions—not just matching tools or words.</p>
-    <aside className="factory-notice"><strong>Background integration is not enabled in this preview.</strong> The detector is implemented and tested. Connecting it to normal summarization and reconstructing episodes across batches are still pending. This page only reads saved proposals; it never starts inference or requires a sync.</aside>
+    <aside className="factory-notice">Process records are saved alongside normal summaries. Background summarization compares them and saves workflow proposals without a manual sync or Factory visit. This page only reads saved results; it never starts inference.</aside>
     {error && <p role="alert">{error}</p>}
     {loading && <p role="status">Checking saved proposals and their source access…</p>}
     {data && <>
+      <p role="status">{data.learning === 'enabled' ? 'Background learning is enabled with automatic summarization.' : data.learning === 'paused' ? 'Background learning is paused because automatic preparation is disabled. Saved proposals remain available.' : 'Automatic preparation stopped after an error. Completed work is retained; use the existing preparation retry in Settings.'}</p>
+      {data.failedExtractions > 0 && <p role="status">Some summaries could not retain valid process records. Their normal summaries remain available; those failures are not treated as empty matches.</p>}
       {data.unavailable > 0 && <p role="status">Some saved results could not be verified against permitted application history and are not shown.</p>}
-      {!data.proposals.length && <section className="factory-card"><h2>No verified workflow proposals yet</h2><p>Historical experiments are not imported into your workflow library. When background learning is connected, its proposals will appear here without opening Factory or starting a manual sync.</p></section>}
+      {!data.proposals.length && <section className="factory-card"><h2>No verified workflow proposals yet</h2><p>Proposals appear as newly summarized history provides comparable process records. Existing summaries are not automatically regenerated for workflow backfill, and historical experiments are not imported.</p></section>}
       {data.proposals.map(proposal => {
         const workflow = proposal.decision.assessment.workflow;
         if (!workflow) return null;
@@ -45,6 +47,7 @@ export function Factory() {
             {proposal.evidence.map((input, i) => <section className="factory-evidence" key={i}>
               <h3>{input.goal}</h3><p>{input.context}</p>
               <p>{input.complete ? 'Episode boundaries recorded.' : 'Episode coverage is incomplete.'}</p>
+              {!!input.limitations?.length && <ul>{input.limitations.map((limit, j) => <li key={j}>{limit}</li>)}</ul>}
               {!!input.gaps.length && <ul>{input.gaps.map((gap, j) => <li key={j}>{gap}</li>)}</ul>}
               <ul>{input.facts.map(fact => <li key={fact.id}><strong>{fact.basis}:</strong> {fact.description}<small className="factory-refs">{fact.id} · {fact.refs.join(', ')}</small></li>)}</ul>
             </section>)}

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const empty = { proposals: [], nextCursor: null, unavailable: 0, learning: 'not-enabled' };
+const empty = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', failedExtractions: 0 };
 const proposal = {
   id: 'proposal-1', model: 'test/model', createdAt: '2026-01-01T00:00:00.000Z',
   decision: { sameWorkflow: true, relation: 'same_workflow_candidate', coverage: [], assessment: {
@@ -17,7 +17,7 @@ test('Factory is read-only, direct-linkable and does not change shared navigatio
   await page.goto('/factory');
   await expect(page.getByRole('heading', { name: 'Factory', exact: true })).toBeVisible();
   await expect(page.getByText('No verified workflow proposals yet')).toBeVisible();
-  await expect(page.getByText('Background integration is not enabled in this preview.')).toBeVisible();
+  await expect(page.getByText('Background learning is enabled with automatic summarization.')).toBeVisible();
   await expect(page.getByRole('banner').getByRole('link', { name: 'Factory', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Refresh saved results' }).click();
   await expect(page.getByText('No verified workflow proposals yet')).toBeVisible();
@@ -37,6 +37,19 @@ test('Factory shows qualifications and source labels without executing model tex
     expect(await page.evaluate(() => 'factoryInjected' in window)).toBe(false);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
+});
+
+test('Factory explains paused learning and preparation errors without starting work', async ({ page }) => {
+  let learning = 'paused'; const mutations: string[] = [];
+  page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
+  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, proposals: [proposal], failedExtractions: learning === 'error' ? 1 : 0 } }));
+  await page.goto('/factory');
+  await expect(page.getByText('Background learning is paused', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
+  learning = 'error'; await page.getByRole('button', { name: 'Refresh saved results' }).click();
+  await expect(page.getByText('Automatic preparation stopped after an error.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Some summaries could not retain valid process records.', { exact: false })).toBeVisible();
+  expect(mutations).toEqual([]);
 });
 
 test('refresh removes old proposal content when sources become unavailable or the request fails', async ({ page }) => {

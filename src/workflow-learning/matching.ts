@@ -13,6 +13,7 @@ Stage IDs must exist on the corresponding input; do not cite recovery stages as 
 type Fact = { id: string; description: string; basis: string; stage: string | null; role: ProcessFragment['stages'][number]['role'] | null; refs: string[] };
 export interface ContractMatchInput {
   goal: string; context: string; complete: boolean; gaps: string[];
+  limitations?: string[];
   stages: { id: string; action: string }[];
   facts: Fact[];
   secondary: { role: string; action: string; tools: string[]; skills: string[] }[];

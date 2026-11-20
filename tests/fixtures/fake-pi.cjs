@@ -53,6 +53,8 @@ process.stdin.on('end', () => {
     if (control.badCitationSelection) return emit({ selections: value.citation_repairs.map(item => ({ observation: item.observation, evidence: item.candidate_source_ids })) });
     return emit({ selections: value.citation_repairs.map(item => ({ observation: item.observation, evidence: [item.candidate_source_ids[0], item.candidate_source_ids.at(-1)] })) });
   }
+  if (value.task === 'select_workflow_candidates') return emit({ selected: control.workflowSelection ?? value.candidates.slice(0, 1).map(c => c.id) });
+  if (value.task === 'compare_workflow_identity') return emit(control.workflowAssessment || { relation: 'same_workflow_candidate', workflow: { purpose: 'Repair a parser defect', method: ['Reproduce the defect and add a regression test', 'Correct the parser and verify compatibility'], appliesWhen: 'A reproducible parser defect must be repaired without changing the format' }, stagePairs: [{ left: 'S1', right: 'S1' }, { left: 'S2', right: 'S2' }], reason: 'Same purpose and method', limitations: [] });
   if (value.task === 'summarize') {
     let observations;
     if (value.stage === 'chunk') {
@@ -78,7 +80,17 @@ process.stdin.on('end', () => {
     if (control.expandedReferences && value.stage === 'chunk') observations = Array.from({ length: 96 }, (_, index) => ({
       topic: `Synthetic dense task ${index}`, state: 'blocked', summary: 'Unresolved work; deployment was NOT checked. '.repeat(10), evidence: value.allowed_source_ids.slice(0, 16),
     }));
-    emit({ observations, limitations: [] });
+    let process;
+    if (value.stage === 'chunk') {
+      process = { summary: 'No procedural facts asserted by the default synthetic provider', fragments: [], limitations: ['Synthetic default has no workflow'] };
+      if (control.workflowProcess) {
+        const refs = { U: value.input.evidence[0]?.id, I: value.input.evidence[1]?.id, O: value.input.evidence[2]?.id };
+        const remap = (v, key) => Array.isArray(v) ? v.map(x => typeof x === 'string' && ['refs','triggerRefs','outcomeRefs'].includes(key) ? refs[x] : remap(x, key)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, remap(x, k)])) : v;
+        process = remap(control.workflowProcess, '');
+      }
+      if (control.invalidProcess) process = { invented: true };
+    }
+    emit({ observations, limitations: [], ...(process ? { process } : {}) });
   } else if (value.task === 'group_topics') {
     const groups = new Map();
     for (const item of value.input.observations) {

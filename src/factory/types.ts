@@ -11,6 +11,6 @@ export interface FactoryPage {
   proposals: FactoryProposal[];
   nextCursor: number | null;
   unavailable: number;
-  /** The first PR is a read-only preview, not an enabled background learner. */
-  learning: 'not-enabled';
+  learning: 'enabled' | 'paused' | 'error';
+  failedExtractions: number;
 }

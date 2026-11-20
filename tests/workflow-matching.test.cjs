@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const Database=require('better-sqlite3');
 const {examples}=require('./fixtures/workflow-identity-cases.cjs');
 const {examples:legacyExamples}=require('./fixtures/matching-v3-cases.cjs');
-const {contractMatchInput,validateContractAssessment,decideContractMatch,validateProcess,validateProcessEvidence}=require('../dist/workflow-learning');
+const {contractMatchInput,validateContractAssessment,decideContractMatch,validateProcess,validateProcessEvidence,preparedProcess,candidateSelection}=require('../dist/workflow-learning');
 const {loadMatchingCases,evaluateMatchingCase}=require('../dist/workflow-pilot/matching');
 const {initProcessSchema}=require('../dist/db/process-schema');
 const {getDb,closeDb}=require('../dist/db/schema');
@@ -66,6 +66,18 @@ test('complete episode coverage does not turn an observed failed attempt into su
 test('a request with no known main steps cannot support an invented workflow match',()=>{
  const c=examples()[7],x=[c.left,c.right].map(s=>contractMatchInput(s.fragment));
  assert.equal(x[1].stages.length,0);assert.throws(()=>decideContractMatch(assessment(),x),/main stages/);
+});
+test('combined summary process references are decoded without rewriting claim text',()=>{
+ const value=JSON.parse(JSON.stringify({summary:'Process',fragments:[examples()[0].left.fragment],limitations:[]}).replaceAll('"U"','"S1"').replaceAll('"I"','"S2"').replaceAll('"O"','"S3"'));
+ value.fragments[0].stages[0].claims[0].description='S1 remains ordinary text';const original=structuredClone(value);
+ const result=preparedProcess(value,['K-request','K-input','K-result'],['user','toolResult','toolResult']);
+ assert.deepEqual(result.fragments[0].coverage.triggerRefs,['K-request']);assert.deepEqual(result.fragments[0].stages[0].claims[0].refs,['K-input']);
+ assert.equal(result.fragments[0].stages[0].claims[0].description,'S1 remains ordinary text');assert.deepEqual(value,original);
+ assert.throws(()=>preparedProcess(value,['K-request','K-input','K-result'],['user','assistant','toolResult']),/secondary/);
+});
+test('candidate selection cannot invent, duplicate or expand the supplied candidate set',()=>{
+ assert.deepEqual(candidateSelection('{"selected":["C1"]}',['C1']),['C1']);assert.deepEqual(candidateSelection('{"selected":[]}',['C1']),[]);
+ for(const value of [{selected:['C9']},{selected:['C1','C1']},{selected:['C1'],extra:true},{selected:['C1','C2','C3','C4']},['C1']])assert.throws(()=>candidateSelection(JSON.stringify(value),['C1','C2','C3','C4']));
 });
 let dir,store,file,prior;
 beforeEach(()=>{

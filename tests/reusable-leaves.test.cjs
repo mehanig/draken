@@ -593,10 +593,12 @@ for (const interrupted of [false, true]) test(`generateReply same-snapshot midpo
   // split at production budgets, rather than reducing limits for the test.
   fs.writeFileSync(data.file, fs.readFileSync(data.file, 'utf8').replaceAll('x'.repeat(6000), ' '.repeat(5998) + 'x.'));
   const sync = await start(), seed = new SummaryTree(sync, 0, new AbortController().signal);
-  const old = await seed.plannedBatches(sync, false, () => false, undefined, true);
+  const old = await seed.plannedBatches(sync, false, () => false, undefined, true, true);
+  const oldPrefix = await seed.plannedBatches(sync, false, () => false, undefined, false, true);
   const current = await seed.plannedBatches(sync, false, () => false);
   assert.deepEqual(old.map(spec => spec.sources.length), [159, 79, 80, 22]);
-  assert.deepEqual(current.map(spec => spec.sources.length), [159, 158, 1, 22]);
+  assert.deepEqual(oldPrefix.map(spec => spec.sources.length), [159, 158, 1, 22], 'old prompt packing is still reconstructible');
+  assert.deepEqual(current.map(spec => spec.sources.length), [159, 157, 2, 22], 'new packing reserves space for process extraction');
   for (const spec of old) {
     seedLeaf(seed, spec.leafInput.evidence, spec.leafInput.background);
     seed.register(spec);
