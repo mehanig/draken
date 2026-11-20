@@ -8,9 +8,10 @@
 .factory-group-heading h2, .factory-location-path { margin: 0; }
 .factory-group-heading .factory-line { flex-wrap: wrap; }
 .factory-card { padding: 24px 0; border-bottom: 1px solid currentColor; }
-.factory-card h2 { line-height: 1.3; }
+.factory-card > h2 { line-height: 1.35; text-transform: none; letter-spacing: -.02em; font-weight: 700; margin-bottom: 8px; }
+.factory-group-count { margin-left: auto; }
 .factory-card li { margin: 10px 0; }
-.factory-card > details:not(.info-disclosure) > summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
+.factory-card > details > summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
 .factory-evidence { margin: 16px 0; padding: 0 16px; border-left: 2px solid currentColor; }
 .factory-refs { display: block; opacity: .75; }
 @media (max-width: 600px) { .factory-page { padding: 20px 16px 56px; } .factory-page ol, .factory-page ul { padding-left: 22px; } }

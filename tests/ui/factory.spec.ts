@@ -18,15 +18,11 @@ test('Factory is read-only, direct-linkable and does not change shared navigatio
   await page.goto('/factory');
   await expect(page.getByRole('heading', { name: 'Factory', exact: true })).toBeVisible();
   await expect(page.getByText('No workflows yet')).toBeVisible();
-  await expect(page.getByText('Background learning enabled', { exact: true })).toBeVisible();
-  const help = page.locator('summary[aria-label="About workflow learning"]');
-  await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeHidden();
-  await help.click();
-  await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeVisible();
-  await help.press('Escape');
-  await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeHidden();
+  await expect(page.locator('.factory-page .info-disclosure')).toHaveCount(0);
+  await expect(page.getByText('Background learning enabled', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('New summaries retain process records.', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('banner').getByRole('link', { name: 'Factory', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Refresh saved results' }).click();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByText('No workflows yet')).toBeVisible();
   await page.reload(); await expect(page.getByRole('main', { name: 'Factory' })).toBeVisible();
   expect(mutations).toEqual([]);
@@ -40,11 +36,11 @@ test('Factory groups repositories and non-Git folders, including older pages', a
   await page.goto('/factory');
   await expect(page.getByRole('region', { name: '/projects/backup', exact: true })).toContainText('Git repository');
   await expect(page.getByRole('region', { name: '/notes/backup', exact: true })).toContainText('Not a Git repository');
-  await page.getByRole('button', { name: 'Load older saved results' }).click();
+  await page.getByRole('button', { name: 'Load more' }).click();
   await expect(page.locator('.factory-group')).toHaveCount(2);
   await expect(page.getByRole('region', { name: '/projects/backup', exact: true }).locator('article')).toHaveCount(2);
   await expect(page.getByRole('region', { name: '/notes/backup', exact: true }).locator('article')).toHaveCount(1);
-  await expect(page.getByText('Location comes from the session', { exact: false }).first()).toBeHidden();
+  await expect(page.getByText('Location comes from the session', { exact: false })).toHaveCount(0);
 });
 
 test('Factory shows qualifications and source labels without executing model text; mobile layout fits', async ({ page }) => {
@@ -53,17 +49,12 @@ test('Factory shows qualifications and source labels without executing model tex
     await page.setViewportSize({ width, height: 900 }); await page.goto('/factory');
     await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
     await expect(page.getByText('One result is reported, not independently observed.')).toBeVisible();
-    await page.getByText('Compared records and supporting evidence').click();
+    await page.getByText('Evidence', { exact: true }).click();
     await expect(page.getByText('Initiating request missing')).toBeVisible();
     await expect(page.getByText('<script>window.factoryInjected=true</script>', { exact: false })).toBeVisible();
     expect(await page.evaluate(() => 'factoryInjected' in window)).toBe(false);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    const help = page.locator('summary[aria-label="About workflow learning"]');
-    await help.click();
-    await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await help.press('Escape');
-    await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeHidden();
+    await expect(page.locator('.factory-page .info-disclosure')).toHaveCount(0);
   }
 });
 
@@ -72,14 +63,12 @@ test('Factory explains paused learning and preparation errors without starting w
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
   await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, proposals: [proposal], failedExtractions: learning === 'error' ? 1 : 0 } }));
   await page.goto('/factory');
-  await expect(page.getByText('Background learning paused', { exact: true })).toBeVisible();
+  await expect(page.getByText('Learning paused', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
-  learning = 'error'; await page.getByRole('button', { name: 'Refresh saved results' }).click();
-  await expect(page.getByText('Preparation stopped', { exact: true })).toBeVisible();
-  await expect(page.getByText('1 failed attempt', { exact: true })).toBeVisible();
-  await expect(page.getByText('Failed extraction attempts are kept for diagnosis', { exact: false })).toBeHidden();
-  await page.locator('summary[aria-label="About process extraction failures"]').click();
-  await expect(page.getByText('Failed extraction attempts are kept for diagnosis', { exact: false })).toBeVisible();
+  learning = 'error'; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Learning stopped.');
+  await expect(page.getByRole('link', { name: 'Retry in Settings' })).toHaveAttribute('href', '/settings');
+  await expect(page.getByText('1 failed attempt', { exact: true })).toHaveCount(0);
   expect(mutations).toEqual([]);
 });
 
@@ -89,10 +78,10 @@ test('refresh removes old proposal content when sources become unavailable or th
     ? route.fulfill({ status: 503, json: { error: 'Source verification unavailable' } })
     : route.fulfill({ json: phase === 0 ? { ...empty, proposals: [proposal] } : { ...empty, unavailable: 1 } }));
   await page.goto('/factory'); await expect(page.getByText('Verify a database backup', { exact: true })).toBeVisible();
-  phase = 1; await page.getByRole('button', { name: 'Refresh saved results' }).click();
+  phase = 1; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByText('Verify a database backup', { exact: true })).toHaveCount(0);
   await expect(page.getByText('1 saved result unavailable', { exact: true })).toBeVisible();
-  phase = 2; await page.getByRole('button', { name: 'Refresh saved results' }).click();
+  phase = 2; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Source verification unavailable');
   await expect(page.getByText('Verify a database backup', { exact: true })).toHaveCount(0);
 });

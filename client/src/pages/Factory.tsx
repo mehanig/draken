@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { factory } from '../api';
-import { InfoDisclosure } from '../components/InfoDisclosure';
 import type { FactoryPage } from '../../../src/factory/types';
 import '../styles/factory.css';
 
@@ -28,33 +27,29 @@ export function Factory() {
     groups.get(proposal.location.key)!.proposals.push(proposal);
   }
   return <main className="factory-page" aria-label="Factory" aria-busy={loading}>
-    <div className="factory-heading"><div className="factory-line"><h1>Factory</h1>
-      <InfoDisclosure label="About workflow learning"><p>New summaries retain process records. Background learning compares them and saves workflow proposals here. No manual sync or page visit is needed.</p><p>Proposals need comparable records; waiting alone does not guarantee a match. Existing cached summaries are not reprocessed. Refresh only reads saved results.</p></InfoDisclosure></div>
-      <button type="button" disabled={loading} onClick={() => void load()}>Refresh saved results</button></div>
+    <div className="factory-heading"><h1>Factory</h1>
+      <button type="button" disabled={loading} onClick={() => void load()}>Refresh</button></div>
     {error && <p role="alert">{error}</p>}
-    {loading && <p role="status">Checking saved proposals and their source access…</p>}
+    {loading && <p role="status">Loading…</p>}
     {data && <>
-      <div className="factory-line" role="status"><span>{data.learning === 'enabled' ? 'Background learning enabled' : data.learning === 'paused' ? 'Background learning paused' : 'Preparation stopped'}</span>
-        <InfoDisclosure label="About background learning"><p>{data.learning === 'enabled' ? 'Learning uses automatic summarization and its existing limits. Enabled does not mean a model call is running now.' : data.learning === 'paused' ? 'Automatic preparation is disabled. Saved proposals remain available.' : 'Preparation stopped after an error. Completed work is retained. Retry automatic preparation in Settings.'}</p></InfoDisclosure></div>
-      {data.failedExtractions > 0 && <div className="factory-line" role="status"><span>{data.failedExtractions} failed {data.failedExtractions === 1 ? 'attempt' : 'attempts'}</span><InfoDisclosure label="About process extraction failures"><p>Failed extraction attempts are kept for diagnosis, even when a later attempt succeeds. Ordinary summaries are retained. Failed records are not used for matching.</p></InfoDisclosure></div>}
-      {data.unavailable > 0 && <div className="factory-line" role="status"><span>{data.unavailable} saved {data.unavailable === 1 ? 'result' : 'results'} unavailable</span><InfoDisclosure label="About unavailable results"><p>Source access or saved evidence could not be verified. Those results are not shown.</p></InfoDisclosure></div>}
+      {data.learning === 'paused' && <p className="muted small" role="status">Learning paused</p>}
+      {data.learning === 'error' && <p role="status">Learning stopped. <a href="/settings">Retry in Settings</a>.</p>}
+      {data.unavailable > 0 && <p className="muted small" role="status">{data.unavailable} saved {data.unavailable === 1 ? 'result' : 'results'} unavailable</p>}
       {!data.proposals.length && <section className="factory-card"><h2>No workflows yet</h2></section>}
       {[...groups.values()].map(group => <section className="factory-group" key={group.location.key} aria-label={group.location.path}>
         <header className="factory-group-heading"><div className="factory-line"><h2>{group.location.name}</h2>
           <span className="muted small">{group.location.kind === 'repository' ? 'Git repository' : group.location.kind === 'folder' ? 'Not a Git repository' : 'Location unavailable'}</span>
-          <InfoDisclosure label={`About location ${group.location.name}`}><p>Location comes from the session’s recorded working folder, not guesses from its text. Subfolders and Git worktrees share their repository. Separate repositories and non-Git folders are not compared. This does not infer where individual commands ran. Older records use the current layout of their recorded folder.</p></InfoDisclosure></div>
+          <span className="muted small factory-group-count">{group.proposals.length} {group.proposals.length === 1 ? 'proposal' : 'proposals'}</span></div>
           <p className="muted small factory-location-path">{group.location.path}</p></header>
       {group.proposals.map(proposal => {
         const workflow = proposal.decision.assessment.workflow;
         if (!workflow) return null;
         return <article className="factory-card" key={proposal.id}>
-          <div className="factory-line muted small"><span>Proposal</span><InfoDisclosure label="About workflow proposals"><p>This is a proposed workflow, not approval to execute it. Factory does not run workflows.</p></InfoDisclosure></div>
-          <h2>{workflow.purpose}</h2><h3>When it applies</h3><p>{workflow.appliesWhen}</p>
-          <h3>Method</h3><ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
-          {!!proposal.decision.assessment.limitations.length && <><h3>What is uncertain</h3><ul>{proposal.decision.assessment.limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
-          <details><summary>Compared records and supporting evidence</summary>
+          <h2>{workflow.purpose}</h2><p className="muted">{workflow.appliesWhen}</p>
+          <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
+          {!!proposal.decision.assessment.limitations.length && <><h3>Limitations</h3><ul>{proposal.decision.assessment.limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
+          <details><summary>Evidence</summary>
             <p>{proposal.decision.assessment.reason}</p>
-            <InfoDisclosure label="About record coverage"><p>Complete episode coverage is not proof of success. Failed attempts can follow the same workflow. A shared subprocedure does not make its parent jobs the same workflow.</p></InfoDisclosure>
             {proposal.evidence.map((input, i) => <section className="factory-evidence" key={i}>
               <h3>{input.goal}</h3><p>{input.context}</p>
               <p>{input.complete ? 'Episode boundaries recorded.' : 'Episode coverage is incomplete.'}</p>
@@ -66,7 +61,7 @@ export function Factory() {
           </details>
         </article>;
       })}</section>)}
-      {data.nextCursor !== null && <button type="button" disabled={loading} onClick={() => void load(data.nextCursor!)}>Load older saved results</button>}
+      {data.nextCursor !== null && <button type="button" disabled={loading} onClick={() => void load(data.nextCursor!)}>Load more</button>}
     </>}
   </main>;
 }

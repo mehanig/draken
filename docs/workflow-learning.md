@@ -17,7 +17,7 @@ There is no independent scheduler, provider client or fresh allowance for the de
 
 Open `/factory` directly. Existing pages and shared navigation are unchanged. Reads and “Refresh saved results” start no inference, synchronization or jobs.
 
-Factory shows purpose, applicability, proposed steps, outcome qualifications and compared evidence. It reports whether learning is enabled, paused or stopped by a preparation error. Explanations are collapsed behind the existing ⓘ controls; the main page shows short status labels and workflow content. The page remains a proposal viewer, not an executor or an approval mechanism.
+Factory shows purpose, applicability, proposed steps, outcome qualifications and compared evidence. It reports whether learning is enabled, paused or stopped by a preparation error. The main page shows repository groups, proposal counts, workflow applicability and steps. Generic explanations, info icons and historical failure counters are omitted. Actual limitations remain visible, evidence is expandable, and stopped learning has a short link to its retry settings. The page remains a proposal viewer, not an executor or an approval mechanism.
 
 `GET /api/factory` uses the existing authenticated, same-origin, no-store API boundary. All supplied source dependencies—including uncited originals and unselected candidates seen during selection—are revalidated before inference, after inference and before serving a proposal. Unavailable derived content is withheld entirely. Source reads use the public evidence contract and application wiring in `src/evidence-adapter.ts`; the production reader no longer imports the pilot reader or opens external experiment databases.
 
@@ -27,7 +27,7 @@ Factory groups proposals by the Git repository containing the session’s record
 
 Candidate selection filters by this location **before** taking up to 24 candidates. Different repositories and different non-Git folders are never compared. Existing comparisons with a pair spanning locations are withheld. Non-Git directories are labelled **Not a Git repository** and show their full path; missing or unreadable locations are withheld, not guessed to be non-Git.
 
-New records retain their location identity, and location changes during extraction or matching reject the result. Older records without that metadata use the current layout of their verified recorded folder. This is session-location attribution, not an inference about where individual commands ran. The distinction is also available through the page’s info icon.
+New records retain their location identity, and location changes during extraction or matching reject the result. Older records without that metadata use the current layout of their verified recorded folder. This is session-location attribution, not an inference about where individual commands ran. The group path identifies the recorded location; this attribution rule is documented here rather than repeated on every card.
 
 ## Storage and limits
 
@@ -56,4 +56,4 @@ Local validation passed 771 automated tests and 15 selected browser tests, plus 
 
 Two real-provider smoke runs used the same two controlled parser-repair examples in separate isolated data directories, not user history. Each completed the background pipeline and produced one source-verified Factory proposal using `openai/gpt-6-luna` in four calls. Total cost was $0.0023014 across eight calls. Unchanged repeats made no further calls; the final saved proposal was also verified with the then-current reader while no provider was available. This is integration evidence, not a general accuracy benchmark. Private smoke-test stores and transcripts are not part of the PR.
 
-An explicitly requested local preparation of four saved leaves from real release history produced two verified proposals. Two earlier extraction-format failures were retained; after clarifying the string-array contract, the successful run used 14 calls. This was a selected starting set, not automatic discovery across all history. The live page was checked at desktop and mobile widths with its explanations collapsed.
+An explicitly requested local preparation of four saved leaves from real release history produced two verified proposals. Two earlier extraction-format failures were retained; after clarifying the string-array contract, the successful run used 14 calls. This was a selected starting set, not automatic discovery across all history. The live page was checked at desktop and mobile widths. Its current presentation removes generic explanatory copy and info icons entirely.
