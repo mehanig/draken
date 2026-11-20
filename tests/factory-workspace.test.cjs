@@ -29,13 +29,13 @@ test('workspace API reads saved results without executing commands and refuses d
  const {readWorkspaces,startWorkspace,cancelWorkspace}=require('../dist/factory/workspace');const {workflowLocation}=require('../dist/factory/location');const f=fixture(),prior={...process.env};
  try{
   Object.assign(process.env,{DRAKEN_DATA_DIR:path.join(f.dir,'data'),DRAKEN_WORKSPACE_REPO:f.dir,DRAKEN_WORKSPACE_ALLOWED_IMAGES:JSON.stringify([image]),DRAKEN_DOCKER_BIN:'/not-executed',DRAKEN_DOCKER_HOST:'unix:///not-executed'});
-  assert.deepEqual(readWorkspaces().runs,[]);const id='12345678-1234-4234-8234-123456789abc',dir=path.join(f.dir,'data/factory-workspaces',id);fs.mkdirSync(path.join(dir,'work'),{recursive:true});
+  assert.deepEqual((await readWorkspaces()).runs,[]);const id='12345678-1234-4234-8234-123456789abc',dir=path.join(f.dir,'data/factory-workspaces',id);fs.mkdirSync(path.join(dir,'work'),{recursive:true});
   fs.writeFileSync(path.join(dir,'request.json'),JSON.stringify({id,ref:'HEAD',propose:false,location:workflowLocation(f.dir).key,createdAt:new Date().toISOString()}));
   fs.writeFileSync(path.join(dir,'work/result.json'),JSON.stringify({status:'completed',modelCalls:0}));
-  assert.equal(readWorkspaces().runs[0].status,'completed');assert.equal((await startWorkspace({requestId:id,ref:'HEAD',propose:false})).id,id);
+  assert.equal((await readWorkspaces()).runs[0].status,'completed');assert.equal((await startWorkspace({requestId:id,ref:'HEAD',propose:false})).id,id);
   await assert.rejects(startWorkspace({requestId:id,ref:'other',propose:false}),/already used/);
   await assert.rejects(startWorkspace({requestId:'../../escape',ref:'HEAD',propose:false}),/request ID/);assert.throws(()=>cancelWorkspace('../../escape'),/Invalid/);
-  delete process.env.DRAKEN_WORKSPACE_REPO;assert.equal(readWorkspaces().available,false);assert.deepEqual(readWorkspaces().runs,[]);
+  delete process.env.DRAKEN_WORKSPACE_REPO;assert.equal((await readWorkspaces()).available,false);assert.deepEqual((await readWorkspaces()).runs,[]);
  }finally{for(const key of Object.keys(process.env))if(!(key in prior))delete process.env[key];Object.assign(process.env,prior);f.clean();}
 });
 test('missing declaration stops before Docker or inference even with the old proposal flag',()=>{

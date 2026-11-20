@@ -117,6 +117,17 @@ test('execution reads saved progress without invoking a model and withholds it a
  for(const table of ['sync_runs','background_runs'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
  db.prepare("UPDATE agent_sessions SET included=0 WHERE id='episode-1'").run();await assert.rejects(readExecution(signal()));
 });
+test('agent workspace results and logs require fresh workflow source access, including uncited dependencies',async()=>{
+ require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);const {id}=await seed();const {readDiscovery}=require('../dist/factory/enrichment');const {readWorkspaces,workspaceLog,startWorkspace}=require('../dist/factory/workspace');const discovery=await readDiscovery(id,signal());
+ Object.assign(process.env,{DRAKEN_WORKSPACE_REPO:path.join(dir,'work'),DRAKEN_WORKSPACE_ALLOWED_IMAGES:'["approved"]',DRAKEN_DOCKER_BIN:'/not-called',DRAKEN_DOCKER_HOST:'unix:///not-called',DRAKEN_FACTORY_PI_SDK:__filename,DRAKEN_FACTORY_AGENT_MODEL:'fixture/test'});
+ const requestId='12345678-1234-4234-8234-123456789abc',run=path.join(dir,'factory-workspaces',requestId);fs.mkdirSync(path.join(run,'work'),{recursive:true});
+ fs.writeFileSync(path.join(run,'request.json'),JSON.stringify({id:requestId,ref:'HEAD',propose:false,workflowId:id,revision:discovery.revision,task:'Repair the parser',location:discovery.locationKey,createdAt:new Date().toISOString()}));
+ fs.writeFileSync(path.join(run,'work/result.json'),JSON.stringify({status:'completed',modelCalls:2,sessionId:'fixture'}));fs.writeFileSync(path.join(run,'work/events.jsonl'),JSON.stringify({type:'stage-result',name:'Test',code:0,stdout:'Verified fixture output'})+'\n');
+ assert.equal((await readWorkspaces()).runs[0].workflowId,id);assert.match((await workspaceLog(requestId)).text,/fixture output/);
+ assert.equal((await startWorkspace({requestId,ref:'HEAD',workflowId:id,task:'Repair the parser'},'fixture-token')).id,requestId);
+ db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();assert.deepEqual((await readWorkspaces()).runs,[]);await assert.rejects(workspaceLog(requestId),/source changed|unavailable/);
+ for(const table of ['sync_runs','background_runs'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
+});
 test('execution refuses invalid input, unauthenticated starts and unknown cancellations',async()=>{
  const {startExecution,cancelExecution}=require('../dist/factory/execution');
  await assert.rejects(startExecution({requestId:'../../escape',version:'0.10.0',regenerate:true},'token',signal()),/request ID/);

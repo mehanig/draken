@@ -4,9 +4,12 @@ import { spawn } from 'node:child_process';
 import { getDataDir } from '../data-dir';
 import { HttpError } from '../errors';
 import { workflowLocation } from './location';
+import { readDiscovery } from './enrichment';
+import { sessionPlan } from '../factory-enrichment';
+import { claimFactoryExecution } from './execution-owner';
 
 import type { WorkspaceRun, WorkspacePage } from './workspace-types';
-interface Request { id: string; ref: string; propose: boolean; location: string; createdAt: string }
+interface Request { id: string; ref: string; propose: boolean; location: string; createdAt: string; workflowId?: string; revision?: string; task?: string }
 const jobs = new Map<string, { cancel(): void; stopped: Promise<void> }>();
 let starting = false, stopping = false;
 const root = () => path.join(getDataDir(), 'factory-workspaces');
@@ -19,14 +22,14 @@ function config() {
   const location = repository ? workflowLocation(repository) : null;
   const available = process.platform !== 'win32' && location?.kind === 'repository' && !!process.env.DRAKEN_WORKSPACE_ALLOWED_IMAGES
     && !!process.env.DRAKEN_DOCKER_BIN && !!process.env.DRAKEN_DOCKER_HOST && fs.existsSync(entry);
-  return { repository, location, available: !!available };
+  return { repository, location, available: !!available, agentAvailable: !!available && !!process.env.DRAKEN_FACTORY_PI_SDK && fs.existsSync(process.env.DRAKEN_FACTORY_PI_SDK) && !!process.env.DRAKEN_FACTORY_AGENT_MODEL };
 }
 function requests(): Request[] {
   return fs.existsSync(root()) ? fs.readdirSync(root()).filter(validId).map(id => read<Request>(path.join(root(), id, 'request.json'))).filter((r): r is Request => !!r).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
 }
 function view(request: Request): WorkspaceRun {
   const dir = path.join(root(), request.id), work = path.join(dir, 'work');
-  const result = read<{ status: string; detail?: string; commit?: string; modelCalls: number | null }>(path.join(work, 'result.json'));
+  const result = read<{ status: string; detail?: string; commit?: string; modelCalls: number | null; sessionId?: string }>(path.join(work, 'result.json'));
   const source = read<{ commit: string }>(path.join(work, 'source.json'));
   const exit = read<{ code: number | null; cancelled: boolean }>(path.join(dir, 'exit.json'));
   const stages: WorkspaceRun['stages'] = []; const progress = path.join(work, 'progress.jsonl');
@@ -36,54 +39,81 @@ function view(request: Request): WorkspaceRun {
     if (event.type === 'stage-started') stages.push({ name: event.name, status: 'running' });
     if (event.type === 'stage-result') { const stage = [...stages].reverse().find(s => s.name === event.name); if (stage) stage.status = event.code === 0 ? 'passed' : 'failed'; }
   }
-  const status = result?.status || (jobs.has(request.id) ? 'running' : exit && !stages.length ? exit.cancelled ? 'cancelled' : 'failed' : 'interrupted');
+  const status = result?.status || (jobs.has(request.id) ? 'running' : exit && !stages.length && !fs.existsSync(path.join(work, 'resources.json')) ? exit.cancelled ? 'cancelled' : 'failed' : 'interrupted');
   if (status !== 'running') for (const stage of stages) if (stage.status === 'running') stage.status = 'unverified';
   const patch = path.join(work, 'changes.patch');
-  return { id: request.id, ref: request.ref, commit: source?.commit || '', status, detail: result?.detail || (status === 'interrupted' ? 'Cleanup is not confirmed. Inspect the workspace before another run.' : status === 'failed' ? 'Repository checks failed. See the private run log.' : ''),
-    modelCalls: result?.modelCalls ?? (request.propose ? null : 0), createdAt: request.createdAt, stages, patchBytes: fs.existsSync(patch) ? fs.statSync(patch).size : 0 };
+  const accounting = read<{modelCalls: number}>(path.join(work, 'agent/status.json'));
+  const session = read<{id: string}>(path.join(work, 'agent/session.json'));
+  return { id: request.id, ref: request.ref, workflowId: request.workflowId, task: request.task, sessionId: session?.id || result?.sessionId, commit: source?.commit || '', status, detail: result?.detail || (status === 'interrupted' ? 'Cleanup is not confirmed. Inspect the workspace before another run.' : status === 'failed' ? 'Repository checks failed. See the private run log.' : ''),
+    modelCalls: result?.modelCalls ?? accounting?.modelCalls ?? (request.propose ? null : 0), createdAt: request.createdAt, stages, patchBytes: fs.existsSync(patch) ? fs.statSync(patch).size : 0 };
 }
-export function readWorkspaces(): WorkspacePage {
-  const settings = config();
-  return { available: settings.available, repository: settings.available ? settings.repository : '', runs: settings.available ? requests().filter(r => r.location === settings.location!.key).slice(0, 10).map(view) : [] };
+async function assertSource(request: Request): Promise<void> {
+  if (!request.workflowId) return;
+  try { const current = await readDiscovery(request.workflowId, new AbortController().signal); if (current.revision !== request.revision || current.locationKey !== request.location) throw Error('Changed'); }
+  catch { throw new HttpError(409, 'Workflow source changed or is unavailable. Check history access in Settings.'); }
 }
-export function workspaceLog(id: string): { text: string } {
+export async function readWorkspaces(): Promise<WorkspacePage> {
+  const settings = config(), runs: WorkspaceRun[] = [], checked = new Map<string, boolean>();
+  if (settings.available) for (const request of requests().filter(r => r.location === settings.location!.key).slice(0, 10)) {
+    const key = `${request.workflowId}/${request.revision}/${request.location}`;
+    if (!checked.has(key)) { try { await assertSource(request); checked.set(key, true); } catch { checked.set(key, false); } }
+    if (checked.get(key)) runs.push(view(request));
+  }
+  return { available: settings.available, agentAvailable: settings.agentAvailable, locationKey: settings.location?.key || '', repository: settings.available ? settings.repository : '', runs };
+}
+export async function workspaceLog(id: string): Promise<{ text: string }> {
   if (!validId(id)) throw new HttpError(400, 'Invalid workspace run ID.');
   const settings = config(), item = requests().find(r => r.id === id && r.location === settings.location?.key);
   if (!settings.available || !item) throw new HttpError(404, 'Workspace log unavailable.');
+  await assertSource(item);
   const file = path.join(root(), id, 'work/events.jsonl'); let text = '';
   if (fs.existsSync(file)) for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
     try { const event = JSON.parse(line); if (event.type === 'stage-result') text = (text + `\n${event.name} — exit ${event.code}\n${event.stdout || ''}${event.stderr || ''}`).slice(-64000); }
     catch { /* Last record may still be being written. */ }
   }
+  const agent = read<{summary?: string; detail?: string}>(path.join(root(), id, 'work/agent/result.json'));
+  if (agent) text += '\nAgent: ' + (agent.summary || agent.detail || 'No final summary');
   if (!text) text = view(item).detail || 'No completed command output yet.';
   return { text };
 }
-export async function startWorkspace(body: unknown): Promise<WorkspaceRun> {
-  const input = body as { requestId?: unknown; ref?: unknown; propose?: unknown } | null;
+export async function startWorkspace(body: unknown, token = ''): Promise<WorkspaceRun> {
+  const input = body as { requestId?: unknown; ref?: unknown; propose?: unknown; workflowId?: unknown; task?: unknown } | null;
   if (!input || !validId(input.requestId) || typeof input.ref !== 'string' || !input.ref || input.ref.startsWith('-') || input.ref.length > 200 || /[\0\r\n]/.test(input.ref) || (input.propose !== undefined && input.propose !== false)) throw new HttpError(400, 'Provide a commit or branch and a run request ID.');
   if (starting || stopping) throw new HttpError(409, 'Workspace execution is busy.');
-  starting = true;
+  if (input.task !== undefined && input.workflowId === undefined) throw new HttpError(400, 'A task requires a selected workflow.');
+  if (input.workflowId !== undefined && (typeof input.workflowId !== 'string' || !/^[a-f0-9]{64}$/.test(input.workflowId) || typeof input.task !== 'string' || !input.task.trim() || input.task.length > 4000)) throw new HttpError(400, 'Provide a workflow and a concrete task.');
+  starting = true; let release: (() => void) | undefined;
   try {
     const settings = config(); if (!settings.available) throw new HttpError(409, 'Repository workspace is not configured or is unavailable.');
+    let plan;
+    if (typeof input.workflowId === 'string') {
+      if (!settings.agentAvailable || !token) throw new HttpError(409, 'An authenticated session and configured Factory Pi agent are required.');
+      const discovery = await readDiscovery(input.workflowId, new AbortController().signal);
+      if (discovery.locationKey !== settings.location!.key) throw new HttpError(409, 'Workflow belongs to a different repository.');
+      plan = sessionPlan(discovery, input.task as string, settings.location!.key);
+    }
     const existing = requests(), prior = existing.find(r => r.id === input.requestId);
     if (prior) {
-      if (prior.ref !== input.ref || prior.propose !== false || prior.location !== settings.location!.key) throw new HttpError(409, 'Run request ID already used.');
+      if (prior.ref !== input.ref || prior.propose !== false || prior.location !== settings.location!.key || prior.workflowId !== input.workflowId || prior.task !== input.task || prior.revision !== plan?.workflow.revision) throw new HttpError(409, 'Run request ID already used.');
       return view(prior);
     }
     if (jobs.size || existing.some(r => ['running', 'interrupted'].includes(view(r).status))) throw new HttpError(409, 'A workspace is running or needs cleanup.');
+    release = claimFactoryExecution(input.requestId);
     fs.mkdirSync(root(), { recursive: true, mode: 0o700 }); const dir = path.join(root(), input.requestId); fs.mkdirSync(dir, { mode: 0o700 });
-    const request: Request = { id: input.requestId, ref: input.ref, propose: false, location: settings.location!.key, createdAt: new Date().toISOString() }; save(path.join(dir, 'request.json'), request);
+    const request: Request = { id: input.requestId, ref: input.ref, propose: false, location: settings.location!.key, createdAt: new Date().toISOString(), ...(plan ? { workflowId: plan.workflow.id, revision: plan.workflow.revision, task: plan.task } : {}) }; save(path.join(dir, 'request.json'), request);
+    const host = process.env.DRAKEN_HOST || '127.0.0.1', address = ['0.0.0.0', '::'].includes(host) ? '127.0.0.1' : host;
+    if (plan) save(path.join(dir, 'brief.json'), { plan, authorization: { kind: 'discovery', origin: `http://${address.includes(':') ? `[${address}]` : address}:${process.env.DRAKEN_PORT || 40333}` } });
     const log = fs.openSync(path.join(dir, 'run.log'), 'wx', 0o600);
-    const child = spawn(process.execPath, [entry, settings.repository, input.ref, path.join(dir, 'work')], { cwd: path.resolve(__dirname, '../..'),
-      env: { ...process.env, DRAKEN_WORKSPACE_PROPOSE: 'false', DRAKEN_WORKSPACE_LOCATION_KEY: request.location }, stdio: ['ignore', log, log] }); fs.closeSync(log);
-    let cancelled = false;
+    const child = spawn(process.execPath, [entry, settings.repository, input.ref, path.join(dir, 'work'), ...(plan ? [path.join(dir, 'brief.json')] : [])], { cwd: path.resolve(__dirname, '../..'),
+      env: { ...process.env, DRAKEN_WORKSPACE_PROPOSE: 'false', DRAKEN_WORKSPACE_LOCATION_KEY: request.location, ...(plan ? { DRAKEN_FACTORY_TOKEN: token } : {}) }, stdio: ['ignore', log, log] }); fs.closeSync(log);
+    let cancelled = false; const releaseRun = release; release = undefined;
     const stopped = new Promise<void>(resolve => {
-      const done = (code: number | null) => { try { if (!fs.existsSync(path.join(dir, 'exit.json'))) save(path.join(dir, 'exit.json'), { code, cancelled }); } catch { console.error('Workspace exit could not be recorded.'); } jobs.delete(request.id); resolve(); };
+      const done = (code: number | null) => { try { if (!fs.existsSync(path.join(dir, 'exit.json'))) save(path.join(dir, 'exit.json'), { code, cancelled }); } catch { console.error('Workspace exit could not be recorded.'); } jobs.delete(request.id); releaseRun?.(); resolve(); };
       child.once('error', () => done(1)); child.once('close', done);
     });
     jobs.set(request.id, { stopped, cancel: () => { cancelled = true; child.kill('SIGTERM'); } });
     return view(request);
-  } finally { starting = false; }
+  } finally { release?.(); starting = false; }
 }
 export function cancelWorkspace(id: string): void {
   if (!validId(id)) throw new HttpError(400, 'Invalid workspace run ID.');

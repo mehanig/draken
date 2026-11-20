@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { factory } from '../api';
-import { FactoryWorkspace } from '../components/FactoryWorkspace';
+import { FactoryWorkspace, useFactoryWorkspaces } from '../components/FactoryWorkspace';
 import { FactoryExecutionPanel, useFactoryExecution } from '../components/FactoryExecution';
 import type { FactoryPage } from '../../../src/factory/types';
 import '../styles/factory.css';
 
 export function Factory() {
+  const workspaces = useFactoryWorkspaces();
   const { execution, executionError, refreshExecution } = useFactoryExecution();
   const [data, setData] = useState<FactoryPage | null>(null);
   const [error, setError] = useState(''), [loading, setLoading] = useState(false);
@@ -32,11 +33,11 @@ export function Factory() {
   }
   return <main className="factory-page" aria-label="Factory" aria-busy={loading}>
     <div className="factory-heading"><h1>Factory</h1>
-      <button type="button" disabled={loading} onClick={() => { void load(); void refreshExecution(); }}>Refresh</button></div>
+      <button type="button" disabled={loading} onClick={() => { void load(); void refreshExecution(); void workspaces.refresh(); }}>Refresh</button></div>
     {error && <p role="alert">{error}</p>}
     {executionError && <p role="alert">Execution unavailable: {executionError}</p>}
     {loading && <p role="status">Loading…</p>}
-    <FactoryWorkspace />
+    <FactoryWorkspace state={workspaces} />
     {data && !executionError && <>
       {data.learning === 'paused' && <p className="muted small" role="status">Learning paused</p>}
       {data.learning === 'error' && <p role="status">Learning stopped. <a href="/settings">Retry in Settings</a>.</p>}
@@ -54,7 +55,8 @@ export function Factory() {
           <h2>{workflow.purpose}</h2><p className="muted">{workflow.appliesWhen}</p>
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
           {!!proposal.decision.assessment.limitations.length && <><h3>Limitations</h3><ul>{proposal.decision.assessment.limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
-          {execution?.proposalId === proposal.id && <FactoryExecutionPanel data={execution} refresh={refreshExecution} />}
+          <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} purpose={workflow.purpose} />
+          {!workspaces.data?.agentAvailable && execution?.proposalId === proposal.id && <FactoryExecutionPanel data={execution} refresh={refreshExecution} />}
           <details><summary>Evidence</summary>
             <p>{proposal.decision.assessment.reason}</p>
             {proposal.evidence.map((input, i) => <section className="factory-evidence" key={i}>

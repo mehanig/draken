@@ -4,7 +4,7 @@ test('enrichment has only internal imports and works outside Draken with injecte
  const root=path.resolve(__dirname,'..'),source=path.join(root,'src/factory-enrichment');
  for(const file of fs.readdirSync(source)){
   const text=fs.readFileSync(path.join(source,file),'utf8');
-  for(const match of text.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*['"]([^'"]+)['"]/g))assert.match(match[1],/^\.\/(?:contracts|enrich|runner)$/,`${file}: ${match[1]}`);
+  for(const match of text.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*['"]([^'"]+)['"]/g))assert.match(match[1],/^\.\/(?:contracts|enrich|runner|session)$/,`${file}: ${match[1]}`);
  }
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'factory-enrichment-proof-'));
  try{

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { getDataDir } from '../data-dir';
 import { HttpError } from '../errors';
+import { claimFactoryExecution } from './execution-owner';
 import { readDiscovery as readSourceDiscovery } from './enrichment';
 import type { Enrichment } from '../factory-enrichment';
 import type { FactoryExecution, FactoryRun } from './execution-types';
@@ -88,7 +89,7 @@ export async function startExecution(body: unknown, token: string, signal: Abort
   if (!input || !validId(input.requestId) || typeof input.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(input.version)
     || input.version.length > 40 || typeof input.regenerate !== 'boolean') throw new HttpError(400, 'A release version and run request ID are required.');
   if (starting || stopping) throw new HttpError(409, 'Factory execution is busy.');
-  starting = true;
+  starting = true; let release: (() => void) | undefined;
   try {
     const settings = config();
     if (!settings.available || !settings.proposalId) throw new HttpError(409, settings.reason);
@@ -103,6 +104,7 @@ export async function startExecution(body: unknown, token: string, signal: Abort
     const reuse = input.regenerate ? undefined : planDirectory(items.filter(item => item.revision === discovery.revision && item.proposalId === discovery.id));
     if (!input.regenerate && !reuse) throw new HttpError(409, 'Generate a plan before running this workflow.');
     signal.throwIfAborted();
+    release = claimFactoryExecution(input.requestId);
     fs.mkdirSync(root(), { recursive: true, mode: 0o700 });
     const dir = path.join(root(), input.requestId); fs.mkdirSync(dir, { mode: 0o700 });
     const item: Saved = { id: input.requestId, version: input.version, regenerate: input.regenerate, createdAt: new Date().toISOString(), proposalId: discovery.id, revision: discovery.revision };
@@ -114,19 +116,19 @@ export async function startExecution(body: unknown, token: string, signal: Abort
       cwd: path.resolve(__dirname, '../..'), env: { ...process.env, DRAKEN_FACTORY_TOKEN: token }, stdio: ['ignore', log, log], windowsHide: true,
     });
     fs.closeSync(log);
-    let cancelled = false;
+    let cancelled = false; const releaseRun = release; release = undefined;
     const stopped = new Promise<void>(resolve => {
       const finish = (code: number | null) => {
         try { if (!fs.existsSync(path.join(dir, 'exit.json'))) save(path.join(dir, 'exit.json'), { code, cancelled }); }
         catch { console.error('Factory could not save process exit state; inspect the private run directory.'); }
-        active.delete(item.id); resolve();
+        active.delete(item.id); releaseRun?.(); resolve();
       };
       child.once('error', () => finish(1)); child.once('close', finish);
     });
     child.on('kill-requested', () => { cancelled = true; });
     active.set(item.id, { child, stopped });
     return view(item);
-  } finally { starting = false; }
+  } finally { release?.(); starting = false; }
 }
 export async function cancelExecution(id: string): Promise<void> {
   if (!validId(id)) throw new HttpError(400, 'Invalid run ID.');

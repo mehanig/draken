@@ -1,4 +1,4 @@
-import { enrich, runWorkflow, type Binding, type Capability, type Configuration, type Discovery, type Enrichment,
+import { enrich, runWorkflow, sessionPlan, type SessionPlan, type Binding, type Capability, type Configuration, type Discovery, type Enrichment,
   type Invocation, type Outcome, type Policy, type RunEvent, type RunnerHost, type Task } from '../../src/factory-enrichment';
 
 async function proof() {
@@ -12,6 +12,8 @@ async function proof() {
   const configuration: Configuration = { inputCheck: 'check', prepare: 'act', completionCheck: 'check', bindings: [binding] };
   const plan: Enrichment = enrich(discovery, policy, configuration, capabilities);
   const task: Task = { id: 'task', locationKey: 'repo', inputs: {} };
+  const whole: SessionPlan = sessionPlan(discovery, 'Check the artifact', 'repo', 4);
+  if (whole.workflow.method.length !== discovery.method.length || whole.policy.publication !== false) throw Error('Invalid whole-workflow contract');
   const events: RunEvent[] = [];
   const host: RunnerHost = { capabilities, claim: async () => {}, authorize: async () => {},
     record: async (event: RunEvent) => { events.push(event); },

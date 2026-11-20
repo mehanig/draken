@@ -1,8 +1,8 @@
 # Repository workspaces
 
-Factory can now check out a complete committed repository tree into a private Docker volume, prepare its development environment, and run its declared workflow there. Setup and checks share the same workspace, including installed dependencies and code edits. Nothing is applied to the host checkout.
+Factory can check out a complete committed repository tree into a private Docker volume, prepare its development environment, and run its declared checks there. Setup and checks share the same workspace, including installed dependencies and code edits. Nothing is applied to the host checkout.
 
-This is the engineering-workspace foundation, not a general coding agent. The current runner executes repository-declared setup/check commands; it does not receive a learned workflow or engineering objective. The agreed next design is **one host-side Pi session for the entire workflow, with all coding tools operating inside one persistent Docker workspace**. Environment setup/check commands are prerequisites, not a replacement for that workflow. Independent step sessions and parallelism are deferred. See [the handoff review and implementation plan](factory-agent-handoff.md). This session integration, independent acceptance testing and PR delivery are not implemented yet.
+With an explicitly configured Pi SDK and model, the same workspace path also executes a selected workflow and task through **one host-side Pi session, with every coding tool operating inside one persistent Docker workspace**. Environment setup/check commands remain prerequisites, not a replacement for the workflow. The host freezes the candidate and reruns the original checks in a fresh workspace. These checks do not establish arbitrary task acceptance; automatic publication/PR delivery and parallel agents remain unfinished. See [the implementation, configuration and real-agent proof](factory-agent-handoff.md).
 
 ## Repository declaration
 
@@ -56,7 +56,7 @@ export DRAKEN_WORKSPACE_ALLOWED_IMAGES='["node@sha256:APPROVED_DIGEST"]'
 node scripts/factory-workspace.cjs /path/to/repository HEAD /private/new-run-directory
 ```
 
-For the browser, additionally set `DRAKEN_WORKSPACE_REPO` on the server. Factory's **Repository checks** section accepts a commit or branch. **Run** starts the job; **Cancel run** stops it. Refresh and reopening the page only read saved state. Request IDs prevent accidental duplicate starts; uncertain interrupted jobs are not automatically replayed.
+For the browser, additionally set `DRAKEN_WORKSPACE_REPO` on the server. To enable agent execution, also set `DRAKEN_FACTORY_PI_SDK` to the qualified Pi 1.4.0 SDK entry and `DRAKEN_FACTORY_AGENT_MODEL` to an explicit `provider/model`. Matching workflows then show a task field and **Run** button; one session handles the complete workflow. Factory's **Repository checks** section accepts a commit or branch. **Run** starts the job; **Cancel run** stops it. Refresh and reopening the page only read saved state. Request IDs prevent accidental duplicate starts; uncertain interrupted jobs are not automatically replayed.
 
 Results persist under the private data directory's `factory-workspaces/`. The run retains the resolved commit, source-pack hash, environment definition, built image ID, actual container configuration, command logs, patch and outcome. Generated build artifacts and dependency directories ignored by Git are not delivery patches.
 
@@ -65,7 +65,7 @@ Results persist under the private data directory's `factory-workspaces/`. The ru
 - A real Draken checkout at `7320eeb4fe99fe8d3acd0a1b86090337341b1962` contained all **376 committed files**. Dependency setup, native SQLite compilation, type/unused-code checks, application build and **805 automated tests** passed inside Docker. No tests were weakened or skipped. The patch was empty and there were no model calls because the environment was declared.
 - The browser-started run at `2a4d7057212285b76d3fdb49cdc24e235967805c` checked out **382 committed files** and passed all seven stages, including **806 automated tests**. It used zero model calls and produced an empty patch. The fresh collector mounted the workspace read-only; no run containers, volumes or networks remained afterward. Reopening Factory showed the saved result and test log without starting another run. Desktop and 390px mobile checks reported no page errors or horizontal overflow.
 - Before automatic proposals were removed, a separate small repository received a real Luna-generated environment and passed its tests (one call, 506 input tokens, 92 output tokens, $0.0000966). Those historical receipts remain retained; this is no longer an available execution path.
-- Host validation also passed 806 automated tests, 73 browser tests, type checking and unused-code checking.
+- The earlier recipe-only workspace validation passed 806 automated tests and 73 browser tests. The subsequent agent integration passed 814 automated tests and nine focused Factory browser tests, plus a genuine six-call parser repair and fresh verification; see the linked implementation report for usage, failures and qualifications.
 - `tests/factory-workspace-live.cjs` checked real edits across stages, an unchanged host checkout, excluded host credentials/Git remotes, read-only patch collection and preservation of edits on cancellation.
 - Development failures were retained: generated image scripts initially lacked read permission for the non-root worker; the first full test run exposed non-executable temporary files. Both environment problems were corrected rather than changing test assertions.
 
