@@ -12,8 +12,8 @@ function command(argv,cwd,input){return new Promise(resolve=>{
 });}
 async function checked(argv,cwd,input){const result=await command(argv,cwd,input);if(result.code!==0)throw Error(`${argv[0]} failed: ${result.stderr||result.reason}`);return result.stdout;}
 async function main(request){
- const root='/workspace/repo';fs.mkdirSync(root,{recursive:true});fs.mkdirSync('/tmp/home',{recursive:true});
- emit({type:'stage-started',name:'Check out repository'});
+ const root=request.exportOnly?'/tmp/baseline':'/workspace/repo';fs.mkdirSync(root,{recursive:true});fs.mkdirSync('/tmp/home',{recursive:true});
+ if(!request.exportOnly)emit({type:'stage-started',name:'Check out repository'});
  await checked(['git','init','--quiet',`--object-format=${request.objectFormat}`,root],'/workspace');
  await checked(['git','index-pack','--stdin'],root,Buffer.from(request.pack,'base64'));
  fs.writeFileSync(path.join(root,'.git/shallow'),request.commit+'\n');
@@ -22,9 +22,15 @@ async function main(request){
  await checked(['git','-c','core.hooksPath=/dev/null','checkout','--force','HEAD'],root);
  const head=(await checked(['git','rev-parse','HEAD'],root)).trim();if(head!==request.commit)throw Error('Checkout commit differs from the requested snapshot');
  await checked(['git','config','user.name','Draken Factory'],root);await checked(['git','config','user.email','factory@localhost'],root);
+ if(request.exportOnly){
+  const git=['git','--git-dir='+root+'/.git','--work-tree=/workspace/repo','-c','core.hooksPath=/dev/null'];
+  await checked([...git,'add','--all'],root);
+  const patch=await checked([...git,'diff','--cached','--binary',request.commit,'--'],root);
+  emit({type:'patch',base:request.commit,patch});return;
+ }
  emit({type:'stage-result',name:'Check out repository',code:0,commit:head});
  let failed=false;
- try{
+ {
   for(const phase of ['setup','checks']){ for(const step of request.environment[phase]){
    const cwd=fs.realpathSync(path.resolve(root,step.cwd||'.'));if(cwd!==root&&!cwd.startsWith(root+'/'))throw Error('Command directory escapes checkout');
    emit({type:'stage-started',name:step.name,phase});
@@ -33,13 +39,9 @@ async function main(request){
   }
   if(failed)break;
   }
- }finally{
-  // Include tracked edits and new, non-ignored files. Never apply them to the host checkout.
-  await checked(['git','-c','core.hooksPath=/dev/null','add','--all'],root);
-  const patch=await checked(['git','diff','--cached','--binary',request.commit,'--'],root);
-  emit({type:'patch',base:request.commit,patch});
  }
  emit({type:'result',status:failed?'failed':'completed',commit:request.commit});
+ if(failed)process.exitCode=1;
 }
 let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',part=>{input+=part;if(input.length>180_000_000)process.exit(2);});
 process.stdin.on('end',()=>main(JSON.parse(input)).catch(error=>{emit({type:'error',message:error.message});process.exitCode=1;}));

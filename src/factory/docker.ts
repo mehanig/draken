@@ -20,7 +20,7 @@ export function dockerIsolation(name: string, network: string, run: string, engi
     '--security-opt=no-new-privileges', `--pids-limit=${engineering ? 512 : 128}`, `--memory=${engineering ? 4096 : 768}m`,
     `--memory-swap=${engineering ? 4096 : 768}m`, `--cpus=${engineering ? 2 : 1}`,
     '--log-driver=json-file', '--log-opt', 'max-size=8m', '--log-opt', 'max-file=1', '--ulimit', engineering ? 'nofile=1024:1024' : 'nofile=256:256',
-    '--network', network, '--ipc=private', '--init', '--tmpfs', engineering ? '/tmp:rw,nosuid,nodev,size=1024m' : '/tmp:rw,nosuid,nodev,noexec,size=256m',
+    '--network', network, '--ipc=private', '--init', '--tmpfs', engineering ? '/tmp:rw,exec,nosuid,nodev,size=1024m' : '/tmp:rw,nosuid,nodev,noexec,size=256m',
     '--env', 'HOME=/tmp/home', '--env', 'DRAKEN_DATA_DIR=/tmp/data', '--env', 'DRAKEN_PI_SESSIONS_DIR=/tmp/no-sessions'];
 }
 

@@ -26,5 +26,6 @@
 .factory-run-status { font-size: .85rem; text-transform: capitalize; }
 .factory-run-completed { color: var(--green); }
 .factory-run-failed, .factory-run-interrupted { color: var(--red); }
+.factory-workspace-log { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--paper); border: 1px solid var(--rule); font-size: 12px; }
 .factory-run-steps li { display: flex; justify-content: space-between; gap: 12px; }
 @media (max-width: 600px) { .factory-page { padding: 20px 16px 56px; } .factory-page ol, .factory-page ul { padding-left: 22px; } }

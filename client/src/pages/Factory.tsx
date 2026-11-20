@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { factory } from '../api';
+import { FactoryWorkspace } from '../components/FactoryWorkspace';
 import { FactoryExecutionPanel, useFactoryExecution } from '../components/FactoryExecution';
 import type { FactoryPage } from '../../../src/factory/types';
 import '../styles/factory.css';
@@ -35,6 +36,7 @@ export function Factory() {
     {error && <p role="alert">{error}</p>}
     {executionError && <p role="alert">Execution unavailable: {executionError}</p>}
     {loading && <p role="status">Loading…</p>}
+    <FactoryWorkspace />
     {data && !executionError && <>
       {data.learning === 'paused' && <p className="muted small" role="status">Learning paused</p>}
       {data.learning === 'error' && <p role="status">Learning stopped. <a href="/settings">Retry in Settings</a>.</p>}

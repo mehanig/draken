@@ -15,6 +15,7 @@ import syncRouter from './routes/sync';
 import memoryRouter from './routes/memory';
 import factoryRouter from './routes/factory';
 import { stopFactoryExecution } from './factory/execution';
+import { stopWorkspaces } from './factory/workspace';
 import { shutdownHistory } from './memory/service';
 import { startBackgroundIndexing, stopBackgroundIndexing } from './sync/background';
 import voiceRouter from './routes/voice';
@@ -119,7 +120,7 @@ export function startServer(trayOwned = false, options: { historyDays?: number |
     const closed = new Promise<void>(resolve => server.close(() => resolve()));
     const secureClosed = new Promise<void>(resolve => secureServer ? secureServer.close(() => resolve()) : resolve());
     void Promise.allSettled([closed, secureClosed, activityStopped, stopBackgroundIndexing(),
-      stopFactoryExecution(), stopManagerProcesses(), shutdownHistory(), shutdownLiveVoice(), stopPiChecks()]).then(results => {
+      stopWorkspaces(), stopFactoryExecution(), stopManagerProcesses(), shutdownHistory(), shutdownLiveVoice(), stopPiChecks()]).then(results => {
       if (results.some(result => result.status === 'rejected')) { unconfirmed(); return; }
       try { closeDb(); releaseDirectory?.(); }
       catch { unconfirmed(); return; }
