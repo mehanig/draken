@@ -1,6 +1,8 @@
 import { digest } from '../sync/normalize';
 import { readWorkflowComparison, type LearningRow } from './learning-store';
 import { getDb } from '../db/schema';
+import { modelCall } from '../sync/model-call';
+import type { SyncModels } from '../types';
 import { proposeEnrichment, type Capability, type Discovery, type Policy } from '../factory-enrichment';
 import type { FactoryPage } from './types';
 
@@ -18,6 +20,20 @@ async function readDiscovery(id: string, signal: AbortSignal): Promise<Discovery
   if (!row) throw Error('Workflow proposal unavailable');
   const { decision, evidence, location } = await readWorkflowComparison(row, signal);
   return discoveryFromProposal({ id: row.id, model: row.model, createdAt: row.created_at, decision, evidence, location });
+}
+
+/** Real provider path for a caller that already owns an accounted preparation run. */
+export function enrichFactoryWithModel(id: string, policy: Policy, catalog: Capability[],
+  owner: { runId: number; table: 'sync_runs' | 'background_runs'; models: SyncModels }, signal: AbortSignal) {
+  return proposeFactoryEnrichment(id, policy, catalog, (payload, system) => {
+    if (!['sync_runs', 'background_runs'].includes(owner.table)) throw Error('Invalid enrichment owner');
+    const run = getDb().prepare(`SELECT status,summary_model,final_model,max_invocations FROM ${owner.table} WHERE id=?`).get(owner.runId) as
+      { status: string; summary_model: string; final_model: string; max_invocations: number } | undefined;
+    if (!run || run.status !== 'running') throw Error('Enrichment owner is not running');
+    if (run.summary_model !== owner.models.summary || run.final_model !== owner.models.final) throw Error('Enrichment owner models changed');
+    const models = { ...owner.models, max_invocations: Math.min(owner.models.max_invocations, run.max_invocations) };
+    return modelCall(payload, system, { ...owner, models, signal, reserveAnswer: owner.table === 'sync_runs' });
+  }, signal);
 }
 
 /** Explicit host integration for future preparation callers. Reads never invoke this function.

@@ -7,7 +7,8 @@
     ".": {
       "entry": [
         "tests/*.cjs", "tests/ui/**/*.{ts,cjs}",
-        "scripts/factory-release-example.cjs",
+        "scripts/factory-release-example.cjs", "scripts/factory-enrichment-model.cjs",
+        "scripts/factory-container/*.cjs",
         // Executables copied/spawned by tests, not imported as modules.
         "tests/fixtures/fake-*.cjs", "tests/fixtures/factory-enrichment-contract.ts",
         // Browser modules served over HTTP by the isolated voice probe.

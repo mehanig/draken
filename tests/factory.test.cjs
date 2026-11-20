@@ -52,6 +52,15 @@ test('enrichment uses verified proposals and rejects uncited source revocation d
  await assert.rejects(proposeFactoryEnrichment(id,policy,[],async()=>{db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();return '{"bindings":[]}';},signal()));
  const count=db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n;await readFactory(undefined,signal());assert.equal(db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n,count);
 });
+test('real enrichment entry point enforces its existing model-call owner allowance',async()=>{
+ const {discoveryFromProposal,enrichFactoryWithModel}=require('../dist/factory/enrichment');const {id}=await seed(),d=discoveryFromProposal((await readFactory(undefined,signal())).proposals[0]);
+ const policy={id:'test',revision:'v1',locationKey:d.locationKey,discoveryRevision:d.revision,endpoint:'Tested patch',inputCheck:'input',prepare:'prepare',completionCheck:'complete',allowedCapabilities:[],allowedEffects:[],maxAttempts:1,timeoutMs:1000};
+ const runId=Number(db.prepare("INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key,invocations) VALUES ('fake','fake',1,0,?,'enrichment',1)").run(new Date().toISOString()).lastInsertRowid);
+ await assert.rejects(enrichFactoryWithModel(id,policy,[],{table:'background_runs',runId,models:{summary:'fake',final:'fake',max_invocations:500}},signal()),/Invocation budget/);
+ db.prepare("UPDATE background_runs SET status='completed' WHERE id=?").run(runId);
+ await assert.rejects(enrichFactoryWithModel(id,policy,[],{table:'background_runs',runId,models:{summary:'fake',final:'fake',max_invocations:1}},signal()),/not running/);
+ assert.equal(db.prepare('SELECT invocations FROM background_runs WHERE id=?').get(runId).invocations,1);
+});
 test('old saved comparisons cannot expose a workflow spanning different folders',async()=>{
  const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);
  const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
