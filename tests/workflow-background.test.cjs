@@ -69,6 +69,50 @@ test('failed process extraction does not replace or break the ordinary summary a
  assert.equal((await factory()).failedExtractions,1);assert.equal((await factory()).proposals.length,0);
  const count=calls().length;await warm();assert.equal(calls().length,count);
 });
+test('process validation uses the existing repair attempt without replacing the valid ordinary summary',async()=>{
+ history(1);await scanSessions();controls({repairableProcess:true});await warm();
+ const db=getDb();assert.equal(calls().filter(c=>c.task==='summarize').length,2);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE status='completed'").get().n,1);
+ assert.ok(db.prepare('SELECT output_json FROM summary_cache').all().every(r=>!r.output_json.includes('Changed by process repair')));
+});
+test('process repair cannot spend the last invocation or discard a valid ordinary summary',async()=>{
+ history(1);await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='1';controls({invalidProcess:true});await warm();
+ const db=getDb();assert.equal(calls().length,1);assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');
+ assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);assert.equal((await factory()).failedExtractions,1);
+});
+test('a failed process-repair provider call does not discard a valid ordinary summary',async()=>{
+ history(1);await scanSessions();controls({repairableProcess:true,failRepair:true});await warm();
+ const db=getDb();assert.equal(calls().length,2);assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');
+ assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);assert.equal((await factory()).failedExtractions,1);
+});
+test('explicit cached preparation retains the failed validation attempt before correction',async()=>{
+ history(1);await scanSessions();controls({invalidProcess:true});await warm();const db=getDb();
+ const keys=db.prepare('SELECT key FROM summary_leaf_inputs').all().map(r=>r.key),before=db.prepare('SELECT * FROM summary_cache ORDER BY key').all();
+ controls({repairableCachedProcess:true});await warmSummaryCache(controller.signal,undefined,keys);
+ assert.equal(calls().filter(c=>c.task==='prepare_workflow_process').length,2);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE status='failed'").get().n,2);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,1);
+ assert.deepEqual(db.prepare('SELECT * FROM summary_cache ORDER BY key').all(),before);
+});
+test('explicit preparation of selected cached leaves preserves summaries and failed attempts',async()=>{
+ history();await scanSessions();controls({invalidProcess:true});await warm();
+ const db=getDb(),before=db.prepare('SELECT * FROM summary_cache ORDER BY key').all();
+ const failed=db.prepare("SELECT output_json FROM process_extractions WHERE status='failed'").all();
+ assert.equal(failed.length,2);assert.ok(failed.every(r=>JSON.parse(r.output_json).failure.message==='Invalid process object fields'));
+ const keys=db.prepare('SELECT key FROM summary_leaf_inputs ORDER BY key').all().map(r=>r.key);
+ controls({});await warmSummaryCache(controller.signal,undefined,keys);
+ assert.deepEqual(db.prepare('SELECT * FROM summary_cache ORDER BY key').all(),before);
+ assert.equal((await factory()).proposals.length,1);assert.equal((await factory()).failedExtractions,2);
+ const count=calls().length;await warmSummaryCache(controller.signal,undefined,keys);assert.equal(calls().length,count);
+});
+test('explicit cached preparation respects opt-out and current source permissions',async()=>{
+ history(1);await scanSessions();controls({invalidProcess:true});await warm();const db=getDb();
+ const keys=db.prepare('SELECT key FROM summary_leaf_inputs').all().map(r=>r.key),count=calls().length;
+ setAutoSummary(false);await warmSummaryCache(controller.signal,undefined,keys);assert.equal(calls().length,count);
+ setAutoSummary(true);db.prepare("UPDATE agent_sessions SET included=0 WHERE id='job-0'").run();
+ await warmSummaryCache(controller.signal,undefined,keys);assert.equal(calls().length,count);
+ await assert.rejects(warmSummaryCache(controller.signal,undefined,Array(7).fill(keys[0])),/one to six/);
+});
 test('source revocation during candidate inference prevents admission and further matching',async()=>{
  history();await scanSessions();controls({taskDelays:{select_workflow_candidates:400}});
  const done=warm();await waitFor(()=>calls().some(c=>c.task==='select_workflow_candidates'));
@@ -113,6 +157,7 @@ test('original-byte changes during leaf inference prevent retaining procedural c
  const file=root+'/sessions/job-0.jsonl';fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace('Uncited context','Changed context'));
  await done;const db=getDb();assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,0);
  assert.equal((await factory()).proposals.length,0);
+ assert.equal(JSON.parse(db.prepare("SELECT output_json FROM process_extractions WHERE status='failed'").get().output_json).failure.stage,'source_verification');
 });
 test('failed matching is not automatically retried; explicit preparation retry retains earlier receipts',async()=>{
  history();await scanSessions();controls({failStage:'workflow_match'});await warm();

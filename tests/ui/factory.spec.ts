@@ -16,11 +16,17 @@ test('Factory is read-only, direct-linkable and does not change shared navigatio
   await page.route('**/api/factory', route => route.fulfill({ json: empty }));
   await page.goto('/factory');
   await expect(page.getByRole('heading', { name: 'Factory', exact: true })).toBeVisible();
-  await expect(page.getByText('No verified workflow proposals yet')).toBeVisible();
-  await expect(page.getByText('Background learning is enabled with automatic summarization.')).toBeVisible();
+  await expect(page.getByText('No workflows yet')).toBeVisible();
+  await expect(page.getByText('Background learning enabled', { exact: true })).toBeVisible();
+  const help = page.locator('summary[aria-label="About workflow learning"]');
+  await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeHidden();
+  await help.click();
+  await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeVisible();
+  await help.press('Escape');
+  await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeHidden();
   await expect(page.getByRole('banner').getByRole('link', { name: 'Factory', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Refresh saved results' }).click();
-  await expect(page.getByText('No verified workflow proposals yet')).toBeVisible();
+  await expect(page.getByText('No workflows yet')).toBeVisible();
   await page.reload(); await expect(page.getByRole('main', { name: 'Factory' })).toBeVisible();
   expect(mutations).toEqual([]);
 });
@@ -36,6 +42,12 @@ test('Factory shows qualifications and source labels without executing model tex
     await expect(page.getByText('<script>window.factoryInjected=true</script>', { exact: false })).toBeVisible();
     expect(await page.evaluate(() => 'factoryInjected' in window)).toBe(false);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const help = page.locator('summary[aria-label="About workflow learning"]');
+    await help.click();
+    await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await help.press('Escape');
+    await expect(page.getByText('New summaries retain process records.', { exact: false })).toBeHidden();
   }
 });
 
@@ -44,11 +56,14 @@ test('Factory explains paused learning and preparation errors without starting w
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
   await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, proposals: [proposal], failedExtractions: learning === 'error' ? 1 : 0 } }));
   await page.goto('/factory');
-  await expect(page.getByText('Background learning is paused', { exact: false })).toBeVisible();
+  await expect(page.getByText('Background learning paused', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
   learning = 'error'; await page.getByRole('button', { name: 'Refresh saved results' }).click();
-  await expect(page.getByText('Automatic preparation stopped after an error.', { exact: false })).toBeVisible();
-  await expect(page.getByText('Some summaries could not retain valid process records.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Preparation stopped', { exact: true })).toBeVisible();
+  await expect(page.getByText('1 failed attempt', { exact: true })).toBeVisible();
+  await expect(page.getByText('Failed extraction attempts are kept for diagnosis', { exact: false })).toBeHidden();
+  await page.locator('summary[aria-label="About process extraction failures"]').click();
+  await expect(page.getByText('Failed extraction attempts are kept for diagnosis', { exact: false })).toBeVisible();
   expect(mutations).toEqual([]);
 });
 
@@ -60,7 +75,7 @@ test('refresh removes old proposal content when sources become unavailable or th
   await page.goto('/factory'); await expect(page.getByText('Verify a database backup', { exact: true })).toBeVisible();
   phase = 1; await page.getByRole('button', { name: 'Refresh saved results' }).click();
   await expect(page.getByText('Verify a database backup', { exact: true })).toHaveCount(0);
-  await expect(page.getByText('Some saved results could not be verified', { exact: false })).toBeVisible();
+  await expect(page.getByText('1 saved result unavailable', { exact: true })).toBeVisible();
   phase = 2; await page.getByRole('button', { name: 'Refresh saved results' }).click();
   await expect(page.getByRole('alert')).toHaveText('Source verification unavailable');
   await expect(page.getByText('Verify a database backup', { exact: true })).toHaveCount(0);

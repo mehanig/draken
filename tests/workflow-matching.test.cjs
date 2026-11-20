@@ -75,6 +75,11 @@ test('combined summary process references are decoded without rewriting claim te
  assert.equal(result.fragments[0].stages[0].claims[0].description,'S1 remains ordinary text');assert.deepEqual(value,original);
  assert.throws(()=>preparedProcess(value,['K-request','K-input','K-result'],['user','assistant','toolResult']),/secondary/);
 });
+test('process failures identify the offending field without recording its contents',()=>{
+ const value={summary:'Process',fragments:[structuredClone(examples()[0].left.fragment)],limitations:[]};
+ value.fragments[0].questions=[{question:'private diagnostic sentinel'}];
+ assert.throws(()=>validateProcess(JSON.stringify(value),['U','I','O']),error=>/questions\[0\].*received object/.test(error.message)&&!error.message.includes('private diagnostic sentinel'));
+});
 test('candidate selection cannot invent, duplicate or expand the supplied candidate set',()=>{
  assert.deepEqual(candidateSelection('{"selected":["C1"]}',['C1']),['C1']);assert.deepEqual(candidateSelection('{"selected":[]}',['C1']),[]);
  for(const value of [{selected:['C9']},{selected:['C1','C1']},{selected:['C1'],extra:true},{selected:['C1','C2','C3','C4']},['C1']])assert.throws(()=>candidateSelection(JSON.stringify(value),['C1','C2','C3','C4']));

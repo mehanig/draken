@@ -27,7 +27,7 @@ process.stdin.on('end', () => {
     recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, citation_repair: value.citation_repair, reference_labels: value.reference_labels,
     allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair, citation_repairs: value.citation_repairs,
   }) + '\n');
-  if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage)) {
+  if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage) || (control.failRepair && value.repair)) {
     console.error('provider unavailable'); process.exit(1);
   }
   if (value.user_question === 'TIMEOUT') { setTimeout(() => console.log('too late'), 10000); return; }
@@ -88,9 +88,14 @@ process.stdin.on('end', () => {
         const remap = (v, key) => Array.isArray(v) ? v.map(x => typeof x === 'string' && ['refs','triggerRefs','outcomeRefs'].includes(key) ? refs[x] : remap(x, key)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, remap(x, k)])) : v;
         process = remap(control.workflowProcess, '');
       }
-      if (control.invalidProcess) process = { invented: true };
+      if (control.invalidProcess || (control.repairableProcess && !value.repair)) process = { invented: true };
+      if (control.repairableProcess && value.repair) observations[0].summary = 'Changed by process repair';
     }
     emit({ observations, limitations: [], ...(process ? { process } : {}) });
+  } else if (value.task === 'prepare_workflow_process') {
+    const refs = { U: value.records[0]?.ref, I: value.records[1]?.ref, O: value.records[2]?.ref };
+    const remap = (v, key) => Array.isArray(v) ? v.map(x => typeof x === 'string' && ['refs','triggerRefs','outcomeRefs'].includes(key) ? refs[x] : remap(x, key)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, remap(x, k)])) : v;
+    emit(control.invalidProcess || (control.repairableCachedProcess && !value.repair) ? { invented: true } : remap(control.workflowProcess, ''));
   } else if (value.task === 'group_topics') {
     const groups = new Map();
     for (const item of value.input.observations) {

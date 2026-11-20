@@ -1,7 +1,7 @@
 import { getDb } from '../db/schema';
 import { digest } from '../sync/normalize';
 import { readWorkflowOriginals } from '../evidence-adapter';
-import { SUMMARY_PROCESS_PROMPT, CONTRACT_MATCH_PROMPT, preparedProcess, validateProcess, validateProcessEvidence, contractMatchInput, decideContractMatch, type ProcessExtraction, type ContractMatchInput } from '../workflow-learning';
+import { SUMMARY_PROCESS_PROMPT, PROCESS_PROMPT, CONTRACT_MATCH_PROMPT, preparedProcess, validateProcess, validateProcessEvidence, contractMatchInput, decideContractMatch, type ProcessExtraction, type ContractMatchInput } from '../workflow-learning';
 
 export const LEARNING_FORMAT = 'summary-workflows-v1';
 export const COMPARISON_FORMAT = 'workflow-comparison-v1';
@@ -14,20 +14,31 @@ export function learningInputKey(deps: unknown, payload: unknown, model: string)
   return digest(JSON.stringify([deps, payload, model]));
 }
 export interface LearningRow { id: string; kind: string; status: string; input_key: string; recipe_version: string; model: string; output_json: string; source_dependencies_json: string; created_at: string }
-export function saveSummaryProcess(leaf: string, model: string, run: { table: 'sync_runs' | 'background_runs'; id: number }, input: string, value: unknown, references: string[], roles: string[]): void {
-  const db = getDb(), recipe = digest(SUMMARY_PROCESS_PROMPT), id = digest(JSON.stringify([LEARNING_FORMAT, leaf, model, recipe]));
-  if (db.prepare('SELECT 1 FROM process_extractions WHERE id=?').get(id)) return;
-  let output: ProcessExtraction | undefined;
-  try { output = preparedProcess(value, references, roles); } catch { /* Normal summaries remain usable; Factory reports the failed extraction. */ }
+export function saveSummaryProcess(leaf: string, model: string, run: { table: 'sync_runs' | 'background_runs'; id: number }, input: string, value: unknown, references: string[], roles: string[], options: { sourceError?: string; separateCall?: boolean } = {}): boolean {
+  const db = getDb(), recipe = digest(options.separateCall ? PROCESS_PROMPT : SUMMARY_PROCESS_PROMPT);
+  const base = digest(JSON.stringify([LEARNING_FORMAT, leaf, model, recipe]));
+  const previous = db.prepare('SELECT status FROM process_extractions WHERE id=?').get(base) as { status: string } | undefined;
+  if (previous && (!options.separateCall || previous.status === 'completed')) return previous.status === 'completed';
+  const attempt = (db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE recipe_version=? AND model=? AND json_extract(source_dependencies_json,'$.leaf')=?").get(recipe, model, leaf) as { n: number }).n;
+  const id = previous ? digest(JSON.stringify([base, run, attempt])) : base;
+  let output: ProcessExtraction | undefined, failure: { stage: string; message: string } | undefined;
+  try {
+    if (options.sourceError) throw Error(options.sourceError);
+    if (value === undefined) throw Error('Summary response did not include process');
+    output = preparedProcess(value, references, roles);
+  } catch (error) {
+    failure = { stage: options.sourceError ? 'source_verification' : 'process_validation', message: error instanceof Error ? error.message.slice(0, 500) : 'Invalid process result' };
+  }
   const dependencies = JSON.stringify({ format: LEARNING_FORMAT, leaf, input: JSON.parse(input) });
   db.prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,usage_json,created_at,completed_at)
     VALUES (?,'summary',?,?,?,?,?,?,?,?,?)`).run(id, digest(dependencies), recipe, model, output ? 'completed' : 'failed', dependencies,
-      output ? JSON.stringify(output) : null, JSON.stringify({ summaryRun: run, includedInSummaryCall: true }), new Date().toISOString(), new Date().toISOString());
+      output ? JSON.stringify(output) : JSON.stringify({ failure, outputHash: digest(JSON.stringify(value) ?? 'missing') }), JSON.stringify({ summaryRun: run, includedInSummaryCall: !options.separateCall }), new Date().toISOString(), new Date().toISOString());
   if (output) for (const f of output.fragments) {
     const episode = digest(JSON.stringify([id, f.key]));
     db.prepare('INSERT INTO work_episodes(id,state,description_json) VALUES (?,?,?)').run(episode, f.state, JSON.stringify(f));
     db.prepare('INSERT INTO episode_extractions(episode_id,extraction_id,fragment_key) VALUES (?,?,?)').run(episode, id, f.key);
   }
+  return !!output;
 }
 export async function readProcessParent(parent: ProcessParent, signal: AbortSignal) {
   signal.throwIfAborted();

@@ -9,6 +9,7 @@ import { digest } from './normalize';
 import { defaultModels } from './models';
 import { learnSummaryWorkflows } from '../factory/learning';
 import { pendingWorkflows } from '../factory/learning-store';
+import { prepareCachedProcesses } from '../factory/prepare';
 
 const FAILURE = 'Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
@@ -71,7 +72,8 @@ export function summaryPreparationSettings(): SummaryPreparationSettings {
 /** Prepare only reusable summaries. No sync identity, snapshot, briefing or verdict.
  * A successful receipt suppresses repeated work; a failure blocks all automatic
  * paid retries until explicit consent/retry. Cancellation retains its allowance. */
-export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void): Promise<void> {
+export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void, processLeaves?: readonly string[]): Promise<void> {
+  if (processLeaves && (!processLeaves.length || processLeaves.length > 6 || new Set(processLeaves).size !== processLeaves.length || processLeaves.some(key => !/^[a-f0-9]{64}$/.test(key)))) throw Error('Select one to six distinct saved summary keys');
   if (signal.aborted || !summaryPreparationEnabled() || !indexingEnabled() || !idle() || setting('auto_summary_error')) return;
   if (active) return active.done;
   const controller = new AbortController();
@@ -92,12 +94,12 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
       // committed. Never silently replace that run with a fresh allowance.
       const orphan = db.prepare("SELECT id,invocations,max_invocations FROM background_runs WHERE status='running' LIMIT 1").get() as Run | undefined;
       if (orphan) { run = orphan; throw new Error('Background ownership was not recovered'); }
-      const input = previewSummaryInput(); assertEvidenceAvailable(input);
-      const key = summaryPreparationKey(input) + (input.items.length ? '' : digest(JSON.stringify(db.prepare("SELECT id FROM process_extractions WHERE kind='summary' AND status='completed' AND json_extract(source_dependencies_json,'$.format')='summary-workflows-v1' ORDER BY id").all())));
+      const input = processLeaves ? { items: [], context: [], models: defaultModels() } : previewSummaryInput(); assertEvidenceAvailable(input);
+      const key = summaryPreparationKey(input) + (processLeaves ? digest(JSON.stringify(processLeaves)) : input.items.length ? '' : digest(JSON.stringify(db.prepare("SELECT id FROM process_extractions WHERE kind='summary' AND status='completed' AND json_extract(source_dependencies_json,'$.format')='summary-workflows-v1' ORDER BY id").all())));
       const receipt = matching(key);
       const summariesReady = !!receipt && cacheIntact(receipt.cache_receipt_json);
-      if (summariesReady && !pendingWorkflows()) return;
-      if (!input.items.length && !pendingWorkflows()) return;
+      if ((summariesReady || (processLeaves && receipt)) && !pendingWorkflows()) return;
+      if (!processLeaves && !input.items.length && !pendingWorkflows()) return;
       check();
       run = db.prepare(`SELECT id,invocations,max_invocations FROM background_runs WHERE input_key=?
         AND (status IN ('cancelled','interrupted') OR (?=1 AND status='completed')) ORDER BY id DESC LIMIT 1`).get(key, Number(summariesReady)) as Run | undefined;
@@ -123,6 +125,7 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void)
         return call(payload, system, false);
       };
       if (input.items.length) await tree.build();
+      if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
       await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();

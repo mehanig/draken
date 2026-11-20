@@ -11,13 +11,13 @@ Workflow detection is connected to normal summarization—not to a Sync action o
 
 The background job uses the existing automatic-preparation settings, idle checks, cancellation and invocation allowance. Disabling automatic summarization pauses paid background workflow learning. Process records produced by explicit foreground summarization can be matched later by the background owner, even when an open conversation holds all pending history.
 
-There is no independent scheduler, provider client or fresh allowance for the detector. Failed matching stops automatic paid retries through the existing preparation failure/retry mechanism. Cancelled work retains its spent allowance and resumes with completed summaries and candidate selections cached. Invalid process extraction is recorded as a failure and shown on Factory; it is not disguised as an empty match or automatically regenerated.
+There is no independent scheduler, provider client or fresh allowance for the detector. Failed matching stops automatic paid retries through the existing preparation failure/retry mechanism. Cancelled work retains its spent allowance and resumes with completed summaries and candidate selections cached. Process validation can use the summarizer’s existing second attempt, within the same invocation allowance, while retaining an already-valid ordinary summary. A failed correction or exhausted allowance does not discard that summary. Failed process extraction records retain the validation field/error and an output hash; they are not disguised as empty matches. Cached failures do not start automatic retry jobs.
 
 ## Factory and source access
 
 Open `/factory` directly. Existing pages and shared navigation are unchanged. Reads and “Refresh saved results” start no inference, synchronization or jobs.
 
-Factory shows purpose, applicability, proposed steps, outcome qualifications and compared evidence. It reports whether learning is enabled, paused or stopped by a preparation error. The page remains a proposal viewer, not an executor or an approval mechanism.
+Factory shows purpose, applicability, proposed steps, outcome qualifications and compared evidence. It reports whether learning is enabled, paused or stopped by a preparation error. Explanations are collapsed behind the existing ⓘ controls; the main page shows short status labels and workflow content. The page remains a proposal viewer, not an executor or an approval mechanism.
 
 `GET /api/factory` uses the existing authenticated, same-origin, no-store API boundary. All supplied source dependencies—including uncited originals and unselected candidates seen during selection—are revalidated before inference, after inference and before serving a proposal. Unavailable derived content is withheld entirely. Source reads use the public evidence contract and application wiring in `src/evidence-adapter.ts`; the production reader no longer imports the pilot reader or opens external experiment databases.
 
@@ -25,7 +25,7 @@ Factory shows purpose, applicability, proposed steps, outcome qualifications and
 
 The three additive tables remain `process_extractions`, `work_episodes` and `episode_extractions`. Episode queue state is stored alongside the existing fragment records. Summary extractions link to their shared summary invocation; selection and comparison attempts link to their owning background run.
 
-- Existing valid summary caches remain reusable. They are **not** automatically regenerated for workflow backfill. New summaries collect process records.
+- Existing valid summary caches remain reusable. They are **not** automatically regenerated for workflow backfill. New summaries collect process records. An explicitly requested preparation can select one to six existing leaf keys through the same background owner. It checks current source permissions and the activity window, prepares process records without changing cached summaries, and retains failed attempts. It allows at most one validation correction per selected leaf, within the job’s allowance. Page reads and ordinary background ticks do not request this preparation.
 - Records spanning summary batches remain explicitly labelled fragments. This change does not claim complete episode reconstruction, recurrence counts or exhaustive discovery across a large library.
 - Candidate selection examines at most 24 earlier records and compares at most three per new fragment. It does not compare every pair in history or use a predefined technology taxonomy.
 - No automatic workflow grouping, review acceptance, execution, deployment or repository scanning is enabled. Reviewed-library editing and cross-batch episode assembly remain separate future work.
@@ -44,6 +44,8 @@ npx playwright test tests/ui/factory.spec.ts tests/ui/settings.spec.ts tests/ui/
 
 Other tests cover original-byte/permission checks, unselected dependencies, schema/reference validation, independently compiled pure modules, old summary-cache reconstruction, authentication, read-only page requests, mobile layouts and inert rendering of model text.
 
-Local validation passed 750 automated tests and 14 selected browser tests, plus typechecks, unused-code checks and server/client builds.
+Local validation passed 757 automated tests and 14 selected browser tests, plus typechecks, unused-code checks and server/client builds.
 
 Two real-provider smoke runs used the same two controlled parser-repair examples in separate isolated data directories, not user history. Each completed the background pipeline and produced one source-verified Factory proposal using `openai/gpt-6-luna` in four calls. Total cost was $0.0023014 across eight calls. Unchanged repeats made no further calls; the final saved proposal was also verified with the current reader while no provider was available. This is integration evidence, not a general accuracy benchmark. Private smoke-test stores and transcripts are not part of the PR.
+
+An explicitly requested local preparation of four saved leaves from real release history produced two verified proposals. Two earlier extraction-format failures were retained; after clarifying the string-array contract, the successful run used 14 calls. This was a selected starting set, not automatic discovery across all history. The live page was checked at desktop and mobile widths with its explanations collapsed.

@@ -11,6 +11,8 @@ Each tool/skill has EXACTLY {"name":"observed identity","usage":"what it was use
 For observed claims, cite the actual tool result or direct user evidence, not an assistant tool request to read that result. Claims whose references are only assistant messages, compaction or branch summaries will be rejected; use reported for secondary accounts. Never guess the adjacent record ID.
 Every fragment, stage, usage and claim needs nonempty supplied refs. Only coverage boundary refs may be empty. Do not invent call IDs, dependencies, authorizations, or recurrence. Mere chronology is not a dependency. Decisions are specific historical permissions, not future authorization. A chunk may contain unrelated fragments; do not merge just because they share a workspace.
 matching contains ONLY goal/context; normal stages and conditional branches will be projected by code from supported stages, not rewritten into a second independent process. No PR numbers, versions, paths or tool brands in matching/normalizedAction. Preserve meaningful applicability and restrictions; no generic best-practice additions or technology taxonomy.
+refs, triggerRefs and outcomeRefs are arrays of supplied ID STRINGS, e.g. ["S1"], never numbers or objects. questions, limitations and coverage.gaps are arrays of plain STRINGS, never claim objects. Only claims, dependencies, decisions, exceptions and condition use the claim-object schema.
+All text fields and string-list entries must be nonempty. If a required description or context is not established, say that explicitly; do not use an empty string or invent a fact. Use empty arrays, not placeholder entries, for absent optional facts, tools, skills or questions.
 Limits: 4 fragments; 12 stages each; 8 claims per stage; 8 dependencies/decisions/exceptions/questions; 6 tools/skills per stage; 12 limitations and coverage gaps; 24 refs per claim; each string at most 1200 characters. Empty fragments requires a limitation explaining why. Preserve omissions and clipped evidence.`;
 interface ProcessClaim { description: string; basis: 'requested' | 'attempted' | 'reported' | 'observed' | 'unknown'; refs: string[] }
 interface ProcessUsage { name: string; usage: string; refs: string[] }
@@ -25,36 +27,36 @@ export interface ProcessExtraction { summary: string; fragments: ProcessFragment
 function obj(v: unknown, keys: string[]): asserts v is Record<string, unknown> {
   if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).sort().join('|') !== [...keys].sort().join('|')) throw Error('Invalid process object fields');
 }
-function text(v: unknown): asserts v is string { if (typeof v !== 'string' || !v.trim() || v.length > 1200) throw Error('Invalid process text'); }
+function text(v: unknown, field = 'list entry'): asserts v is string { if (typeof v !== 'string' || !v.trim() || v.length > 1200) throw Error(`Invalid process text at ${field}: expected a nonempty string of at most 1200 characters; received ${Array.isArray(v) ? 'array' : typeof v}${typeof v === 'string' ? ` (${v.length} characters)` : ''}`); }
 function list(v: unknown, max: number): asserts v is unknown[] { if (!Array.isArray(v) || v.length > max) throw Error('Invalid process list'); }
-function strings(v: unknown, max: number) { list(v, max); v.forEach(text); }
+function strings(v: unknown, max: number, field = 'list') { list(v, max); v.forEach((value, i) => text(value, `${field}[${i}]`)); }
 function parse(raw: string): unknown { if (new TextEncoder().encode(raw).length > 60000) throw Error('Process output exceeds 60000 bytes'); return JSON.parse(raw); }
 function choice(v: unknown, options: string[]) { if (typeof v !== 'string' || !options.includes(v)) throw Error('Invalid process label'); }
 function complete(f: ProcessFragment) { return !!f.coverage.triggerRefs.length && !!f.coverage.outcomeRefs.length && !f.coverage.gaps.length; }
 export function validateProcess(raw: string, allowed: readonly string[]): ProcessExtraction {
-  const v = parse(raw); obj(v, ['summary', 'fragments', 'limitations']); text(v.summary); list(v.fragments, 4); strings(v.limitations, 12);
-  const refs = (r: unknown, empty = false) => { strings(r, 24); const a = r as string[]; if ((!empty && !a.length) || new Set(a).size !== a.length || a.some(x => !allowed.includes(x))) throw Error('Invalid process source references'); };
-  const claim = (c: unknown) => { obj(c, ['description', 'basis', 'refs']); text(c.description); choice(c.basis, ['requested', 'attempted', 'reported', 'observed', 'unknown']); refs(c.refs); };
+  const v = parse(raw); obj(v, ['summary', 'fragments', 'limitations']); text(v.summary, 'summary'); list(v.fragments, 4); strings(v.limitations, 12, 'limitations');
+  const refs = (r: unknown, empty = false) => { strings(r, 24, 'refs'); const a = r as string[]; if ((!empty && !a.length) || new Set(a).size !== a.length || a.some(x => !allowed.includes(x))) throw Error('Invalid process source references'); };
+  const claim = (c: unknown) => { obj(c, ['description', 'basis', 'refs']); text(c.description, 'claim.description'); choice(c.basis, ['requested', 'attempted', 'reported', 'observed', 'unknown']); refs(c.refs); };
   const keys = new Set<string>();
   for (const f of v.fragments) {
     obj(f, ['key', 'goal', 'context', 'state', 'refs', 'coverage', 'stages', 'dependencies', 'decisions', 'exceptions', 'questions', 'matching']);
-    text(f.key); if (keys.has(f.key)) throw Error('Duplicate process fragment key'); keys.add(f.key);
-    text(f.goal); text(f.context); choice(f.state, ['partial', 'completed', 'blocked', 'unknown']); refs(f.refs);
-    obj(f.coverage, ['triggerRefs', 'outcomeRefs', 'gaps']); refs(f.coverage.triggerRefs, true); refs(f.coverage.outcomeRefs, true); strings(f.coverage.gaps, 12);
+    text(f.key, 'fragment.key'); if (keys.has(f.key)) throw Error('Duplicate process fragment key'); keys.add(f.key);
+    text(f.goal, 'fragment.goal'); text(f.context, 'fragment.context'); choice(f.state, ['partial', 'completed', 'blocked', 'unknown']); refs(f.refs);
+    obj(f.coverage, ['triggerRefs', 'outcomeRefs', 'gaps']); refs(f.coverage.triggerRefs, true); refs(f.coverage.outcomeRefs, true); strings(f.coverage.gaps, 12, 'coverage.gaps');
     if (f.state === 'completed' && !complete(f as unknown as ProcessFragment)) throw Error('Completed episode requires both boundaries and no coverage gaps');
     list(f.stages, 12); if (!f.stages.length) throw Error('Process fragment needs supported stages');
     const stageKeys = new Set<string>();
     for (const s of f.stages) {
       obj(s, ['key', 'action', 'normalizedAction', 'role', 'condition', 'claims', 'refs', 'tools', 'skills']);
-      text(s.key); if (stageKeys.has(s.key)) throw Error('Duplicate process stage key'); stageKeys.add(s.key);
-      text(s.action); text(s.normalizedAction); refs(s.refs); choice(s.role, ['main', 'recovery', 'conditional', 'unknown']);
+      text(s.key, 'stage.key'); if (stageKeys.has(s.key)) throw Error('Duplicate process stage key'); stageKeys.add(s.key);
+      text(s.action, 'stage.action'); text(s.normalizedAction, 'stage.normalizedAction'); refs(s.refs); choice(s.role, ['main', 'recovery', 'conditional', 'unknown']);
       if (s.role === 'recovery' || s.role === 'conditional') claim(s.condition);
       else if (s.condition !== null) throw Error('Only conditional/recovery stages have conditions');
       list(s.claims, 8); if (!s.claims.length) throw Error('Stage needs individual evidence claims'); s.claims.forEach(claim);
-      for (const field of ['tools', 'skills']) { list(s[field], 6); for (const u of s[field]) { obj(u, ['name', 'usage', 'refs']); text(u.name); text(u.usage); refs(u.refs); } }
+      for (const field of ['tools', 'skills']) { list(s[field], 6); for (const u of s[field]) { obj(u, ['name', 'usage', 'refs']); text(u.name, 'usage.name'); text(u.usage, 'usage.usage'); refs(u.refs); } }
     }
     for (const field of ['dependencies', 'decisions', 'exceptions']) { list(f[field], 8); f[field].forEach(claim); }
-    strings(f.questions, 8); obj(f.matching, ['goal', 'context']); text(f.matching.goal); text(f.matching.context);
+    strings(f.questions, 8, 'questions'); obj(f.matching, ['goal', 'context']); text(f.matching.goal, 'matching.goal'); text(f.matching.context, 'matching.context');
   }
   if (!v.fragments.length && !(v.limitations as unknown[]).length) throw Error('Empty process extraction needs a reason');
   return v as unknown as ProcessExtraction;

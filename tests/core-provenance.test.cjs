@@ -23,7 +23,7 @@ beforeEach(() => {
     calls.push(payload);
     if (payload.task === 'sync_recap') return JSON.stringify({ lines: ['Synthetic project history.', 'No saved decisions.', 'Deployment remains unverified.'] });
     return payload.task === 'final_verdict' ? 'Synthetic report [R1].' : JSON.stringify({ observations: [
-      { topic: 'Synthetic', state: 'blocked', summary: 'Not independently verified.', evidence: [payload.allowed_source_ids[0]] }], limitations: [] });
+      { topic: 'Synthetic', state: 'blocked', summary: 'Not independently verified.', evidence: [payload.allowed_source_ids[0]] }], limitations: [], process: { summary: 'No process example', fragments: [], limitations: ['Synthetic source has no procedure'] } });
   };
 });
 afterEach(() => { SummaryTree.prototype.call = originalCall; closeDb(); fs.rmSync(root, { recursive: true, force: true }); });

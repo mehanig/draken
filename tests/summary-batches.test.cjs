@@ -13,6 +13,7 @@ const { generateReply, cancelReply } = require('../dist/sync/manager');
 const { invokePi } = require('../dist/sync/pi');
 const { LUNA_BATCH, summaryTokens, promptTokens } = require('../dist/sync/summary-budget');
 const LUNA = 'openai/gpt-6-luna', ASTRA = 'openai/gpt-6-astra';
+const processRecord = { summary: 'No process example', fragments: [], limitations: ['Synthetic source has no procedure'] };
 let temp, root, controlPath, logPath;
 beforeEach(() => {
   closeDb(); temp = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-batches-')); root = path.join(temp, 'sessions'); fs.mkdirSync(root);
@@ -64,7 +65,7 @@ test('aggregate citation compaction preserves all claims, uses one targeted repa
     }
     if (request.stage === 'chunk') {
       let next = 0;
-      return JSON.stringify({ observations: claims.map((claim, i) => ({ ...claim, evidence: request.allowed_source_ids.slice(next, next += i < 7 ? 7 : 6) })), limitations: ['All deployment claims remain unverified.'] });
+      return JSON.stringify({ observations: claims.map((claim, i) => ({ ...claim, evidence: request.allowed_source_ids.slice(next, next += i < 7 ? 7 : 6) })), limitations: ['All deployment claims remain unverified.'], process: processRecord });
     }
     assert.equal(request.input.goal, 'current_project_briefing');
     return JSON.stringify(request.input.children[0].summary); // Reproduce an otherwise valid result still citing 151 sources.
@@ -96,11 +97,11 @@ test('oversized history selects recent project state with few citations while re
     }
     if (appended) {
       assert.equal(r.stage, 'chunk'); assert.equal(r.input.evidence.length, 1);
-      return JSON.stringify({ observations: [{ topic: 'Draken', state: 'blocked', summary: 'New tail; deployment still unverified.', evidence: [r.allowed_source_ids[0]] }], limitations: [] });
+      return JSON.stringify({ observations: [{ topic: 'Draken', state: 'blocked', summary: 'New tail; deployment still unverified.', evidence: [r.allowed_source_ids[0]] }], limitations: [], process: processRecord });
     }
     if (r.stage === 'chunk') {
       let n = 0;
-      return JSON.stringify({ observations: Array.from({ length: 24 }, (_, i) => ({ topic: i === 0 ? 'Other project' : 'Draken', state: i === 0 ? 'blocked' : i === 23 ? 'reported_done' : 'superseded', summary: i === 0 ? 'Older unresolved blocker; newer activity does not resolve it.' : i === 23 ? 'Latest implementation reported; deployment NOT verified.' : `Superseded plan ${i}`, evidence: r.allowed_source_ids.slice(n, n += i < 7 ? 7 : 6) })), limitations: ['Reports are not proof of deployment.'] });
+      return JSON.stringify({ observations: Array.from({ length: 24 }, (_, i) => ({ topic: i === 0 ? 'Other project' : 'Draken', state: i === 0 ? 'blocked' : i === 23 ? 'reported_done' : 'superseded', summary: i === 0 ? 'Older unresolved blocker; newer activity does not resolve it.' : i === 23 ? 'Latest implementation reported; deployment NOT verified.' : `Superseded plan ${i}`, evidence: r.allowed_source_ids.slice(n, n += i < 7 ? 7 : 6) })), limitations: ['Reports are not proof of deployment.'], process: processRecord });
     }
     assert.equal(r.input.goal, 'current_project_briefing');
     assert.match(r.input.briefing_policy, /ONE recent.*Older evidence|Older evidence.*ONE recent/);

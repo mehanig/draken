@@ -1,5 +1,5 @@
 import { getDb } from '../db/schema';
-import { SUMMARY_PROCESS_PROMPT } from '../workflow-learning';
+import { SUMMARY_PROCESS_PROMPT, preparedProcess } from '../workflow-learning';
 import { saveSummaryProcess } from '../factory/learning-store';
 import { readWorkflowOriginals } from '../evidence-adapter';
 import { assertRecentSessions } from '../sources/activity-window';
@@ -388,7 +388,7 @@ export class SummaryTree {
       this.db.prepare(`UPDATE ${this.runTable} SET cache_hits = cache_hits + ?, processed_entries = processed_entries + ? WHERE id = ?`)
         .run(Number(cached), newlyProcessed.length, this.runId);
     };
-    let processValue: unknown;
+    let processValue: unknown, processSourceError: string | undefined;
     this.stage(spec.kind, spec.label);
     for (const cacheKey of [spec.key, spec.legacyKey].filter((key): key is string => Boolean(key))) {
       const cache = this.db.prepare('SELECT output_json,model,prompt_version FROM summary_cache WHERE key = ?').get(cacheKey) as { output_json: string; model: string; prompt_version: string } | undefined;
@@ -420,20 +420,27 @@ export class SummaryTree {
         let previousOutput = '';
         let citationCandidate: NodeSummary | undefined;
         let maxSources = Infinity;
-        let parsed: T | undefined;
+        let parsed: T | undefined, processRepair = false;
         for (let attempt = 0; attempt < 2; attempt++) {
           if (attempt) this.stage(`Repairing ${spec.kind}`, `${spec.label} (attempt 2 of 2)`);
           const citationRepair = attempt > 0 && citationCandidate !== undefined;
           // Keep this outside call(): even synthetic/overridden providers must
           // never receive revoked originals after an asynchronous planning yield.
           verify();
-          const response = await this.call({ task: citationRepair ? 'repair_summary_citations' : spec.kind === 'topics' ? 'group_topics' : 'summarize', stage: spec.kind,
+          let response: string;
+          try { response = await this.call({ task: citationRepair ? 'repair_summary_citations' : spec.kind === 'topics' ? 'group_topics' : 'summarize', stage: spec.kind,
             input: wire.input,
             ...(citationRepair ? { ...(Number.isFinite(maxSources) ? { max_distinct_sources: maxSources } : {}), citation_repairs: citationCandidate!.observations.flatMap((item, index) => Number.isFinite(maxSources) || item.evidence.length > MAX_EVIDENCE ? [{ observation: index + 1, topic: item.topic, state: item.state, summary: item.summary, candidate_source_ids: item.evidence, max_references: MAX_EVIDENCE }] : []) } : {}),
             [spec.kind === 'topics' ? 'allowed_observation_ids' : 'allowed_source_ids']: [...wire.allowed],
             ...(validationError ? { repair: { validation_error: validationError, ...(spec.batch && citationRepair ? {} : { previous_output: previousOutput }),
               instruction: citationRepair ? 'Return only selections for citation_repairs. Keep claims unchanged; select only sufficient supporting references from each observation’s candidates, at most 16 each. If max_distinct_sources is supplied, the UNION across all selections must also fit that total; repeated references count once. Never drop support for distinct claims or qualifications to meet the limit.' : 'Correct the previous output against the original input and allowed IDs. Do not invent or guess source references.' } } : {}) },
-          (citationRepair ? citationRepairSystem : spec.kind === 'topics' ? groupingSystem : spec.batch ? batchSummarySystem + ((spec.payload as { goal?: string }).goal === 'current_project_briefing' ? `\nFor this final briefing selection, the exhaustive-history instructions above do not apply: ${BRIEFING_POLICY}` : '') : summarySystem) + (spec.leafInput && !citationRepair ? SUMMARY_PROCESS_PROMPT : ''));
+          (citationRepair ? citationRepairSystem : spec.kind === 'topics' ? groupingSystem : spec.batch ? batchSummarySystem + ((spec.payload as { goal?: string }).goal === 'current_project_briefing' ? `\nFor this final briefing selection, the exhaustive-history instructions above do not apply: ${BRIEFING_POLICY}` : '') : summarySystem) + (spec.leafInput && !citationRepair ? SUMMARY_PROCESS_PROMPT : '')); }
+          catch (error) {
+            if (!processRepair || this.signal.aborted) throw error;
+            verify();
+            if (this.accountAggregation) assertRecentSessions(this.db, this.sync.items.map(item => item.session_id));
+            break;
+          }
           // A provider may yield to inclusion, agent, effective-record or file
           // changes. Never persist its result (or attempt repair) on stale proof.
           verify();
@@ -441,7 +448,21 @@ export class SummaryTree {
             const raw = parseJson(response, limits.characters + (spec.leafInput && !citationRepair ? 60000 : 0));
             if (spec.leafInput && !citationRepair) processValue = (raw as { process?: unknown }).process;
             const local = citationRepair ? repairSummaryCitations(citationCandidate!, raw, wire.allowed, limits, maxSources) : validate(raw, wire.allowed);
-            parsed = validate(wire.decode(local), spec.allowed);
+            parsed ??= validate(wire.decode(local), spec.allowed);
+            if (spec.leafInput && !citationRepair && attempt === 0) {
+              const roles = new Map([...dependencies].map(item => [sourceKey(item), item.role]));
+              try { preparedProcess(processValue, [...spec.allowed], [...spec.allowed].map(ref => roles.get(ref) || 'unknown')); }
+              catch (error) {
+                // Use the existing second attempt, never a new retry allowance.
+                // Keep the already-valid ordinary summary even if process repair fails.
+                validationError = `The ordinary summary is valid. Correct the process property: ${error instanceof Error ? error.message : 'Invalid process'}`;
+                previousOutput = response.slice(0, spec.batch ? 8000 : OUTPUT_CHARS);
+                const run = this.db.prepare(`SELECT invocations,max_invocations FROM ${this.runTable} WHERE id=?`).get(this.runId) as { invocations: number; max_invocations: number };
+                if (run.invocations >= run.max_invocations - (this.background ? 0 : 1)) break;
+                processRepair = true;
+                continue;
+              }
+            }
             break;
           } catch (error) {
             citationCandidate = error instanceof CitationLimitError ? error.candidate : undefined;
@@ -458,7 +479,7 @@ export class SummaryTree {
       if (processInput && (processValue as { fragments?: unknown[] } | null)?.fragments?.length) {
         const frozen = JSON.parse(processInput);
         try { await readWorkflowOriginals([...frozen.evidence, ...frozen.background], this.signal); }
-        catch { this.signal.throwIfAborted(); processValue = undefined; }
+        catch (error) { this.signal.throwIfAborted(); processSourceError = error instanceof Error ? error.message : 'Original verification failed'; }
         verify();
       }
       this.db.transaction(() => {
@@ -468,7 +489,7 @@ export class SummaryTree {
         if (processInput) {
           const references = [...spec.allowed];
           const roles = new Map([...dependencies].map(item => [sourceKey(item), item.role]));
-          saveSummaryProcess(spec.key, this.sync.models.summary, { table: this.runTable, id: this.runId }, processInput, processValue, references, references.map(ref => roles.get(ref) || 'unknown'));
+          saveSummaryProcess(spec.key, this.sync.models.summary, { table: this.runTable, id: this.runId }, processInput, processValue, references, references.map(ref => roles.get(ref) || 'unknown'), { sourceError: processSourceError });
         }
       })();
       return output;
