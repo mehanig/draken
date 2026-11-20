@@ -6,7 +6,7 @@ This is the engineering-workspace foundation, not a general coding agent. The cu
 
 ## Repository declaration
 
-Commit `.draken/environment.json`. Draken's declaration pins a full Node 22 development image, matching the Node 22 toolchain used by its CI:
+Commit `.draken/environment.json`. Draken's declaration pins a full Node 22.23.5 development image. Its CI currently uses Node 22.23.4; the workspace tests verify the newer patch version rather than claiming an exact CI image match:
 
 ```json
 {
@@ -65,7 +65,9 @@ Results persist under the private data directory's `factory-workspaces/`. The ru
 ## Observed validation
 
 - A real Draken checkout at `7320eeb4fe99fe8d3acd0a1b86090337341b1962` contained all **376 committed files**. Dependency setup, native SQLite compilation, type/unused-code checks, application build and **805 automated tests** passed inside Docker. No tests were weakened or skipped. The patch was empty and there were no model calls because the environment was declared.
-- A separate small repository without a declaration received a real Luna-generated environment, then installed its locked dependencies and passed its tests. That used one accounted model call, not a simulated response.
+- The browser-started run at `2a4d7057212285b76d3fdb49cdc24e235967805c` checked out **382 committed files** and passed all seven stages, including **806 automated tests**. It used zero model calls and produced an empty patch. The fresh collector mounted the workspace read-only; no run containers, volumes or networks remained afterward. Reopening Factory showed the saved result and test log without starting another run. Desktop and 390px mobile checks reported no page errors or horizontal overflow.
+- A separate small repository without a declaration received a real Luna-generated environment, then installed its locked dependencies and passed its tests. That used one accounted model call (506 input tokens, 92 output tokens, $0.0000966), not a simulated response.
+- Host validation also passed 806 automated tests, 73 browser tests, type checking and unused-code checking.
 - `tests/factory-workspace-live.cjs` checked real edits across stages, an unchanged host checkout, excluded host credentials/Git remotes, read-only patch collection and preservation of edits on cancellation.
 - Development failures were retained: generated image scripts initially lacked read permission for the non-root worker; the first full test run exposed non-executable temporary files. Both environment problems were corrected rather than changing test assertions.
 
