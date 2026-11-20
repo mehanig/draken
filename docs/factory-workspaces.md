@@ -2,7 +2,7 @@
 
 Factory can now check out a complete committed repository tree into a private Docker volume, prepare its development environment, and run its declared workflow there. Setup and checks share the same workspace, including installed dependencies and code edits. Nothing is applied to the host checkout.
 
-This is the engineering-workspace foundation, not a general coding agent. The current workflow executes repository-declared setup/check commands. Agent task planning, independent acceptance testing and PR delivery remain separate work.
+This is the engineering-workspace foundation, not a general coding agent. The current runner executes repository-declared setup/check commands; it does not receive a learned workflow or engineering objective. The agreed next design is **one host-side Pi session for the entire workflow, with all coding tools operating inside one persistent Docker workspace**. Environment setup/check commands are prerequisites, not a replacement for that workflow. Independent step sessions and parallelism are deferred. See [the handoff review and implementation plan](factory-agent-handoff.md). This session integration, independent acceptance testing and PR delivery are not implemented yet.
 
 ## Repository declaration
 
