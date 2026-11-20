@@ -10,7 +10,7 @@ A local-first engineering sync across your **pi, Codex CLI and Claude Code sessi
 
 **Sync with Draken → call or chat → keep a short recap.**
 
-**Draken 0.9.3** makes Settings session lists part of the page, without an inner scrollbar. Ignored sessions are hidden by default behind **Show ignored sessions**, without changing their inclusion settings. The existing isolated evidence module interprets questions before retrieval, replacing intent regexes. Normal project chat uses three model calls—planning, selection and answer—or four with citation correction. This adds a request and latency, not a guarantee of exhaustive retrieval. Native voice shares evidence preparation and keeps its own answering model. Preparation defaults to sessions active within seven days, with a configurable window, a startup flag and a dedicated `/settings` page. Existing histories, notes, caches, vectors, permissions and explicit review are preserved. See [the release notes](CHANGELOG.md#093).
+**Draken 0.10.0** introduces **Factory**: workflow proposals learned from your session history during normal background summarization. Browse steps, applicability and source evidence, grouped by repository or non-Git folder. Different repositories are not matched together. Factory is available in the top bar, with a hamburger menu on mobile. Opening it starts no model calls; proposals do not execute anything. Existing history and caches are preserved, and old summaries are not automatically reprocessed. See [the release notes](CHANGELOG.md#0100).
 
 **Automatic preparation:** **Settings → Automatically prepare history** controls one pipeline: scan, index locally, then cache reusable summaries through your configured provider and quota/API billing. Both stages default on; saved opt-outs remain unchanged until you explicitly enable the combined control. Idle minute checks include small tails. Disabling stops both stages and retains completed embeddings and summaries. Paid failures appear in the shared Home/Settings status and require **Retry automatic preparation**; local failures back off five minutes.
 
@@ -28,7 +28,7 @@ Draken remembers which evidence a finished sync covered, what you decided, and w
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.9.3](CHANGELOG.md#093) and [upgrade instructions](SETUP.md#upgrade-to-093), including idle ending of older inactive sessions.
+> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.10.0](CHANGELOG.md#0100) and [upgrade instructions](SETUP.md#upgrade-to-0100), including idle ending of older inactive sessions.
 
 ```sh
 npm install -g draken
@@ -219,7 +219,7 @@ This is not a drop-in replacement for the old Docker/Claude task dashboard or it
 
 Source builds, development commands, test/probe instructions and the code map live in [CONTRIBUTING.md](CONTRIBUTING.md). They are not needed for normal npm installation.
 
-See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist and focused high-risk review areas. The public landing page lives in `site/`; changes there on `master`/`main` trigger the existing website deployment workflow. Its `scripts/site-release.cjs` gate validates the version copy and withholds deployment until npm `latest` matches the root package version. Release copy describes 0.9.3 after release, not evidence of a live deployment. Qualify and publish npm separately before allowing the gated website deployment; this documentation change does not merge, publish or deploy anything. Focused lifecycle/readiness regressions are `tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs` and `tests/voice-live-updates.test.cjs`; browser coverage is `tests/ui/live-conversation.spec.ts`. Existing cache/consent regressions remain required.
+See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist and focused high-risk review areas. The public landing page lives in `site/`; changes there on `master`/`main` trigger the existing website deployment workflow. Its `scripts/site-release.cjs` gate validates the version copy and withholds deployment until npm `latest` matches the root package version. Release copy describes 0.10.0 after release, not evidence of a live deployment. Qualify and publish npm separately before allowing the gated website deployment; this documentation change does not merge, publish or deploy anything. Focused lifecycle/readiness regressions are `tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs` and `tests/voice-live-updates.test.cjs`; browser coverage is `tests/ui/live-conversation.spec.ts`. Existing cache/consent regressions remain required.
 
 ## License
 

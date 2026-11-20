@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0
+
+### Factory: workflows from your own work
+
+- Learn workflow proposals during normal background summarization. New summaries retain process records; matching uses the existing preparation consent, activity window and invocation allowance. Opening Factory or refreshing it starts no model calls.
+- Group proposals by the session’s Git repository or non-Git folder. Subfolders and linked worktrees share a repository; separate repositories, clones and non-Git folders are not matched together.
+- Show applicability, steps, limitations and expandable source evidence in Factory. Recheck source access, original bytes and repository identity before displaying saved proposals. Proposals are not approval to execute, and Factory does not run workflows.
+- Add Factory to the top bar and use a hamburger menu for navigation and account controls on mobile. Remove generic explanatory copy and repeated info icons from Factory.
+- Preserve ordinary summaries when process extraction fails, retain failed attempts for diagnosis, and allow a limited format correction within existing invocation limits. Existing cached history is not automatically reprocessed; explicit preparation can select up to six saved summary leaves.
+- Add process-record storage without deleting histories, notes, caches, vectors or review state. Workflow discovery still depends on available fragments and model decisions; it is not exhaustive reconstruction or proof of success.
+- Qualification includes 771 automated tests and 70 browser tests, including repository separation, source revocation, cancellation, accounting and responsive navigation.
+
 ## 0.9.3
 
 - Let session lists in Settings flow with the page instead of using an inner scrollbar, on desktop and mobile.
