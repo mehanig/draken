@@ -14,4 +14,16 @@
 .factory-card > details > summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
 .factory-evidence { margin: 16px 0; padding: 0 16px; border-left: 2px solid currentColor; }
 .factory-refs { display: block; opacity: .75; }
+.factory-execution { margin: 24px 0; padding: 20px; border: 1px solid var(--rule); background: var(--panel); }
+.factory-execution summary { cursor: pointer; padding: 8px 0; }
+.factory-run-form { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin: 16px 0; }
+.factory-run-form label { display: flex; flex-direction: column; gap: 6px; }
+.factory-run-form input { width: 160px; max-width: 100%; }
+.factory-run { border-top: 1px solid var(--rule); margin-top: 18px; padding-top: 12px; }
+.factory-run .factory-line { flex-wrap: wrap; }
+.factory-run-status { font-size: .85rem; text-transform: capitalize; }
+.factory-run-completed { color: var(--green); }
+.factory-run-failed, .factory-run-interrupted { color: var(--red); }
+.factory-workspace-log { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--paper); border: 1px solid var(--rule); font-size: 12px; }
+.factory-run-steps li { display: flex; justify-content: space-between; gap: 12px; }
 @media (max-width: 600px) { .factory-page { padding: 20px 16px 56px; } .factory-page ol, .factory-page ul { padding-left: 22px; } }

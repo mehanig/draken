@@ -1,6 +1,8 @@
 import { getDb } from '../db/schema';
 import { HttpError } from '../errors';
 import { COMPARISON_FORMAT, LEARNING_FORMAT, readWorkflowComparison, type LearningRow } from './learning-store';
+import { discoveryFromProposal } from './discovery';
+import { savedEnrichment } from './enrichment';
 import type { FactoryPage } from './types';
 
 /** Reads saved proposals only. Background summarization owns all learning. */
@@ -20,7 +22,10 @@ export async function readFactory(cursor: number | undefined, signal: AbortSigna
     try {
       const { decision, evidence, location } = await readWorkflowComparison(row, signal);
       signal.throwIfAborted();
-      if (decision.sameWorkflow) result.proposals.push({ id: row.id, model: row.model, createdAt: row.created_at, decision, evidence, location });
+      if (decision.sameWorkflow) {
+        const proposal = { id: row.id, model: row.model, createdAt: row.created_at, decision, evidence, location };
+        result.proposals.push({ ...proposal, enrichment: savedEnrichment(discoveryFromProposal(proposal)) });
+      }
     } catch {
       signal.throwIfAborted();
       result.unavailable++;

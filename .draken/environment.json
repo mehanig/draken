@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "image": "node@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb",
+  "setup": [
+    { "name": "Install server dependencies", "argv": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"] },
+    { "name": "Build SQLite addon", "argv": ["npm", "rebuild", "better-sqlite3", "--build-from-source", "--nodedir=/usr/local"] },
+    { "name": "Install client dependencies", "argv": ["npm", "ci", "--prefix", "client", "--ignore-scripts", "--no-audit", "--no-fund"] }
+  ],
+  "checks": [
+    { "name": "Types and unused code", "argv": ["npm", "run", "check"] },
+    { "name": "Build application", "argv": ["npm", "run", "build"] },
+    { "name": "Automated tests", "argv": ["sh", "-c", "node --test --test-concurrency=4 tests/*.test.cjs"] }
+  ]
+}
