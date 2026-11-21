@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0
+
+### Factory: prepared workflows and checkout execution
+
+- Enrich discovered workflows during preparation and save reusable steps, review checks, completion criteria, risks and concrete input definitions. Factory displays the saved guidance; running a task does not regenerate it, and refreshing the page starts no work.
+- Use the configured final model and existing preparation accounting. Retain failed attempts and validate source permissions before preparation, display and execution. Existing workflows without current enrichment offer an explicit preparation action.
+- Add workflow-defined input forms, a repository ref, run history/logs/cancellation and one shared execution-call setting. There is no generic task prompt box.
+- Add a checkout-only execution prototype: one host Pi session operates through container-backed tools in a persistent Docker workspace, with ordinary Docker networking, retained patches and fresh repository checks. It requires explicit Docker/SDK/repository configuration and a committed `.draken/environment.json`. Execution scripts are not included in the npm package, so this release does not enable Run in a normal npm installation.
+- Preserve existing histories, caches, review state and failed-run receipts. Add workflow-enrichment storage without deleting previous records.
+- Record the authoritative workflow-driven design and remaining implementation gaps. The current prototype still prohibits publication and restricts edits to several file categories; complete agent-driven PR/release delivery has not been demonstrated. These are implementation limitations, not the intended limits of Factory.
+- Validation before release: 800 automated tests and the existing browser qualification, plus real Docker networking/lifecycle and Pi SDK protocol checks. These checks do not establish end-to-end model-driven delivery.
+
 ## 0.10.0
 
 ### Factory: workflows from your own work
