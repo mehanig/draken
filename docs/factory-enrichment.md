@@ -47,11 +47,27 @@ The browser invokes `scripts/factory-workspace.cjs REPOSITORY REF NEW_PRIVATE_OU
 
 One server-side execution owner rejects overlapping runs and uncertain cleanup, including old release receipts. Workflow preparation uses the existing summary-preparation owner, not a second scheduler. Explicit preparation requests have durable request IDs; repeating an attempted request cannot make another provider call. Failed raw output and accounting remain retained.
 
-The host owns Pi, credentials, sources, accounting and Docker control. An explicit empty resource loader disables executable project extensions, MCP/codemode, skills and templates. Repository instructions may be read as data. Workers are non-root with read-only roots, dropped capabilities, seccomp, no host checkout/socket mounts, and CPU/memory/PID limits. Engineering workers use 2 CPUs, 4 GiB RAM, 512 PIDs and 1 GiB temporary storage. Network access is limited to npm reads/audits through the restricted broker. Rootless containers share the host kernel and have no volume disk quota; host Pi/adapters remain trusted code.
+The host owns Pi, credentials, sources, accounting and Docker control. An explicit empty resource loader disables executable project extensions, MCP/codemode, skills and templates. Repository instructions may be read as data. Workers are non-root with read-only roots, dropped capabilities, seccomp, no host checkout/socket mounts, and CPU/memory/PID limits. Engineering workers use 2 CPUs, 4 GiB RAM, 512 PIDs and 1 GiB temporary storage. Workers have public HTTPS read access through the broker, including public GitHub APIs and deployment websites, plus npm registry installation/audit. They stay on an internal Docker network; there is no unrestricted direct connection or CONNECT tunnel. Every destination and redirect is resolved and checked against private, loopback, link-local, metadata and reserved addresses, with the connection IP, TLS identity and Host tied together. Caller credentials/cookies are not forwarded. Write methods are denied except npm audit endpoints. Rootless containers share the host kernel and have no volume disk quota; host Pi/adapters remain trusted code.
 
 Execution requests are durably reserved through `session.agent.streamFunction`, reconciled with returned usage, and stopped on unknown accounting. Explicit unknown usage is never displayed as zero. A settled assistant alone does not establish completion. Runs have a 15-minute deadline; bash has a 240-second maximum, process-group cancellation and 1 MB output limit, returning the final 40,000 characters. File tools support regular text files up to 1 MB and reject traversal/outside symlinks. Cancellation stops the actual task container before patch collection. Failed collection retains the volume; uncertain cleanup blocks starts.
 
 Private `factory-workspaces/<run>/` receipts retain request/exit files, baseline/events, the reused enrichment, session/accounting/result, patch, verification and cleanup. Legacy `factory-runs/` receipts remain retained without an execution API/UI. Discovery-authorized sessions are saved under the normal Pi source root in `draken-factory/` with the actual repository identity. Normal consent, activity windows, exclusions and verified preparation control ingestion. Host verification is separate; no automatic success labels are inserted into learning.
+
+## Network interface available to the agent
+
+The execution request includes a host-authored `network` descriptor with these exact commands. There is no additional Pi tool to discover:
+
+```sh
+# npm already uses npm_config_registry=http://egress:8080/npm/
+npm view draken@0.10.0 version --json
+# Use ordinary npm install/audit in a temporary directory for artifact checks.
+node /factory/network.cjs 'https://api.github.com/repos/OWNER/REPO/actions/runs?per_page=5' /tmp/actions.json
+node /factory/network.cjs https://SITE/ /tmp/website.html
+```
+
+The HTTPS helper writes the response to stdout or the optional file, reports status/final URL on stderr and exits nonzero for non-2xx. It follows at most five redirects, checking each new destination. It does not automatically retry failures. The broker imposes a 60-second overall request deadline and response limits of 128 MB (16 MB for rewritten npm metadata). IPv6-only destinations are unsupported. Authentication, publication, merge, push and deployment permissions are not granted by public read access. Outbound URLs can transmit data; the agent must not put secrets or repository contents in them. Public networking is not a guarantee that checkout contents cannot leave the container.
+
+Network authority changed to `factory-host-policy-v2`. Older npm-only enrichments are not silently reused; they require explicit preparation under the new policy. Failed execution receipts remain unchanged, and deploying this change does not rerun them.
 
 ## Code and validation
 
@@ -63,6 +79,6 @@ Private `factory-workspaces/<run>/` receipts retain request/exit files, baseline
 
 Tests cover automatic preparation using the final model and shared allowance, explicit retries/idempotency without resetting learning errors, raw failure retention, source revocation, missing/stale enrichment, unchanged reuse across tasks, page reads with no model calls, UI preparation/display/reuse and one execution prompt. Typechecks and Knip check for unused imports/exports/files; the old per-run enrichment prompt and tool-switching path have been removed.
 
-Opt-in real-Docker tests use deterministic responses to prove lifecycle, network/tool isolation, protected-check rejection, fresh verification, cancellation and patch recovery. The actual SDK 1.4.0 contract test uses simulated transport/container operations to prove one execution prompt, saved-enrichment reuse, tool continuations and reconciled usage. These are not model-quality proofs.
+Opt-in real-Docker tests use deterministic responses to prove lifecycle, network/tool isolation, protected-check rejection, fresh verification, cancellation and patch recovery. The actual SDK 1.4.0 contract test uses simulated transport/container operations to prove one execution prompt, saved-enrichment reuse, tool continuations and reconciled usage. These are not model-quality proofs. Real container checks also exercise npm version lookup/install/audit, the public GitHub Actions API and the actual deployment website through the documented helper; unit tests cover redirects to private/metadata addresses, DNS rebinding, credential stripping, rejected write methods and redirect limits.
 
 Earlier paid Luna parser-repair and fixed-release receipts remain historical, not evidence for the current lifecycle or Astra task quality. The earlier six-call/$0.00073426 accounting correction remains retained. Independent task acceptance, controlled delivery, automatic restart reconciliation, outcome-learning joins, SDK consolidation and packaged distribution remain unfinished.
