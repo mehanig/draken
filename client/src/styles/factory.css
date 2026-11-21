@@ -22,7 +22,6 @@
 .factory-run-form .factory-task { flex: 1 1 100%; min-width: 0; }
 .factory-run-form textarea { width: 100%; min-height: 88px; resize: vertical; }
 .factory-run-form input:not([type=checkbox]) { width: 160px; max-width: 100%; }
-.factory-run-form .factory-plan-choice { flex-direction: row; align-items: center; font-size: .875rem; }
 .factory-run { border-top: 1px solid var(--rule); margin-top: 18px; padding-top: 12px; }
 .factory-run .factory-line { flex-wrap: wrap; }
 .factory-run-status { font-size: .85rem; text-transform: capitalize; }

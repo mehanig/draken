@@ -2,7 +2,7 @@
 // Repository snapshots and Docker control only. Repository setup/check commands never run on the host.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const {validate,pinned,fingerprint}=require('./factory-workspace/environment.cjs');
-const {DockerExecutor,dockerIsolation}=require('../dist/factory/docker');
+const {assertDockerHost,dockerIsolation}=require('../dist/factory/docker');
 const {workflowLocation}=require('../dist/factory/location');
 const {runAgent,sdkConfiguration}=require('./factory-workspace/agent.cjs');
 const {loadBrief}=require('./factory-workspace/authorization.cjs');
@@ -66,9 +66,9 @@ async function main(){
   if(!Object.hasOwn(source.files,'.draken/environment.json'))throw Error('Missing required file: .draken/environment.json. Add and commit it to the selected branch or commit before running repository checks.');
   environment=validate(JSON.parse(source.files['.draken/environment.json']),approved);
   if(briefFile){authorization=loadBrief(path.resolve(briefFile),repo,source.commit);sdkConfiguration();await authorization.authorize(controller.signal);save('workflow.json',authorization.brief);}
-  const info=JSON.parse((await docker(['image','inspect',environment.image],{signal:controller.signal})).toString())[0];await new DockerExecutor({binary,host,image:info.Id,stages:{},record:async()=>{}}).check(controller.signal);
+  const info=JSON.parse((await docker(['image','inspect',environment.image],{signal:controller.signal})).toString())[0];assertDockerHost(JSON.parse((await docker(['info','--format','{{json .}}'],{signal:controller.signal})).toString()),host,info.Id);
   save('environment.json',environment);
-  const tool=fs.readFileSync(path.join(__dirname,'factory-workspace/tool.cjs')),worker=fs.readFileSync(path.join(__dirname,'factory-workspace/worker.cjs')),broker=fs.readFileSync(path.join(__dirname,'factory-container/proxy.cjs'));
+  const tool=fs.readFileSync(path.join(__dirname,'factory-workspace/tool.cjs')),worker=fs.readFileSync(path.join(__dirname,'factory-workspace/worker.cjs')),broker=fs.readFileSync(path.join(__dirname,'factory-workspace/proxy.cjs'));
   const key=fingerprint({environment,commit:source.commit,tool:crypto.createHash('sha256').update(tool).digest('hex'),worker:crypto.createHash('sha256').update(worker).digest('hex'),broker:crypto.createHash('sha256').update(broker).digest('hex'),platform:process.arch,wrapper:2});
   const context=path.join(output,'image');fs.mkdirSync(context,{mode:0o700});fs.writeFileSync(path.join(context,'tool.cjs'),tool);fs.writeFileSync(path.join(context,'worker.cjs'),worker);fs.writeFileSync(path.join(context,'proxy.cjs'),broker);
   fs.writeFileSync(path.join(context,'Dockerfile'),`FROM ${environment.image}\nUSER root\nRUN mkdir -p /factory /workspace && chown 65532:65532 /workspace\nCOPY worker.cjs proxy.cjs tool.cjs /factory/\nRUN chmod 644 /factory/worker.cjs /factory/proxy.cjs /factory/tool.cjs\nLABEL draken.environment=${key}\nUSER 65532:65532\nWORKDIR /workspace\nCMD ["node", "/factory/worker.cjs"]\n`);
@@ -88,7 +88,7 @@ async function main(){
    await runWorker({...input,mode:'prepare'});
    const baseline=await runWorker({...input,mode:'checks',label:'Baseline'},true);save('baseline.json',baseline);
    record({type:'stage-started',name:'Run workflow',phase:'agent'});
-   const agent=await runAgent({directory:path.join(output,'agent'),sessionDirectory:authorization.sessionDirectory,brief:authorization.brief,baseline,signal:controller.signal,record,maxCalls:authorization.brief.policy.maxCalls,authorize:()=>authorization.authorize(controller.signal),invoke:async(request,signal)=>{
+   const agent=await runAgent({directory:path.join(output,'agent'),sessionDirectory:authorization.sessionDirectory,brief:authorization.brief,environment,baseline,signal:controller.signal,record,maxCalls:authorization.brief.policy.maxCalls,authorize:()=>authorization.authorize(controller.signal),invoke:async(request,signal)=>{
     const raw=await docker(['exec','-i',container,'node','/factory/tool.cjs'],{signal,timeout:245000,limit:3_000_000,input:JSON.stringify(request)});const response=JSON.parse(raw.toString());if(!response.ok)throw Error(response.error);return response.value;
    }});
    modelCalls=agent.modelCalls;record({type:'stage-result',name:'Run workflow',phase:'agent',code:0});

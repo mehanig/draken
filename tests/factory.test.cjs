@@ -44,22 +44,9 @@ test('Factory reads verified saved proposals without syncs, provider calls or ne
  assert.equal(result.proposals[0].location.kind,'folder');
  assert.ok(!JSON.stringify(result).includes(path.join(dir,'sessions')));
 });
-test('enrichment uses verified proposals and rejects uncited source revocation during inference',async()=>{
- const {discoveryFromProposal,proposeFactoryEnrichment}=require('../dist/factory/enrichment');
- const {id}=await seed(),discovery=discoveryFromProposal((await readFactory(undefined,signal())).proposals[0]);
- const policy={id:'test',revision:'v1',locationKey:discovery.locationKey,discoveryRevision:discovery.revision,endpoint:'Tested patch',inputCheck:'input',prepare:'prepare',completionCheck:'complete',allowedCapabilities:[],allowedEffects:[],maxAttempts:1,timeoutMs:1000};
- let calls=0;const incomplete=await proposeFactoryEnrichment(id,policy,[],async()=>{calls++;return '{"bindings":[]}';},signal());assert.equal(incomplete.ready,false);assert.equal(calls,1);
- await assert.rejects(proposeFactoryEnrichment(id,policy,[],async()=>{db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();return '{"bindings":[]}';},signal()));
- const count=db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n;await readFactory(undefined,signal());assert.equal(db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n,count);
-});
-test('real enrichment entry point enforces its existing model-call owner allowance',async()=>{
- const {discoveryFromProposal,enrichFactoryWithModel}=require('../dist/factory/enrichment');const {id}=await seed(),d=discoveryFromProposal((await readFactory(undefined,signal())).proposals[0]);
- const policy={id:'test',revision:'v1',locationKey:d.locationKey,discoveryRevision:d.revision,endpoint:'Tested patch',inputCheck:'input',prepare:'prepare',completionCheck:'complete',allowedCapabilities:[],allowedEffects:[],maxAttempts:1,timeoutMs:1000};
- const runId=Number(db.prepare("INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key,invocations) VALUES ('fake','fake',1,0,?,'enrichment',1)").run(new Date().toISOString()).lastInsertRowid);
- await assert.rejects(enrichFactoryWithModel(id,policy,[],{table:'background_runs',runId,models:{summary:'fake',final:'fake',max_invocations:500}},signal()),/Invocation budget/);
- db.prepare("UPDATE background_runs SET status='completed' WHERE id=?").run(runId);
- await assert.rejects(enrichFactoryWithModel(id,policy,[],{table:'background_runs',runId,models:{summary:'fake',final:'fake',max_invocations:1}},signal()),/not running/);
- assert.equal(db.prepare('SELECT invocations FROM background_runs WHERE id=?').get(runId).invocations,1);
+test('enrichment rejects uncited source revocation after its accounted planning callback',async()=>{
+ const {readDiscovery}=require('../dist/factory/discovery'),{sessionPlan,proposeEnrichment}=require('../dist/factory-enrichment');const {id}=await seed(),d=await readDiscovery(id,signal());let calls=0;
+ await assert.rejects(proposeEnrichment(sessionPlan(d,'Repair parser',d.locationKey),{assertCurrent:async s=>{if((await readDiscovery(id,s)).revision!==d.revision)throw Error('Changed');},ask:async()=>{calls++;db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();return '{}';}},signal()));assert.equal(calls,1);
 });
 test('old saved comparisons cannot expose a workflow spanning different folders',async()=>{
  const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);
@@ -104,46 +91,36 @@ test('Factory rejects invalid cursors and cancellation without returning content
  for(const cursor of [0,-1,NaN,1.5])await assert.rejects(readFactory(cursor,signal()),/cursor/);
  const c=new AbortController();c.abort();await assert.rejects(readFactory(undefined,c.signal));
 });
-test('execution reads saved progress without invoking a model and withholds it after source exclusion',async()=>{
- const {id}=await seed();const {readDiscovery}=require('../dist/factory/enrichment');const {readExecution,startExecution}=require('../dist/factory/execution');
- const discovery=await readDiscovery(id,signal());Object.assign(process.env,{DRAKEN_FACTORY_PROPOSAL_ID:id,DRAKEN_DOCKER_BIN:'/not-invoked',DRAKEN_DOCKER_HOST:'unix:///test.sock',DRAKEN_FACTORY_IMAGE:'sha256:'+'a'.repeat(64)});
- const requestId='12345678-1234-4234-8234-123456789abc',run=path.join(dir,'factory-runs',requestId);fs.mkdirSync(path.join(run,'work'),{recursive:true});
- fs.writeFileSync(path.join(run,'request.json'),JSON.stringify({id:requestId,version:'0.10.0',proposalId:id,revision:discovery.revision,regenerate:false,createdAt:new Date().toISOString()}));
- fs.writeFileSync(path.join(run,'work','result.json'),JSON.stringify({status:'completed',detail:'Verified fixture',modelCalls:0}));
- fs.writeFileSync(path.join(run,'work','events.jsonl'),'{"type":"requested","capability":"registry"}\n{"type":"result","capability":"registry","outcome":{"ok":true}}\n');
- const state=await readExecution(signal());assert.equal(state.runs[0].status,'completed');assert.equal(state.runs[0].steps[0].status,'passed');
- assert.equal((await startExecution({requestId,version:'0.10.0',regenerate:false},'test-token',signal())).id,requestId);
- await assert.rejects(startExecution({requestId,version:'0.11.0',regenerate:false},'test-token',signal()),/already used/);
- for(const table of ['sync_runs','background_runs'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
- db.prepare("UPDATE agent_sessions SET included=0 WHERE id='episode-1'").run();await assert.rejects(readExecution(signal()));
-});
 test('agent workspace results and logs require fresh workflow source access, including uncited dependencies',async()=>{
- require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);const {id}=await seed();const {readDiscovery}=require('../dist/factory/enrichment');const {readWorkspaces,workspaceLog,startWorkspace}=require('../dist/factory/workspace');const discovery=await readDiscovery(id,signal());
+ require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);const {id}=await seed();const {readDiscovery}=require('../dist/factory/discovery');const {readWorkspaces,workspaceLog,startWorkspace}=require('../dist/factory/workspace');const discovery=await readDiscovery(id,signal());
  Object.assign(process.env,{DRAKEN_WORKSPACE_REPO:path.join(dir,'work'),DRAKEN_WORKSPACE_ALLOWED_IMAGES:'["approved"]',DRAKEN_DOCKER_BIN:'/not-called',DRAKEN_DOCKER_HOST:'unix:///not-called',DRAKEN_FACTORY_PI_SDK:__filename,DRAKEN_PI_FINAL_MODEL:'fixture/test'});
  const requestId='12345678-1234-4234-8234-123456789abc',run=path.join(dir,'factory-workspaces',requestId);fs.mkdirSync(path.join(run,'work'),{recursive:true});
  fs.writeFileSync(path.join(run,'request.json'),JSON.stringify({id:requestId,ref:'HEAD',propose:false,workflowId:id,revision:discovery.revision,task:'Repair the parser',location:discovery.locationKey,createdAt:new Date().toISOString()}));
  fs.writeFileSync(path.join(run,'work/result.json'),JSON.stringify({status:'completed',modelCalls:2,sessionId:'fixture'}));fs.writeFileSync(path.join(run,'work/events.jsonl'),JSON.stringify({type:'stage-result',name:'Test',code:0,stdout:'Verified fixture output'})+'\n');
- assert.equal((await readWorkspaces()).runs[0].workflowId,id);assert.match((await workspaceLog(requestId)).text,/fixture output/);
+ fs.mkdirSync(path.join(run,'work/agent'));fs.writeFileSync(path.join(run,'work/agent/enrichment.json'),JSON.stringify({guidance:{review:['Private task review']},requirements:['Do not publish']}));
+ assert.equal((await readWorkspaces()).runs[0].workflowId,id);assert.match((await workspaceLog(requestId)).text,/fixture output/);assert.match((await workspaceLog(requestId)).text,/Private task review/);
  assert.equal((await startWorkspace({requestId,ref:'HEAD',workflowId:id,task:'Repair the parser'},'fixture-token')).id,requestId);
+ await assert.rejects(startWorkspace({requestId,ref:'HEAD',workflowId:id,task:'A different task'},'fixture-token'),/already used/);
+ await assert.rejects(startWorkspace({requestId,ref:'HEAD',workflowId:id,task:'Repair the parser'}),/authenticated/);
  db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();assert.deepEqual((await readWorkspaces()).runs,[]);await assert.rejects(workspaceLog(requestId),/source changed|unavailable/);
  for(const table of ['sync_runs','background_runs'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
 });
 test('execution refuses invalid input, unauthenticated starts and unknown cancellations',async()=>{
- const {startExecution,cancelExecution}=require('../dist/factory/execution');
- await assert.rejects(startExecution({requestId:'../../escape',version:'0.10.0',regenerate:true},'token',signal()),/request ID/);
- await assert.rejects(cancelExecution('../../escape'),/Invalid run ID/);
- await assert.rejects(cancelExecution('12345678-1234-4234-8234-123456789abc'),/no longer active/);
- assert.equal(fs.existsSync(path.join(dir,'factory-runs')),false);
+ const {startWorkspace,cancelWorkspace}=require('../dist/factory/workspace');
+ await assert.rejects(startWorkspace({requestId:'../../escape',ref:'HEAD'}),/request ID/);
+ assert.throws(()=>cancelWorkspace('../../escape'),/Invalid/);
+ assert.throws(()=>cancelWorkspace('12345678-1234-4234-8234-123456789abc'),/no longer running/);
+ assert.equal(fs.existsSync(path.join(dir,'factory-workspaces')),false);
 });
 test('Factory API uses existing authentication, same-origin and no-store policy; GET starts no work',async()=>{
  server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const url=`http://127.0.0.1:${server.address().port}/api/factory`;
  const response=await fetch(url);assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');assert.deepEqual((await response.json()).proposals,[]);
  assert.equal((await fetch(url+'?before=invalid')).status,400);
  assert.equal((await fetch(url,{headers:{Origin:'https://other.example'}})).status,403);
- assert.equal((await fetch(url+'/execution')).status,200);
- assert.equal((await fetch(url+'/execution/runs',{method:'POST',headers:{Origin:'https://other.example','Content-Type':'application/json'},body:'{}'})).status,403);
+ assert.equal((await fetch(url+'/workspaces')).status,200);
+ assert.equal((await fetch(url+'/workspaces',{method:'POST',headers:{Origin:'https://other.example','Content-Type':'application/json'},body:'{}'})).status,403);
  process.env.DRAKEN_NO_AUTH='false';assert.equal((await fetch(url)).status,401);
- assert.equal((await fetch(url+'/execution')).status,401);
- assert.equal((await fetch(url+'/execution/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
+ assert.equal((await fetch(url+'/workspaces')).status,401);
+ assert.equal((await fetch(url+'/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,0);
 });

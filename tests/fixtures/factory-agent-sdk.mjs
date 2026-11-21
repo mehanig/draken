@@ -1,4 +1,4 @@
-// Deterministic SDK contract fixture. Never a model-quality or paid-execution proof.
+// Deterministic SDK fixture, not a provider or actual SDK compatibility proof.
 import fs from 'node:fs';
 import path from 'node:path';
 export const SettingsManager={inMemory:value=>value};
@@ -16,19 +16,24 @@ export const createReadTool=factory('read'),createWriteTool=factory('write'),cre
 export async function createAgentSession(options){
  if(options.settingsManager.compaction.enabled||options.settingsManager.retry.enabled||options.settingsManager.cacheWarming!=='off')throw Error('Automatic model work enabled');
  if(options.resourceLoader.getExtensions().extensions.length||options.resourceLoader.getAgentsFiles().agentsFiles.length)throw Error('Resource discovery enabled');
- const listeners=[],controller=new AbortController(),session={messages:[],agent:{streamFunction:async()=>{fs.appendFileSync(path.join(options.cwd,'fixture-provider-calls'),'call\n');}},
- getActiveToolNames:()=>options.tools,subscribe:f=>listeners.push(f),clearQueue:()=>{},abort:async()=>{controller.abort();},dispose:()=>{},getLastAssistantText:()=> JSON.stringify({status:'completed',summary:'Fixture finished'}),
+ const listeners=[],controller=new AbortController();let active=options.tools,answer='',planned=false;
+ const session={messages:[],agent:{streamFunction:async()=>{fs.appendFileSync(path.join(options.cwd,'fixture-provider-calls'),'call\n');}},getActiveToolNames:()=>[...active],setActiveToolsByName:names=>{active=[...names];},subscribe:f=>listeners.push(f),clearQueue:()=>{},abort:async()=>{controller.abort();},dispose:()=>{},getLastAssistantText:()=>answer,
  prompt:async text=>{
-  for(let i=0;i<2;i++){
-   await session.agent.streamFunction({},{});const message={role:'assistant',stopReason:i?'stop':'toolUse',usage:{input:10,output:2,cacheRead:0,cacheWrite:0,cost:{total:0.001}}};session.messages.push(message);
-   for(const listener of listeners)listener({type:'message_end',message});
-   if(i===0&&text.includes('"task":"fixture-weaken-check"'))await options.customTools.find(t=>t.name==='write').execute('weaken',{path:'verify.cjs',content:'process.exit(0);'},controller.signal);
-   if(i===0&&text.includes('"task":"fixture-cancel"')){
+  await session.agent.streamFunction({},{});
+  if(!planned){
+   if(active.length)throw Error('Planning tools were enabled');const data=JSON.parse(text.slice(text.indexOf('\n{"payload"')+1));
+   answer=JSON.stringify({steps:data.payload.plan.workflow.method.map((_,i)=>({step:i+1,approach:'Apply this step to the task',checks:['Check result']})),review:['Review the diff and repair findings'],completion:['Check requested endpoint'],risks:[]});planned=true;
+  }else{
+   if(active.join(',')!=='read,write,edit,bash'||!text.includes('factory-workflow-enrichment-v2'))throw Error('Execution did not receive enrichment');
+   if(text.includes('"task":"fixture-weaken-check"'))await options.customTools.find(t=>t.name==='write').execute('weaken',{path:'verify.cjs',content:'process.exit(0);'},controller.signal);
+   if(text.includes('"task":"fixture-cancel"')){
     await options.customTools.find(t=>t.name==='write').execute('write',{path:'cancelled.txt',content:'retained before cancellation\n'},controller.signal);
     for(const listener of listeners)listener({type:'tool_execution_start',toolName:'bash',toolCallId:'long-command'});
     await options.customTools.find(t=>t.name==='bash').execute('long-command',{command:'sleep 90'},controller.signal);
    }
+   answer=JSON.stringify({status:'completed',summary:'Fixture finished'});
   }
-  for(const listener of listeners)listener({type:'agent_settled'});
+  const message={role:'assistant',stopReason:'stop',usage:{input:10,output:2,cacheRead:0,cacheWrite:0,cost:{total:0.001}}};session.messages.push(message);
+  for(const listener of listeners){listener({type:'message_end',message});listener({type:'agent_settled'});}
  }};return {session};
 }

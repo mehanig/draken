@@ -1,119 +1,73 @@
-# Factory: real model enrichment and Docker execution
+# Factory: enriched workflows in one Pi session
 
-Discovery records how work was done. Enrichment uses an LLM to map that procedure to Factory capabilities and a repository policy. Execution consumes the resulting revision; it does not execute historical text or model-generated shell commands.
+This is a checkout-only prototype in draft PR #54, not part of published 0.10.0. Runtime scripts are not yet included in the npm package. Opening or refreshing Factory starts no inference or execution.
 
-This implementation is on the Factory enrichment branch, not in the published 0.10.0 package. Factory page reads still start no work.
+## Execution path
 
-## Real test in Draken
+**Verified historical workflow → task-specific enrichment → one Pi session executes the complete enriched workflow → fresh host checks and retained patch.**
 
-The existing release-verification discovery was supplied to **`openai/gpt-6-luna`**, together with the capability catalog and policy. No step-to-action bindings were supplied. The model returned:
+1. The operator selects a matching repository workflow, committed ref and concrete task, then clicks **Run**. Sources, including uncited dependencies, are checked again. One server-side owner prevents overlapping runs; unfinished cleanup, including legacy release runs, blocks another start.
+2. The host snapshots that exact commit. It requires the committed `.draken/environment.json`, validates the approved image and prepares the isolated workspace. Original setup/check commands establish the baseline. Dirty and untracked host files are not included.
+3. The host creates one Pi session. Its first model turn has **no active tools**. It receives the historical procedure, task, immutable policy, environment and baseline, and produces task-specific approaches/checks for every historical step, review guidance, completion criteria and risks.
+4. The pure enrichment module validates that output. Historical observations remain unchanged. Draken's additions and mandatory preparation, verification, repair, self-review, completion and escalation requirements are separate. Invalid enrichment stops the run; it is not repaired or retried silently. The validated result is saved in `agent/enrichment.json` and appears in **View log**.
+5. The same session receives the complete enrichment and enables container-only `read`, `write`, `edit` and `bash`. It executes the workflow, reviews its diff, repairs findings and retests. A model-written plan cannot grant authority or alter host requirements. Review by this session is **self-review**, not independent review.
+6. The host stops the task processes, collects the candidate through a read-only volume mount and pristine Git metadata, then applies it to a fresh volume. Original setup/check commands run again. The receipt records the patch hash and check-definition hash, with scope `frozen-repository-checks`. Passing these checks does **not** establish arbitrary task acceptance.
 
-```json
-{"bindings":[
-  {"step":1,"action":"registry","verify":"check-registry"},
-  {"step":2,"action":"install","verify":"check-install"},
-  {"step":3,"action":"audit","verify":"check-audit"},
-  {"step":4,"action":"release","verify":"check-release"}
-]}
-```
+No publication, push, pull request creation or parallel agents. Unsupported endpoints or permissions must be reported as blockers. The old fixed-release/per-step executor, capability catalog, release UI and saved-binding regeneration path have been removed; private historical receipts remain intact. The checks-only CLI invocation remains an internal diagnostic, not a second Factory Run form.
 
-These exact bindings were validated and executed against **Draken 0.10.0**, without intermediate prompts or manual edits.
+## Model, accounting and learning
 
-| Result | Observed |
-|---|---|
-| Enrichment | One real Luna call for the final revision; 1,991 input and 63 output tokens |
-| Estimated model cost | $0.0002306, retained through shared `modelCall` accounting |
-| Stage execution | 11 distinct Docker containers, including input/preparation/final checks |
-| npm | Requested version is latest, with integrity and provenance metadata |
-| Package | Temporary installation, matching CLI version and selected production files |
-| Production audit | Zero vulnerabilities |
-| Release/deployment | Successful GitHub workflows for the release tag commit |
-| Live website | HTTP 200 and version 0.10.0 |
-| Cleanup | No run containers, networks or artifact volumes retained |
+- Both enrichment and execution use the **same final summarization model**, selected by `defaultModels().final`: `DRAKEN_PI_FINAL_MODEL`, then `DRAKEN_PI_MODEL`, then `openai/gpt-6-astra`. There is no separate Factory model override.
+- The default allowance is **16 total provider calls**, including enrichment, tool continuations and repair. One session holds the entire conversation. Automatic retries, compaction and cache warming are disabled.
+- The host durably reserves each dispatch through the qualified `session.agent.streamFunction`, reconciles response usage and stops on missing or invalid accounting. Failed paid attempts and explicit unknown usage are retained, never converted to zero. A final assistant message alone is not success.
+- Source permission checks occur before/after planning, provider/tool work and completion. The server rechecks dependencies before displaying saved results, logs or enrichment. Revocation withholds all of that content.
+- Discovery-authorized sessions are saved under the normal Pi session root in `draken-factory/`, with the real repository `cwd` and workflow/policy metadata. Normal consent, activity windows, exclusions and verified preparation still control ingestion. Host verification stays separate; no success label is automatically inserted into learning.
 
-Four short-lived network brokers were also used; they are not counted as workflow stages. The final run used rootless Docker 29.10.0. Three real enrichment calls across development revisions cost an estimated **$0.0006941 total**. Two earlier full runs passed. The final revision's first execution stopped after audit when a fresh Factory source request failed with `fetch failed`; it did not continue without source validation. An explicit new execution reused that unchanged model-generated plan and passed all eleven stages with **zero additional model calls**. Reuse checks the fresh source, exact policy and reconstructed original model output; it does not supply new bindings. A reuse argument-order bug was also caught and fixed before any stages ran. Failed attempts and receipts remain separate. Repeating this single case is not an independent accuracy evaluation.
+## Required repository declaration
 
-Package lifecycle scripts are disabled. This verifies package contents and the CLI version, **not full application startup or native-addon installation**. No merge, tag, publication or deployment operation exists in this profile.
+Commit `.draken/environment.json` on the selected ref. It supplies the approved container image, setup commands and frozen checks. It is **not** the workflow or enrichment, and no environment is inferred from manifests or CI. Missing declarations fail before Docker or model work with:
 
-The previous zero-model-call experiment was a hand-configured harness baseline. It is superseded by this real model-enriched example, not relabeled as an LLM result.
+> Missing required file: .draken/environment.json. Add and commit it to the selected branch or commit before running repository checks.
 
-## Browser execution
+See this repository's declaration for the schema. The candidate cannot weaken the environment, CI, manifests/locks, command entrypoints or existing test/script/configuration files. New regression tests are allowed. These restrictions are deliberately conservative and can block legitimate tasks that require changing protected files.
 
-The Factory page now connects to this host. The approved proposal shows a release-version input, **Run**, its generated plan, stage progress, saved results and **Cancel run**. **Generate a new plan (1 model call)** is an explicit option, not something refresh does.
+## Host configuration
 
-Enable the profile on the server with `DRAKEN_FACTORY_PROPOSAL_ID`, `DRAKEN_DOCKER_BIN`, `DRAKEN_DOCKER_HOST`, `DRAKEN_FACTORY_IMAGE` and explicit `DRAKEN_PI_BIN`. An optional `DRAKEN_FACTORY_PLAN_DIR` points to an existing real model-enrichment run. This integration requires the source checkout and authenticated API; it is not enabled by default in published installations. The proposal must belong to the checkout and the profile only verifies Draken releases.
+Set these on the running Draken server, not in repository-controlled code:
 
-The authenticated execution API accepts a version, a request UUID and the decision to regenerate—not commands, Docker settings or filesystem paths. Reads verify source access and return saved state only. A browser disconnect does not cancel an accepted job. Explicit cancellation stops its controller and Docker containers; server shutdown waits for cleanup. Only one job can run at a time. An interrupted job with no cleanup confirmation blocks further execution rather than being replayed.
+- `DRAKEN_WORKSPACE_REPO`: permitted local Git repository.
+- `DRAKEN_DOCKER_BIN`: absolute Docker CLI path.
+- `DRAKEN_DOCKER_HOST`: local rootless `unix:///...` socket.
+- `DRAKEN_WORKSPACE_ALLOWED_IMAGES`: JSON array of approved pinned image references matching the declaration.
+- `DRAKEN_FACTORY_PI_SDK`: absolute `dist/index.js` path for the separately qualified **Pi SDK 1.4.0**.
+- Normal final-model configuration and credentials.
 
-`src/factory/execution.ts` supervises the existing tested CLI pipeline. Requests, plans, events, receipts and process exits persist under the private data directory's `factory-runs/`. Repeated request UUIDs do not create another paid call. Per-run model accounting remains in the pipeline's private one-call store and is shown in Factory; it is not presented as part of ordinary summary-preparation accounting.
+The SDK qualification is still separate from Draken's managed CLI version. Another SDK version is rejected, not silently substituted; unifying those installations requires qualification. Never put provider credentials in the worker container.
 
-The live browser was tested for cancellation, saved-plan execution and fresh enrichment. The fresh UI run made one Luna call (2,005 input / 63 output tokens, estimated $0.000232) and passed all eleven stages. Desktop and 390px layouts were checked. No intermediate approval prompts were needed.
+The browser starts `scripts/factory-workspace.cjs REPOSITORY REF NEW_PRIVATE_OUTPUT_DIRECTORY BRIEF_FILE` with a source-authorized brief and authenticated source checks. Operator-authored briefs are allowed only through the private CLI mode. Manual trusted CLI runs are outside the server's execution lock. Omitting the brief runs only the declared setup/check diagnostic, with no agent or model calls.
 
-## Implementation
+## Isolation, cancellation and receipts
 
-- `src/factory-enrichment/`: portable enrichment contracts, model prompt/compiler and serial execution loop. No imports outside the folder.
-- `src/factory/enrichment.ts`: source-verified Factory adapter, plus `enrichFactoryWithModel` calling the application's real `modelCall` with an existing run owner and invocation allowance.
-- `src/factory/docker.ts`: fresh-container execution and cleanup. Missing Docker is an error, never a host-execution fallback.
-- `scripts/factory-enrichment-model.cjs`: explicit test worker using the same `modelCall` accounting in a private one-call store. It preserves raw output, usage and failed attempts; it does not restart the live paused learning job.
-- `scripts/factory-release-example.cjs`: verified discovery → real model enrichment → validation → Docker execution → final verification.
-- `scripts/factory-container/`: pinned image, registered stage implementations and restricted network broker.
+The host owns Pi, credentials, session storage, accounting, source checks and Docker control. Every coding tool uses the persistent container; there is no host fallback. Extension/MCP/codemode/skill/template discovery is disabled through an explicit empty resource loader. Repository instructions can be read as data, not executable host resources.
 
-The model supplies bindings, not permissions. Host policy fixes applicability checks, environment preparation and endpoint verification. Verifiers explicitly list supported actions. Unknown capabilities, weaker lifecycle checks or incomplete mappings are rejected; no bindings are silently filled in after inference.
+Workers are non-root, with read-only roots, dropped capabilities, seccomp, no Docker socket or host checkout mounts, and enforced CPU/memory/PID limits. Engineering workers use 2 CPUs, 4 GiB RAM, 512 PIDs and 1 GiB temporary storage. Network access goes through a restricted npm read/audit broker; arbitrary external requests and publication are unavailable. Rootless containers still share the host kernel and have no volume disk quota. Host Pi and adapters remain trusted code.
 
-Source access and identity are rechecked before and after inference and execution boundaries. The example requires the discovery to belong to this Draken checkout, rather than adopting an arbitrary source repository as its target. Historical limitations remain attached to the discovery; a successful new run does not retroactively verify old outcomes.
+A run has a 15-minute deadline. Bash commands have a 240-second maximum and stop their process group on timeout/cancellation; output is limited to 1 MB, with the final 40,000 characters returned. File tools accept regular text files of at most 1 MB and reject traversal and paths outside the workspace, including symlinks. Cancellation stops the actual task container before read-only patch collection. Failed collection retains the volume; uncertain cleanup blocks new starts.
 
-## Container boundaries
+Private receipts live under the data directory's `factory-workspaces/<run>/`: request/exit files, event log, baseline, agent session/accounting/enrichment/result, candidate patch, fresh verification and cleanup records. Legacy `factory-runs/` receipts are retained and inspected for unfinished cleanup, but no longer have an execution API or UI.
 
-Every capability runs in a new container, including verification. The executor requires a local rootless Docker engine with the built-in seccomp profile and CPU, memory and PID enforcement.
+## Code and validation
 
-- Pinned image ID; UID/GID **65532**.
-- Read-only root filesystem, all Linux capabilities dropped, no-new-privileges.
-- **1 CPU, 768 MiB memory, 128 processes**, 256 MiB temporary filesystem and 8 MiB container log limit.
-- No host bind mounts: no repository checkout, home directory, provider credentials or Docker socket inside workers.
-- Actions write their own Docker artifact volume. Later stages receive only declared dependencies, mounted read-only. Failed actions do not promote artifacts.
-- Checks have no network. Network actions use an internal Docker network and their own broker with approved hosts.
-- The broker allows HTTPS reads and the two npm audit POST endpoints. It rejects publication methods, redirects, private/link-local addresses and arbitrary CONNECT tunnels. DNS is checked, then the selected IP, TLS server name and HTTP Host are fixed together. Workers cannot use a tunnel to bypass hostname restrictions.
-- Cancellation removes the container and its child processes; killing the Docker CLI alone is insufficient. Completion is not reported until cleanup succeeds.
+- `src/factory-enrichment/`: independent public contract, plan validation and substantive enrichment; no application/package/Node imports.
+- `src/factory/discovery.ts`: converts only freshly verified proposals.
+- `src/factory/workspace.ts`, `execution-owner.ts`: authenticated starts, source-sensitive reads, accounting display and ownership.
+- `src/factory/docker.ts`: shared isolation flags and rootless-engine checks.
+- `scripts/factory-workspace/`: authorization, persistent host session, container tools, restricted broker and workspace worker.
 
-These are **rootless Docker containers, not Docker Sandboxes microVMs**. They share the host kernel. Artifact volumes do not yet have size quotas, so this is a trusted registered-stage host—not a claim that arbitrary adversarial coding agents or repositories are production-safe.
+Normal tests cover the pure boundary and copied standalone module, every-step/review/completion validation, source revocation, no implicit retries, shared call allowance, unknown usage, API ownership/authentication and browser refresh/start/cancel behavior.
 
-The model call itself is a tool-free control-plane operation using the configured Draken provider. Credentials stay on that control plane and are never placed in workflow containers.
+Opt-in `tests/factory-agent-live.cjs` exercises real Docker with a deterministic SDK fixture: enrichment then execution, call limits, tool/path isolation, network restrictions, protected-check rejection, fresh verification, cancellation, patch recovery and unchanged host checkout. `tests/factory-pi-contract-live.cjs` exercises the actual qualified SDK with simulated provider responses and simulated container operations: tool-free enrichment, execution with four tools, three reconciled turns and one saved conversation. Neither test proves model/task quality or incurs provider calls.
 
-## Validation
+Earlier real-agent development proof used **Luna**, before this cleanup and before the shared-model switch: six calls, $0.00089804, a strict-integer parser fix and fresh host checks. An earlier accounting bug's six-call/$0.00073426 correction remains retained separately. Older fixed-release enrichment/container receipts are historical proofs of that removed implementation. None is a paid Astra demonstration of the new enrichment path or complete task-to-PR delivery.
 
-- 802 automated tests, 72 browser tests, typechecks and unused-code checks passed. Factory browser tests cover explicit execution, cancellation, generation consent, read-only refresh and source-access failure.
-- Existing standalone copy/compile/run and pure public-contract tests remain in normal CI.
-- New tests cover owner invocation limits, container arguments, absence of host fallback, artifact dependencies, network policy and cleanup.
-- `tests/factory-docker-live.cjs` was also run against real rootless Docker. It confirmed non-root execution, read-only root and previous-stage artifacts, absence of the Docker socket/credentials, permitted registry access, denied unapproved/metadata/direct egress, and removal of a running container on cancellation.
-
-The real-Docker proof is an explicit operator test, not a mocked result or a claim that the ordinary CI runner provisions rootless Docker. Provider-model quality still needs more independent cases.
-
-## Reproduce
-
-Use a POSIX checkout and rootless Docker with a delegated cgroup. Build the trusted stage image before paying for enrichment:
-
-```sh
-npm run build:server
-export DRAKEN_DOCKER_BIN=/path/to/docker
-export DRAKEN_DOCKER_HOST=unix:///path/to/rootless-docker.sock
-"$DRAKEN_DOCKER_BIN" --host "$DRAKEN_DOCKER_HOST" build \
-  -t draken-factory-stage:local scripts/factory-container
-export DRAKEN_FACTORY_IMAGE=$("$DRAKEN_DOCKER_BIN" --host "$DRAKEN_DOCKER_HOST" \
-  image inspect draken-factory-stage:local --format '{{.Id}}')
-node tests/factory-docker-live.cjs
-```
-
-Select the release-verification proposal from the authenticated Factory API. Configure the same summary model and explicit Pi executable/auth directory used by your Draken installation. The isolated operator worker requires explicit `DRAKEN_PI_BIN`; it never substitutes a different runtime when private accounting storage has no Pi installation. The application adapter uses its existing owner and normal managed/external provider selection.
-
-```sh
-# Supply the API token privately; do not paste credentials into a transcript.
-export DRAKEN_FACTORY_TOKEN DRAKEN_PI_BIN PI_CODING_AGENT_DIR DRAKEN_PI_SUMMARY_MODEL
-node scripts/factory-release-example.cjs \
-  http://127.0.0.1:PORT PROPOSAL_ID 0.10.0 /private/new-run-directory
-```
-
-Docker preflight happens before the model call. Each new test directory permits one call, with no automatic retry or manual binding fallback. An optional fifth argument supplies an earlier run directory to reuse its unchanged model-generated enrichment; this makes no new model call and still performs fresh source/policy checks. Raw model input/output, accounting, the enriched revision, effective container settings, stage receipts and final result are retained privately. Exported snapshots cannot enforce future source revocation; do not publish raw stores or transcripts.
-
-## Still separate work
-
-Automatic background enrichment needs approved repository policies and separately persisted revisions wired into the existing preparation owner. Factory task submission is connected through the browser. Automatic queue/restart recovery and a general coding-agent capability are not implemented here. The current test proves real LLM enrichment and containerized execution for one release-verification procedure—not an unattended general-purpose coding factory.
+Still unfinished: task-specific independent acceptance, permitted delivery, automatic restart reconciliation, richer outcome-to-learning joins, SDK-version consolidation and packaged runtime distribution. Existing background-learning errors are not cleared or retried by this change.

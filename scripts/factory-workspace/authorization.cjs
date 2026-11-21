@@ -1,6 +1,6 @@
 const fs=require('node:fs');
 const {workflowLocation}=require('../../dist/factory/location');
-const {discoveryFromProposal}=require('../../dist/factory/enrichment');
+const {discoveryFromProposal}=require('../../dist/factory/discovery');
 const {sessionPlan}=require('../../dist/factory-enrichment');
 function loadBrief(file,repository,commit){
  const original=fs.readFileSync(file,'utf8'),request=JSON.parse(original),p=request.plan;

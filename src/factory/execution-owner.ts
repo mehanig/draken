@@ -3,7 +3,7 @@ import path from 'node:path';
 import { getDataDir } from '../data-dir';
 import { HttpError } from '../errors';
 let owner: string | null = null;
-/** One active Factory execution across both profiles; uncertain saved runs require inspection. */
+/** One active Factory execution; include legacy release receipts when checking unfinished cleanup. */
 export function claimFactoryExecution(id: string): () => void {
   if (owner) throw new HttpError(409, 'A Factory execution is already active.');
   for (const folder of ['factory-runs', 'factory-workspaces']) {

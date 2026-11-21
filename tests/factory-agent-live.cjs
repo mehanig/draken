@@ -15,10 +15,12 @@ async function main(){
  const limited=start('allowance','fixture-budget',1);assert.equal(await limited.done,1);const budget=JSON.parse(fs.readFileSync(path.join(limited.out,'result.json')));assert.equal(budget.modelCalls,1);assert.match(budget.detail,/allowance/);assert.equal(budget.accountingComplete,true);assert.equal(JSON.parse(fs.readFileSync(path.join(limited.out,'failure.json'))).modelCalls,1);
  const weakened=start('protected','fixture-weaken-check',2);assert.equal(await weakened.done,1);assert.match(JSON.parse(fs.readFileSync(path.join(weakened.out,'result.json'))).detail,/protected check/);assert.equal(fs.existsSync(path.join(weakened.out,'verification.json')),false);
  const verified=start('verified','fixture-verify',2);assert.equal(await verified.done,0);assert.equal(JSON.parse(fs.readFileSync(path.join(verified.out,'verification.json'))).scope,'frozen-repository-checks');
- const cancelled=start('cancel','fixture-cancel',2);try{
+ const cancelled=start('cancel','fixture-cancel',3);try{
   for(let i=0;;i++){if(i>180)throw Error('Agent did not reach long command');const progress=path.join(cancelled.out,'events.jsonl');if(fs.existsSync(progress)&&fs.readFileSync(progress,'utf8').includes('long-command'))break;await sleep(500);}
   const resources=JSON.parse(fs.readFileSync(path.join(cancelled.out,'resources.json'))),container=resources.container;
   const tool=request=>JSON.parse(docker(['exec','-i',container,'node','/factory/tool.cjs'],JSON.stringify(request)));
+  const probe="const fs=require('fs'),a=require('node:assert/strict');(async()=>{a.equal(process.getuid(),65532);a.equal(fs.existsSync('/var/run/docker.sock'),false);a.throws(()=>fs.writeFileSync('/factory/tool.cjs','bad'));a.equal((await fetch('http://egress:8080/fetch?url=https://registry.npmjs.org/draken/latest')).status,200);a.equal((await fetch('http://egress:8080/fetch?url=https://api.github.com')).status,403);a.equal((await fetch('http://egress:8080/fetch?url=http://169.254.169.254')).status,403);await a.rejects(fetch('https://registry.npmjs.org/draken/latest',{signal:AbortSignal.timeout(2000)}));await a.rejects(fetch('https://1.1.1.1',{signal:AbortSignal.timeout(2000)}));})().catch(e=>{console.error(e);process.exitCode=1;});";
+  const isolation=tool({op:'bash',command:'node -e '+JSON.stringify(probe)});assert.equal(isolation.value.code,0,isolation.value.output);
   assert.equal(tool({op:'read',path:'/etc/passwd'}).ok,false);assert.equal(tool({op:'read',path:'../repo/../../etc/passwd'}).ok,false);
   assert.equal(tool({op:'mkdir',path:'new parent'}).ok,true);assert.equal(tool({op:'write',path:'new parent/$(touch HOST).txt',text:'literal'}).ok,true);assert.equal(Buffer.from(tool({op:'read',path:'new parent/$(touch HOST).txt'}).value.base64,'base64').toString(),'literal');
   assert.equal(tool({op:'bash',command:'ln -s /tmp/missing dangling'}).ok,true);assert.equal(tool({op:'write',path:'dangling',text:'no'}).ok,false);
@@ -26,7 +28,7 @@ async function main(){
   const large=tool({op:'bash',command:'node -e "console.log(\'x\'.repeat(90000))"'});assert.ok(large.value.output.length<=40000);
   assert.match(tool({op:'bash',command:'sleep 5',timeoutMs:1000}).value.output,/timeout/);
   cancelled.child.kill('SIGTERM');assert.equal(await cancelled.done,1);
-  const result=JSON.parse(fs.readFileSync(path.join(cancelled.out,'result.json')));assert.equal(result.status,'cancelled');assert.equal(result.modelCalls,1);assert.match(fs.readFileSync(path.join(cancelled.out,'changes.patch'),'utf8'),/retained before cancellation/);
+  const result=JSON.parse(fs.readFileSync(path.join(cancelled.out,'result.json')));assert.equal(result.status,'cancelled');assert.equal(result.modelCalls,2);assert.match(fs.readFileSync(path.join(cancelled.out,'changes.patch'),'utf8'),/retained before cancellation/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(cancelled.out,'export-container.json'))).Mounts[0].RW,false);
   assert.equal(docker(['ps','-aq','--filter','label=draken.factory.run='+resources.prefix]).trim(),'');
   assert.equal(fs.existsSync(path.join(repo,'cancelled.txt')),false);assert.equal(git('status','--porcelain'),'');console.log('Passed: allowance, container-only tools, cancellation, read-only patch collection, unchanged host checkout.');

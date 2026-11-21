@@ -20,7 +20,7 @@ Only **Sync with Draken** or **Chat instead** creates a snapshot and opening bri
 
 The home page is compact history cards. Each sync has its own `/syncs/:id` URL, with the full briefing, conversations, notes and evidence behind it. **Search history** (`/history`) adds local semantic + keyword retrieval across retained older records, with dated source links. It prepares itself automatically—no enable/update buttons or search-mode choices. Progress counts only new or changed passages, with cached history shown separately and a measured time estimate. Local indexing reuses existing vectors and uses up to two embedding lanes/six CPU threads on sufficiently capable machines; smaller machines stay single-lane. Text questions and calls use it by default. See [MEMORY.md](MEMORY.md) for source scope, first-use download and limitations.
 
-For a plain-English guide to the code, with diagrams and reasons for the main design choices, see [ARCHITECTURE.md](ARCHITECTURE.md). The [standalone visual guide](docs/architecture.html) opens in a browser without connecting to Draken; it contains no live data or app controls.
+For a plain-English guide to the code, with diagrams and reasons for the main design choices, see [ARCHITECTURE.md](ARCHITECTURE.md). The [standalone visual guide](docs/architecture.html) opens in a browser without connecting to Draken; it contains no live data or app controls. The checkout-only [Factory execution prototype](docs/factory-enrichment.md) adds task-specific enrichment and one-session execution; it is not included in published 0.10.0.
 
 Draken remembers which evidence a finished sync covered, what you decided, and what remains open. Reading logs or generating a response does **not** advance that checkpoint.
 

@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { factory } from '../api';
 import { FactoryWorkspace, useFactoryWorkspaces } from '../components/FactoryWorkspace';
-import { FactoryExecutionPanel, useFactoryExecution } from '../components/FactoryExecution';
 import type { FactoryPage } from '../../../src/factory/types';
 import '../styles/factory.css';
 
 export function Factory() {
   const workspaces = useFactoryWorkspaces();
-  const { execution, executionError, refreshExecution } = useFactoryExecution();
   const [data, setData] = useState<FactoryPage | null>(null);
   const [error, setError] = useState(''), [loading, setLoading] = useState(false);
   const request = useRef<AbortController | null>(null);
-  useEffect(() => { if (executionError) setData(null); }, [executionError]);
   const load = useCallback(async (before?: number) => {
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
@@ -33,12 +30,11 @@ export function Factory() {
   }
   return <main className="factory-page" aria-label="Factory" aria-busy={loading}>
     <div className="factory-heading"><h1>Factory</h1>
-      <button type="button" disabled={loading} onClick={() => { void load(); void refreshExecution(); void workspaces.refresh(); }}>Refresh</button></div>
+      <button type="button" disabled={loading} onClick={() => { void load(); void workspaces.refresh(); }}>Refresh</button></div>
     {error && <p role="alert">{error}</p>}
-    {executionError && <p role="alert">Execution unavailable: {executionError}</p>}
+    {workspaces.error && <p role="alert">{workspaces.error}</p>}
     {loading && <p role="status">Loading…</p>}
-    <FactoryWorkspace state={workspaces} />
-    {data && !executionError && <>
+    {data && <>
       {data.learning === 'paused' && <p className="muted small" role="status">Learning paused</p>}
       {data.learning === 'error' && <p role="status">Learning stopped. <a href="/settings">Retry in Settings</a>.</p>}
       {data.unavailable > 0 && <p className="muted small" role="status">{data.unavailable} saved {data.unavailable === 1 ? 'result' : 'results'} unavailable</p>}
@@ -56,7 +52,6 @@ export function Factory() {
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
           {!!proposal.decision.assessment.limitations.length && <><h3>Limitations</h3><ul>{proposal.decision.assessment.limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
           <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} purpose={workflow.purpose} />
-          {!workspaces.data?.agentAvailable && execution?.proposalId === proposal.id && <FactoryExecutionPanel data={execution} refresh={refreshExecution} />}
           <details><summary>Evidence</summary>
             <p>{proposal.decision.assessment.reason}</p>
             {proposal.evidence.map((input, i) => <section className="factory-evidence" key={i}>

@@ -17,7 +17,7 @@ export function useFactoryWorkspaces() {
   useEffect(() => { const timer = setInterval(() => { if (!request.current) void refresh(); }, active ? 1500 : 15000); return () => clearInterval(timer); }, [active, refresh]);
   return { data, error, refresh };
 }
-export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { state: ReturnType<typeof useFactoryWorkspaces>; workflowId?: string; locationKey?: string; purpose?: string }) {
+export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { state: ReturnType<typeof useFactoryWorkspaces>; workflowId: string; locationKey: string; purpose?: string }) {
   const { data, refresh } = state;
   const [error, setError] = useState(''), [ref, setRef] = useState('HEAD'), [task, setTask] = useState(''), [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<Record<string, string>>({});
@@ -26,7 +26,7 @@ export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { 
   async function start() {
     setBusy(true); setError('');
     if (!pending.current || pending.current.ref !== ref || pending.current.task !== task) pending.current = { id: requestId(), ref, task };
-    try { await runWorkspace(ref, pending.current.id, workflowId ? { workflowId, task } : undefined); pending.current = null; await refresh(); }
+    try { await runWorkspace(ref, pending.current.id, { workflowId, task }); pending.current = null; await refresh(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not start workspace.'); } finally { setBusy(false); }
   }
   async function cancel(id: string) {
@@ -37,15 +37,14 @@ export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { 
     try { const result = await workspaceLog(id); setLogs(previous => ({ ...previous, [id]: result.text })); }
     catch (cause) { setLogs({}); setError(cause instanceof Error ? cause.message : 'Log unavailable.'); }
   }
-  if (!data) return !workflowId && state.error ? <p role="alert">{state.error}</p> : null;
-  if (workflowId && (!data.agentAvailable || locationKey !== data.locationKey)) return null;
+  if (!data?.agentAvailable || locationKey !== data.locationKey) return null;
   const blocked = busy || data.runs.some(run => ['running', 'interrupted'].includes(run.status));
   const runs = data.runs.filter(run => run.workflowId === workflowId);
-  return <section className="factory-execution" aria-label={workflowId ? 'Agent workflow execution' : 'Repository checks'}>
-    {workflowId ? <h3>Run workflow</h3> : <><h2>Repository checks</h2><p className="muted small">{data.repository}</p></>}
-    <p>{workflowId ? 'One agent session runs the whole workflow in a separate workspace, using at most 16 model calls. Changes are retained as a patch, not published.' : 'Build and test committed code in a separate workspace. Uncommitted changes are not included.'}</p>
+  return <section className="factory-execution" aria-label="Agent workflow execution">
+    <h3>Run workflow</h3>
+    <p className="muted small">Up to 16 model calls, including enrichment. Changes are retained as a patch; nothing is published.</p>
     <form className="factory-run-form" onSubmit={event => { event.preventDefault(); void start(); }}>
-      {workflowId && <label className="factory-task">Task<textarea className="input" value={task} onChange={event => setTask(event.target.value)} placeholder={purpose} required maxLength={4000} disabled={blocked} /></label>}
+      <label className="factory-task">Task<textarea className="input" value={task} onChange={event => setTask(event.target.value)} placeholder={purpose} required maxLength={4000} disabled={blocked} /></label>
       <label>Commit or branch<input className="input" value={ref} onChange={event => setRef(event.target.value)} required maxLength={200} disabled={blocked} /></label>
       <button className="btn btn-primary" type="submit" disabled={blocked}>Run</button>
     </form>
@@ -56,7 +55,7 @@ export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { 
         {run.status === 'running' && <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => void cancel(run.id)}>Cancel run</button>}
       </div>
       {run.task && <p>{run.task}</p>}
-      <p>{run.status === 'completed' ? workflowId ? run.detail : 'Repository checks passed.' : run.status === 'running' ? run.stages.find(stage => stage.status === 'running')?.name || 'Preparing workspace…' : run.detail}</p>
+      <p>{run.status === 'completed' ? run.detail : run.status === 'running' ? run.stages.find(stage => stage.status === 'running')?.name || 'Preparing workspace…' : run.detail}</p>
       {run.patchBytes > 0 && <p>Changes retained as a patch; not applied to your checkout.</p>}
       <details open={run.status === 'running'}><summary>{run.stages.filter(stage => stage.status === 'passed').length} stages passed</summary>
         <ol className="factory-run-steps">{run.stages.map((stage, i) => <li key={i}><span>{stage.name}</span><span>{stage.status}</span></li>)}</ol>

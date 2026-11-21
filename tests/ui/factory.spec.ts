@@ -28,6 +28,14 @@ test('Factory is read-only, direct-linkable and available in shared navigation',
   expect(mutations).toEqual([]);
 });
 
+test('retired release executor is not polled and cannot hide workflows', async ({ page }) => {
+  let oldReads = 0;
+  await page.route('**/api/factory/execution', route => { oldReads++; return route.fulfill({ status: 409, json: { error: 'Old source revoked' } }); });
+  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, proposals: [proposal] } }));
+  await page.goto('/factory'); await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible(); expect(oldReads).toBe(0);
+});
+
 test('Factory groups repositories and non-Git folders, including older pages', async ({ page }) => {
   const folder = { ...proposal, id: 'folder-proposal', location: { kind: 'folder', key: 'folder', path: '/notes/backup', name: 'backup' } };
   const older = { ...proposal, id: 'older-proposal' };
@@ -70,45 +78,6 @@ test('Factory explains paused learning and preparation errors without starting w
   await expect(page.getByRole('link', { name: 'Retry in Settings' })).toHaveAttribute('href', '/settings');
   await expect(page.getByText('1 failed attempt', { exact: true })).toHaveCount(0);
   expect(mutations).toEqual([]);
-});
-
-test('Factory runs the approved workflow, shows progress and cancels without triggering work on reads', async ({ page }) => {
-  const state = { proposalId: proposal.id, available: true, reason: '', hasPlan: true, bindings: [{ step: 1, action: 'registry', verify: 'check-registry' }], runs: [] as any[] };
-  let starts = 0, cancellations = 0;
-  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, proposals: [proposal] } }));
-  await page.route('**/api/factory/execution', route => route.fulfill({ json: state }));
-  await page.route('**/api/factory/execution/runs', async route => {
-    starts++; const body = route.request().postDataJSON(); expect(body.version).toBe('0.10.0'); expect(body.regenerate).toBe(false); expect(body.requestId).toMatch(/^[a-f0-9-]{36}$/);
-    state.runs = [{ id: body.requestId, version: body.version, status: 'running', createdAt: new Date().toISOString(), phase: 'registry', detail: '', modelCalls: 0, reused: true, steps: [{ capability: 'registry', status: 'running' }] }];
-    await route.fulfill({ status: 202, json: state.runs[0] });
-  });
-  await page.route('**/api/factory/execution/runs/*/cancel', async route => { cancellations++; state.runs[0].status = 'cancelled'; state.runs[0].detail = 'Run cancelled'; await route.fulfill({ status: 204 }); });
-  await page.setViewportSize({ width: 390, height: 900 }); await page.goto('/factory');
-  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible(); expect(starts).toBe(0);
-  await page.getByLabel('Release version').fill('0.10.0'); await page.getByRole('button', { name: 'Run', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Cancel run' })).toBeVisible(); expect(starts).toBe(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.getByRole('button', { name: 'Cancel run' }).click(); await expect(page.getByText('Run cancelled', { exact: true })).toBeVisible(); expect(cancellations).toBe(1);
-  await page.reload(); await expect(page.getByText('Run cancelled', { exact: true })).toBeVisible(); expect(starts).toBe(1);
-});
-
-test('new enrichment requires an explicit action and source failure removes execution details', async ({ page }) => {
-  let posts = 0, unavailable = false;
-  const state = { proposalId: proposal.id, available: true, reason: '', hasPlan: false, bindings: [], runs: [] as any[] };
-  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, proposals: [proposal] } }));
-  await page.route('**/api/factory/execution', route => unavailable ? route.fulfill({ status: 409, json: { error: 'Workflow source is unavailable' } }) : route.fulfill({ json: state }));
-  await page.route('**/api/factory/execution/runs', async route => {
-    posts++; const body = route.request().postDataJSON(); expect(body.regenerate).toBe(true);
-    state.runs = [{ id: body.requestId, version: '0.10.0', status: 'failed', detail: 'Model enrichment incomplete', phase: '', createdAt: new Date().toISOString(), modelCalls: 1, reused: false, steps: [] }];
-    await route.fulfill({ status: 202, json: state.runs[0] });
-  });
-  await page.goto('/factory'); await expect(page.getByText('Generates a plan with one model call, then runs it in Docker.')).toBeVisible(); expect(posts).toBe(0);
-  await page.getByLabel('Release version').fill('0.10.0'); await page.getByRole('button', { name: 'Generate & run', exact: true }).click();
-  await expect(page.getByText('Model enrichment incomplete')).toBeVisible(); await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByText('Model enrichment incomplete')).toBeVisible(); expect(posts).toBe(1);
-  unavailable = true; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Workflow source is unavailable'); await expect(page.getByText('Model enrichment incomplete')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toHaveCount(0); expect(posts).toBe(1);
 });
 
 test('refresh removes old proposal content when sources become unavailable or the request fails', async ({ page }) => {
