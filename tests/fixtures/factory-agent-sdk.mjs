@@ -20,7 +20,7 @@ export async function createAgentSession(options){
  const session={messages:[],agent:{streamFunction:async()=>{fs.appendFileSync(path.join(options.cwd,'fixture-provider-calls'),'call\n');}},getActiveToolNames:()=>[...active],subscribe:f=>listeners.push(f),clearQueue:()=>{},abort:async()=>{controller.abort();},dispose:()=>{},getLastAssistantText:()=>answer,
  prompt:async text=>{
   if(++prompts!==1)throw Error('Run must not add an enrichment prompt');
-  const request=JSON.parse(text.slice(text.indexOf('\n')+1));if(!request.network?.web.includes('node /factory/network.cjs')||!request.network?.npm.includes('npm_config_registry'))throw Error('Missing usable network instructions');
+  if(!options.resourceLoader.getSystemPrompt().includes('normal Docker bridge network access'))throw Error('Agent was not told normal networking is available');
   if(active.join(',')!=='read,write,edit,bash'||!text.includes('factory-workflow-enrichment-v4'))throw Error('Execution did not receive saved enrichment');
   for(let i=0;i<2;i++){
    await session.agent.streamFunction({},{});

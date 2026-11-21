@@ -1,7 +1,7 @@
 import type { Discovery } from './contracts';
 
 /** Bump when the host's execution permissions or required checks change. */
-export const ENRICHMENT_POLICY_VERSION = 'factory-host-policy-v2';
+export const ENRICHMENT_POLICY_VERSION = 'factory-host-policy-v3';
 export interface Guidance {
   inputs: { name: string; label: string; description: string; required: boolean }[];
   steps: { step: number; approach: string; checks: string[] }[];
@@ -21,9 +21,7 @@ export interface Enrichment {
 const requirements = [
   'Execution uses one Pi session with only container-backed read, write, edit and bash; no subagents, host tools or executable extensions.',
   'A committed .draken/environment.json supplies the approved image, setup and frozen checks. Do not infer or replace it.',
-  'Public HTTPS reads, including public GitHub APIs and deployment websites, are authorized through bash: node /factory/network.cjs HTTPS_URL [OUTPUT_FILE]. The helper follows at most five public HTTPS redirects and reports HTTP status and final URL. No separate network tool is needed.',
-  'npm is preconfigured with npm_config_registry=http://egress:8080/npm/: use ordinary npm view, install and audit through bash. Use temporary directories for published-package checks. Do not override the registry or claim npm access is unavailable merely because there is no broker tool.',
-  'Host/LAN/private and metadata destinations, credentials, arbitrary write methods and CONNECT tunnels are denied. Public reads do not authorize authentication, push, merge, publication or deployment. Outbound URLs can transmit data: do not include secrets or repository contents in them.',
+  'The container has normal Docker bridge networking. Use ordinary npm, curl, Git and language network clients directly. There is no broker, special network command, domain allowlist, HTTP-method filter or application destination restriction. Host files, the Docker socket and provider credentials are not mounted or forwarded. Network access does not itself grant publication or deployment authority.',
   'Existing tests, scripts, CI, package manifests/locks and environment policy are protected. New regression tests may be added.',
   'Check task applicability and report missing context or authority rather than inventing it.',
   'Inspect repository instructions and implementation; use the recorded baseline and reproduce relevant failures.',

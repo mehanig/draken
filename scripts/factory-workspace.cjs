@@ -51,8 +51,8 @@ async function main(){
  const save=(name,value)=>{const temporary=path.join(output,'.'+crypto.randomUUID());const fd=fs.openSync(temporary,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}try{fs.linkSync(temporary,path.join(output,name));const directory=fs.openSync(output,'r');try{fs.fsyncSync(directory);}finally{fs.closeSync(directory);}}finally{fs.unlinkSync(temporary);}};
  const record=value=>{const fd=fs.openSync(path.join(output,'events.jsonl'),'a',0o600);try{fs.writeFileSync(fd,JSON.stringify(value)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}const {stdout,stderr,...progress}=value;const status=fs.openSync(path.join(output,'progress.jsonl'),'a',0o600);try{fs.writeFileSync(status,JSON.stringify(progress)+'\n');fs.fsyncSync(status);}finally{fs.closeSync(status);}if(value.type==='stage-started'||value.type==='stage-result')console.log(value.type,value.name,value.code??'');};
  const docker=(args,options={})=>processCall(binary,['--host',host,...args],{...options,env:{PATH:process.env.PATH,HOME:process.env.HOME,XDG_RUNTIME_DIR:process.env.XDG_RUNTIME_DIR}});
- const prefix='draken-workspace-'+crypto.randomUUID(),container=prefix+'-worker',proxy=prefix+'-broker',network=prefix+'-network',volume=prefix+'-files';
- save('resources.json',{prefix,container,proxy,network,volume,exporter:prefix+'-export',verifier:prefix+'-verify',verificationVolume:prefix+'-verification-files'});
+ const prefix='draken-workspace-'+crypto.randomUUID(),container=prefix+'-worker',volume=prefix+'-files';
+ save('resources.json',{prefix,container,volume,exporter:prefix+'-export',verifier:prefix+'-verify',verificationVolume:prefix+'-verification-files'});
  const resources=[];let outcome,modelCalls=0,source,image,environment,authorization,checkoutComplete=false,retainVolume=false,changedFiles=[];
  const accounting=()=>{const file=path.join(output,'agent/status.json');if(!fs.existsSync(file))return {};try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return {modelCalls:null,accountingComplete:false};}};
  const receive=event=>{record(event);if(event.type==='stage-result'&&event.name==='Check out repository'&&event.commit===source.commit&&event.code===0)checkoutComplete=true;};
@@ -68,19 +68,15 @@ async function main(){
   if(briefFile){authorization=loadBrief(path.resolve(briefFile),repo,source.commit);sdkConfiguration();await authorization.authorize(controller.signal);save('workflow.json',authorization.brief);}
   const info=JSON.parse((await docker(['image','inspect',environment.image],{signal:controller.signal})).toString())[0];assertDockerHost(JSON.parse((await docker(['info','--format','{{json .}}'],{signal:controller.signal})).toString()),host,info.Id);
   save('environment.json',environment);
-  const tool=fs.readFileSync(path.join(__dirname,'factory-workspace/tool.cjs')),worker=fs.readFileSync(path.join(__dirname,'factory-workspace/worker.cjs')),broker=fs.readFileSync(path.join(__dirname,'factory-workspace/proxy.cjs')),networkTool=fs.readFileSync(path.join(__dirname,'factory-workspace/network.cjs'));
-  const key=fingerprint({environment,commit:source.commit,tool:crypto.createHash('sha256').update(tool).digest('hex'),worker:crypto.createHash('sha256').update(worker).digest('hex'),broker:crypto.createHash('sha256').update(broker).digest('hex'),networkTool:crypto.createHash('sha256').update(networkTool).digest('hex'),platform:process.arch,wrapper:3});
-  const context=path.join(output,'image');fs.mkdirSync(context,{mode:0o700});fs.writeFileSync(path.join(context,'tool.cjs'),tool);fs.writeFileSync(path.join(context,'worker.cjs'),worker);fs.writeFileSync(path.join(context,'proxy.cjs'),broker);fs.writeFileSync(path.join(context,'network.cjs'),networkTool);
-  fs.writeFileSync(path.join(context,'Dockerfile'),`FROM ${environment.image}\nUSER root\nRUN mkdir -p /factory /workspace && chown 65532:65532 /workspace\nCOPY worker.cjs proxy.cjs tool.cjs network.cjs /factory/\nRUN chmod 644 /factory/worker.cjs /factory/proxy.cjs /factory/tool.cjs /factory/network.cjs\nLABEL draken.environment=${key}\nUSER 65532:65532\nWORKDIR /workspace\nCMD ["node", "/factory/worker.cjs"]\n`);
+  const tool=fs.readFileSync(path.join(__dirname,'factory-workspace/tool.cjs')),worker=fs.readFileSync(path.join(__dirname,'factory-workspace/worker.cjs'));
+  const key=fingerprint({environment,commit:source.commit,tool:crypto.createHash('sha256').update(tool).digest('hex'),worker:crypto.createHash('sha256').update(worker).digest('hex'),platform:process.arch,wrapper:4});
+  const context=path.join(output,'image');fs.mkdirSync(context,{mode:0o700});fs.writeFileSync(path.join(context,'tool.cjs'),tool);fs.writeFileSync(path.join(context,'worker.cjs'),worker);
+  fs.writeFileSync(path.join(context,'Dockerfile'),`FROM ${environment.image}\nUSER root\nRUN mkdir -p /factory /workspace && chown 65532:65532 /workspace\nCOPY worker.cjs tool.cjs /factory/\nRUN chmod 644 /factory/worker.cjs /factory/tool.cjs\nLABEL draken.environment=${key}\nUSER 65532:65532\nWORKDIR /workspace\nCMD ["node", "/factory/worker.cjs"]\n`);
   image=(await docker(['build','--network=none','--quiet','-t','draken-workspace:'+key,context],{signal:controller.signal,timeout:180000})).toString().trim().split('\n').at(-1);
   if(!/^sha256:[a-f0-9]{64}$/.test(image))throw Error('Build did not return a pinned image ID');
   save('image.json',{id:image,base:environment.image,recipe:key});
-  resources.push(['network',network]);await docker(['network','create','--internal','--label','draken.factory.run='+prefix,network]);
-  resources.push(['container',proxy]);await docker(['create',...dockerIsolation(proxy,'bridge',prefix),image,'node','/factory/proxy.cjs']);
-  await docker(['network','connect','--alias','egress',network,proxy]);await docker(['start',proxy]);
-  let ready=false;for(let i=0;i<30;i++){controller.signal.throwIfAborted();if((await docker(['logs',proxy])).toString().includes('proxy-ready')){ready=true;break;}await new Promise(r=>setTimeout(r,100));}if(!ready)throw Error('Network broker did not start');
   resources.push(['volume',volume]);await docker(['volume','create','--label','draken.factory.run='+prefix,volume]);
-  resources.push(['container',container]);await docker(['create','-i',...dockerIsolation(container,network,prefix,true),'--env','npm_config_registry=http://egress:8080/npm/','--mount',`type=volume,src=${volume},dst=/workspace`,image,...(authorization?['node','-e','setInterval(()=>{},1000)']:[])]);
+  resources.push(['container',container]);await docker(['create','-i',...dockerIsolation(container,'bridge',prefix),'--mount',`type=volume,src=${volume},dst=/workspace`,image,...(authorization?['node','-e','setInterval(()=>{},1000)']:[])]);
   save('container.json',JSON.parse((await docker(['inspect',container])).toString())[0]);
   if(authorization){
    await docker(['start',container]);
@@ -107,7 +103,7 @@ async function main(){
    try{
     // Stop all repository processes before taking a read-only handoff to a fresh collector.
     await docker(['rm','--force',container]);
-    await docker(['create','-i',...dockerIsolation(exporter,'none',prefix,true),'--mount',`type=volume,src=${volume},dst=/workspace,readonly`,image]);
+    await docker(['create','-i',...dockerIsolation(exporter,'none',prefix),'--mount',`type=volume,src=${volume},dst=/workspace,readonly`,image]);
     save('export-container.json',JSON.parse((await docker(['inspect',exporter])).toString())[0]);
     let collected=false;
     await docker(['start','--attach','--interactive',exporter],{timeout:60000,limit:8_000_000,input:JSON.stringify({commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),exportOnly:true}),onLine:line=>{
@@ -123,7 +119,7 @@ async function main(){
     const protectedFile=({status,file})=>checkEntries.has(file)||/^(?:\.draken|\.github)\//.test(file)||/(^|\/)(?:package(?:-lock)?\.json|(?:tsconfig|knip)[^/]*\.jsonc?)$/.test(file)||(status!=='A'&&(/(^|\/)(?:tests?(?:\/|\.)|[^/]+\.(?:test|spec)\.)/.test(file)||file.startsWith('scripts/')));
     if(changedFiles.some(protectedFile))throw Error('Candidate changes protected check, dependency or policy files; explicit review required');
     const verify=prefix+'-verify',verificationVolume=prefix+'-verification-files';resources.push(['volume',verificationVolume]);await docker(['volume','create','--label','draken.factory.run='+prefix,verificationVolume]);
-    resources.push(['container',verify]);await docker(['create','-i',...dockerIsolation(verify,network,prefix,true),'--env','npm_config_registry=http://egress:8080/npm/','--mount',`type=volume,src=${verificationVolume},dst=/workspace`,image]);
+    resources.push(['container',verify]);await docker(['create','-i',...dockerIsolation(verify,'bridge',prefix),'--mount',`type=volume,src=${verificationVolume},dst=/workspace`,image]);
     save('verification-container.json',JSON.parse((await docker(['inspect',verify])).toString())[0]);let verified;
     await docker(['start','--attach','--interactive',verify],{signal:controller.signal,timeout:900000,limit:64_000_000,input:JSON.stringify({commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),environment,candidatePatch:fs.readFileSync(path.join(output,'changes.patch'),'utf8'),label:'Verification'}),onLine:line=>{const event=JSON.parse(line);record(event);if(event.type==='result')verified=event;}});
     const state=JSON.parse((await docker(['inspect','--format','{{json .State}}',verify])).toString());if(state.ExitCode!==0||state.OOMKilled||verified?.status!=='completed')throw Error('Candidate verification failed');

@@ -14,7 +14,7 @@ async function execute(r){
  if(r.op==='bash'){
   if(typeof r.command!=='string'||r.command.length>32000||r.command.includes('\0'))throw Error('Invalid command');
   return new Promise(resolve=>{
-   const child=spawn('/bin/bash',['--noprofile','--norc','-c',r.command],{cwd:root,detached:true,env:{PATH:process.env.PATH,HOME:'/tmp/home',npm_config_registry:process.env.npm_config_registry,GIT_TERMINAL_PROMPT:'0'},stdio:['ignore','pipe','pipe']});
+   const child=spawn('/bin/bash',['--noprofile','--norc','-c',r.command],{cwd:root,detached:true,env:{PATH:process.env.PATH,HOME:'/tmp/home',GIT_TERMINAL_PROMPT:'0'},stdio:['ignore','pipe','pipe']});
    let output='',bytes=0,reason='';const stop=why=>{reason=why;try{process.kill(-child.pid,'SIGKILL');}catch{}};
    const timer=setTimeout(()=>stop('Command timeout'),Math.min(240000,Math.max(1000,r.timeoutMs||240000)));
    const collect=b=>{bytes+=b.length;if(bytes>1000000)stop('Command output exceeded 1 MB');else output+=b.toString();};child.stdout.on('data',collect);child.stderr.on('data',collect);
