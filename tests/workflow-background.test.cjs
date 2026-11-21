@@ -5,7 +5,7 @@ const {getDb,closeDb}=require('../dist/db/schema');
 const {scanSessions}=require('../dist/sync/collector');
 const store=require('../dist/sync/store');
 const {generateReply}=require('../dist/sync/manager');
-const {warmSummaryCache}=require('../dist/sync/summary-preparation');
+const {warmSummaryCache,prepareWorkflowEnrichment}=require('../dist/sync/summary-preparation');
 const {createAutoIndexer,setAutoSummary,stopBackgroundIndexing}=require('../dist/sync/background');
 const {readFactory}=require('../dist/factory/service');
 const {pendingWorkflows}=require('../dist/factory/learning-store');
@@ -40,15 +40,34 @@ test('normal background tick saves process records with summaries and detects a 
  const worker=createAutoIndexer({enabled:()=>true,idle:()=>true,now:Date.now,scan:scanSessions,stamp:()=>new Map(),baseline:()=>new Map(),prepare:async()=>assert.fail('No new indexing is needed'),completed:()=>{},prepareSummaries:warmSummaryCache});
  await worker.tick();await worker.stop();
  const db=getDb(),run=db.prepare('SELECT * FROM background_runs ORDER BY id DESC LIMIT 1').get();assert.equal(run.status,'completed');
- assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model==='openai/gpt-6-luna'));
+ assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model===(c.task==='enrich_workflow'?'openai/gpt-6-astra':'openai/gpt-6-luna')));assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
  const chunks=calls().filter(c=>c.task==='summarize'&&c.stage==='chunk');assert.equal(chunks.length,2);
  assert.ok(chunks.every(c=>c.system.includes('process property alongside observations')));
  assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,2);
  assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,1);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
  assert.equal(pendingWorkflows(),false);noSync();
- const count=calls().length;const page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].decision.sameWorkflow,true);assert.equal(calls().length,count);
+ const count=calls().length;const page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].decision.sameWorkflow,true);assert.equal(page.proposals[0].enrichment.status,'ready');assert.equal(calls().length,count);
  for(const row of db.prepare("SELECT source_dependencies_json FROM process_extractions WHERE kind='summary'").all()){assert.ok(row.source_dependencies_json.includes('source_pointer'));assert.doesNotMatch(row.source_dependencies_json,/"text":/);}
  await warm();assert.equal(calls().length,count,'unchanged ticks do not repeat paid work');
+});
+test('explicit enrichment retries retain failed paid output and do not reset the background learning error',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),id=(await factory()).proposals[0].id;db.prepare('DELETE FROM workflow_enrichments').run();
+ db.prepare("INSERT OR REPLACE INTO sync_settings VALUES ('auto_summary_error','Existing learning failure')").run();controls({invalidEnrichment:true});
+ const requestId='12345678-1234-4234-8234-123456789abc',before=calls().length;
+ await assert.rejects(prepareWorkflowEnrichment(id,{requestId,retry:false},controller.signal),/enrichment/);assert.equal(calls().length,before+1);
+ const row=db.prepare('SELECT * FROM workflow_enrichments').get();assert.equal(row.status,'failed');assert.ok(row.raw_output);assert.equal(db.prepare('SELECT invocations FROM background_runs WHERE id=?').get(row.run_id).invocations,1);
+ await assert.rejects(prepareWorkflowEnrichment(id,{requestId,retry:false},controller.signal),/not ready/);assert.equal(calls().length,before+1);
+ controls({});await prepareWorkflowEnrichment(id,{requestId:'22345678-1234-4234-8234-123456789abc',retry:true},controller.signal);assert.equal(calls().length,before+2);
+ assert.equal((await factory()).proposals[0].enrichment.status,'ready');assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'Existing learning failure');
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_enrichments').get().n,2);const count=calls().length;await factory();await warm();assert.equal(calls().length,count);
+});
+test('enrichment uses the remaining shared preparation allowance, not a new budget',async()=>{
+ history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='4';await warm();const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.invocations,4);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,0);assert.equal((await factory()).proposals[0].enrichment.status,'failed');assert.equal(run.status,'failed');
+});
+test('uncited source revocation during enrichment prevents publication and retains the attempt',async()=>{
+ history();await scanSessions();controls({taskDelays:{enrich_workflow:500}});const done=warm();await waitFor(()=>calls().some(c=>c.task==='enrich_workflow'));
+ const db=getDb(),entries=db.prepare("SELECT entry_id FROM agent_entries WHERE session_id='job-0'").all();db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='job-0' AND entry_id=?").run(entries.at(-1).entry_id);await done;
+ assert.equal((await factory()).proposals.length,0);assert.equal(db.prepare('SELECT status FROM workflow_enrichments').get().status,'failed');assert.ok(db.prepare('SELECT raw_output FROM workflow_enrichments').get().raw_output);
 });
 test('different repositories never reach candidate selection or workflow matching',async()=>{
  const {execFileSync}=require('node:child_process');const a=root+'/a',b=root+'/b';
@@ -179,7 +198,7 @@ test('cancelled matching retains accounting and resumes with cached summaries an
  const db=getDb(),before=db.prepare('SELECT * FROM background_runs').get();assert.equal(before.status,'cancelled');assert.equal((await factory()).proposals.length,0);
  const summaries=calls().filter(c=>c.task==='summarize').length,selections=calls().filter(c=>c.task==='select_workflow_candidates').length;
  controller=new AbortController();controls({});await warm();
- assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,1);assert.equal(db.prepare('SELECT invocations FROM background_runs').get().invocations,before.invocations+1);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,1);assert.equal(db.prepare('SELECT invocations FROM background_runs').get().invocations,before.invocations+2);
  assert.equal(calls().filter(c=>c.task==='summarize').length,summaries);assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,selections);assert.equal((await factory()).proposals.length,1);
 });
 test('foreground summarization feeds background learning even when the open conversation holds all pending history',async()=>{

@@ -10,6 +10,8 @@ import { defaultModels } from './models';
 import { learnSummaryWorkflows } from '../factory/learning';
 import { pendingWorkflows } from '../factory/learning-store';
 import { prepareCachedProcesses } from '../factory/prepare';
+import { prepareEnrichment, prepareDiscoveredEnrichments, requireEnrichment } from '../factory/enrichment';
+import { modelCall } from './model-call';
 
 const FAILURE = 'Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
@@ -64,9 +66,35 @@ function cacheIntact(value: string | [string, string][]): boolean {
  * transcript bodies; the preparing owner and explicit sync validate originals. */
 export function summaryPreparationSettings(): SummaryPreparationSettings {
   const enabled = summaryPreparationEnabled(), error = setting('auto_summary_error') || '';
-  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
+  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key NOT LIKE 'workflow-enrichment:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
   return { enabled, status: !enabled ? 'off' : error ? 'error' : !indexingEnabled() || !idle() || active?.controller.signal.aborted ? 'paused' : active?.working ? 'running' : 'waiting',
     prepared_entries: last?.total_entries || 0, last_completed_at: last?.completed_at || null, error };
+}
+
+/** Explicit preparation/retry of an older workflow. Shares the background owner, not its error/reset state. */
+export async function prepareWorkflowEnrichment(id: string, body: unknown, signal: AbortSignal) {
+  const input = body as {requestId?: unknown; retry?: unknown} | null;
+  if (!/^[a-f0-9]{64}$/.test(id) || !input || typeof input.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(input.requestId) || typeof input.retry !== 'boolean') throw new HttpError(400, 'Provide a workflow, request ID and explicit retry choice.');
+  signal.throwIfAborted();
+  if (active || getDb().prepare("SELECT id FROM background_runs WHERE status='running' LIMIT 1").get()) throw new HttpError(409, 'Preparation is busy or needs recovery.');
+  const key = `workflow-enrichment:${id}:${input.requestId}`;
+  if (getDb().prepare('SELECT id FROM background_runs WHERE input_key=?').get(key)) return requireEnrichment(id, signal);
+  const controller = new AbortController(), abort = () => controller.abort(); signal.addEventListener('abort', abort, { once: true });
+  const owner = { controller, done: Promise.resolve(), working: true }; active = owner;
+  owner.done = Promise.resolve().then(async () => {
+    const models = { ...defaultModels(), max_invocations: 1 }, db = getDb();
+    const run = Number(db.prepare(`INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key,stage)
+      VALUES (?,?,1,0,?,?,'Workflow enrichment')`).run(models.summary, models.final, new Date().toISOString(), key).lastInsertRowid);
+    try {
+      await prepareEnrichment(id, run, models.final, (payload, system) => modelCall(payload, system, { models, runId: run, table: 'background_runs', final: true, signal: controller.signal }), controller.signal, input.retry as boolean);
+      db.prepare("UPDATE background_runs SET status='completed',stage='Workflow ready',completed_at=? WHERE id=?").run(new Date().toISOString(), run);
+    } catch (error) {
+      db.prepare('UPDATE background_runs SET status=?,error=?,completed_at=? WHERE id=?').run(controller.signal.aborted ? 'cancelled' : 'failed', 'Workflow enrichment did not complete. Attempt and accounting retained.', new Date().toISOString(), run);
+      throw error;
+    }
+  }).finally(() => { signal.removeEventListener('abort', abort); if (active === owner) active = undefined; });
+  await owner.done;
+  return requireEnrichment(id, signal);
 }
 
 /** Prepare only reusable summaries. No sync identity, snapshot, briefing or verdict.
@@ -128,6 +156,10 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
       await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
+      check();
+      await prepareDiscoveredEnrichments(run.id, input.models.final, (payload, system) => {
+        check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
+      }, controller.signal);
       check();
       // This receipt describes the captured input, not later arrivals. Verify its
       // originals and permissions without rebuilding the entire live snapshot.

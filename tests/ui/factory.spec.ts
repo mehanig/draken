@@ -28,6 +28,14 @@ test('Factory is read-only, direct-linkable and available in shared navigation',
   expect(mutations).toEqual([]);
 });
 
+test('retired release executor is not polled and cannot hide workflows', async ({ page }) => {
+  let oldReads = 0;
+  await page.route('**/api/factory/execution', route => { oldReads++; return route.fulfill({ status: 409, json: { error: 'Old source revoked' } }); });
+  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, proposals: [proposal] } }));
+  await page.goto('/factory'); await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible(); expect(oldReads).toBe(0);
+});
+
 test('Factory groups repositories and non-Git folders, including older pages', async ({ page }) => {
   const folder = { ...proposal, id: 'folder-proposal', location: { kind: 'folder', key: 'folder', path: '/notes/backup', name: 'backup' } };
   const older = { ...proposal, id: 'older-proposal' };
@@ -66,7 +74,7 @@ test('Factory explains paused learning and preparation errors without starting w
   await expect(page.getByText('Learning paused', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
   learning = 'error'; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Learning stopped.');
+  await expect(page.getByRole('status').filter({ hasText: 'Learning stopped.' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Retry in Settings' })).toHaveAttribute('href', '/settings');
   await expect(page.getByText('1 failed attempt', { exact: true })).toHaveCount(0);
   expect(mutations).toEqual([]);

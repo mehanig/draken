@@ -26,7 +26,7 @@ export function Settings() {
         setSettings(current => current ? { ...current, enabled, summary_enabled: enabled } : current);
         try { setSettings(await setAutoIndex(enabled)); } catch (error) { setSettings(previous); setError(error instanceof Error ? error.message : 'Could not save settings'); }
         finally { setSaving(false); }
-      }} /><span><strong>Automatically prepare history</strong><span className="small muted">Index locally, then cache summaries using your configured provider and its quota or API billing.</span></span></label>
+      }} /><span><strong>Automatically prepare history</strong><span className="small muted">Index locally, then cache summaries and prepare workflows using your configured models and their quota or API billing.</span></span></label>
     <InfoDisclosure label="About automatic preparation">
       <p>Preparation runs while Draken is idle. Turning it off keeps completed work. Provider failures pause summaries until you explicitly retry.</p>
       <p>Local search uses CPU, memory and disk, and may download about 136 MB on first use. Starting a chat or call creates its briefing. Preparation never starts a call or marks work reviewed.</p>

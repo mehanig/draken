@@ -7,8 +7,9 @@
     ".": {
       "entry": [
         "tests/*.cjs", "tests/ui/**/*.{ts,cjs}",
+        "scripts/factory-workspace.cjs", "scripts/factory-workspace/worker.cjs", "scripts/factory-workspace/tool.cjs",
         // Executables copied/spawned by tests, not imported as modules.
-        "tests/fixtures/fake-*.cjs",
+        "tests/fixtures/fake-*.cjs", "tests/fixtures/factory-enrichment-contract.ts",
         // Browser modules served over HTTP by the isolated voice probe.
         "voice/realtime/probe-browser.mjs", "voice/realtime/peer.mjs",
         // The client compiler consumes this declaration; Knip resolves the JS implementation.
@@ -16,6 +17,8 @@
       ],
       "project": ["src/**/*.ts", "tests/**/*.{ts,cjs}", "voice/**/*.{mjs,mts}"],
       "paths": {
+        // CJS tests and operator examples consume compiled modules; lint their source.
+        "../dist/*": ["src/*"],
         // Test-browser HTTP import, served from this source file.
         "/peer.mjs": ["voice/realtime/peer.mjs"]
       },

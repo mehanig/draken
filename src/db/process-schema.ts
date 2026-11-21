@@ -16,6 +16,21 @@ export function initProcessSchema(db: Database.Database): void {
       created_at TEXT NOT NULL,
       completed_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS workflow_enrichments (
+      id INTEGER PRIMARY KEY,
+      workflow_id TEXT NOT NULL REFERENCES process_extractions(id),
+      revision TEXT NOT NULL,
+      policy_version TEXT NOT NULL,
+      recipe_version TEXT NOT NULL,
+      model TEXT NOT NULL,
+      run_id INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('running','completed','failed','cancelled')),
+      raw_output TEXT,
+      output_json TEXT,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS workflow_enrichments_source ON workflow_enrichments(workflow_id,revision,policy_version,recipe_version);
     CREATE INDEX IF NOT EXISTS process_extractions_input ON process_extractions(input_key,recipe_version,model);
     CREATE TABLE IF NOT EXISTS work_episodes (
       id TEXT PRIMARY KEY,
