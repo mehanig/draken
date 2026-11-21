@@ -51,11 +51,11 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/Factory finds workflow proposals during background summarization/);
-  assert.match(notes,/steps and source evidence, grouped by repository/);
-  assert.match(notes,/Different repositories stay separate/);
-  assert.match(notes,/top bar—or the mobile menu/);
-  assert.match(notes,/Proposals are yours to review, not automatic execution/);
+  assert.match(notes,/Factory now prepares and saves workflow guidance, checks and concrete inputs/);
+  assert.match(notes,/alongside the historical evidence/);
+  assert.match(notes,/Browse it by repository without regenerating it on every visit/);
+  assert.match(notes,/Configured source checkouts can try single-session execution in Docker/);
+  assert.match(notes,/Execution is not yet available in the npm installation/);
   assert.match(notes,/Existing history and caches stay intact/);
   assert.match(notes,/newly prepared original history between user turns as dated H evidence/);
   assert.match(notes,/Each answer pins one history cutoff/);

@@ -2,7 +2,7 @@
 
 **Design authority: [Factory plan](factory-plan.md).** This guide describes the current code, not the desired limits of the product. The current publication prohibition, broad protected-file checks and incomplete Git/credential setup are implementation gaps to correct—not requirements to preserve. Updating the plan has not yet removed them from runtime code. Workflow actions such as PR creation and publication belong to the agent's complete workflow, not separate Factory executors.
 
-Checkout-only prototype in draft PR #54, not published 0.10.0. Runtime scripts are not yet shipped in npm. Opening or refreshing Factory starts no inference or execution.
+PR #54 is merged. Execution remains a checkout-only prototype: its runtime scripts are not shipped in the 0.11.0 npm package. Opening or refreshing Factory starts no inference or execution.
 
 ## Intended lifecycle
 
