@@ -24,6 +24,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 }
 
 export const factory = (before?: number, signal?: AbortSignal) => request<FactoryPage>(`/factory${before === undefined ? '' : `?before=${before}`}`, 'GET', undefined, signal);
+export const prepareFactoryWorkflow = (id: string, requestId: string, retry: boolean, signal: AbortSignal) => request(`/factory/${encodeURIComponent(id)}/enrichment`, 'POST', { requestId, retry }, signal);
 export const factoryWorkspaces = (signal?: AbortSignal) => request<WorkspacePage>('/factory/workspaces', 'GET', undefined, signal);
 export const workspaceLog = (id: string) => request<{ text: string }>(`/factory/workspaces/${encodeURIComponent(id)}/log`);
 export const runWorkspace = (ref: string, requestId: string, workflow: { workflowId: string; task: string }) => request<WorkspaceRun>('/factory/workspaces', 'POST', { ref, requestId, ...workflow });

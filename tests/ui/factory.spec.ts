@@ -74,7 +74,7 @@ test('Factory explains paused learning and preparation errors without starting w
   await expect(page.getByText('Learning paused', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
   learning = 'error'; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Learning stopped.');
+  await expect(page.getByRole('status').filter({ hasText: 'Learning stopped.' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Retry in Settings' })).toHaveAttribute('href', '/settings');
   await expect(page.getByText('1 failed attempt', { exact: true })).toHaveCount(0);
   expect(mutations).toEqual([]);

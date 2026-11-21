@@ -4,7 +4,7 @@ const {discoveryFromProposal}=require('../../dist/factory/discovery');
 const {sessionPlan}=require('../../dist/factory-enrichment');
 function loadBrief(file,repository,commit){
  const original=fs.readFileSync(file,'utf8'),request=JSON.parse(original),p=request.plan;
- if(!p||p.format!=='factory-agent-session-v1'||JSON.stringify(sessionPlan(p.workflow,p.task,p.policy.locationKey,p.policy.maxCalls))!==JSON.stringify(p))throw Error('Invalid whole-workflow session plan');
+ if(!p||p.format!=='factory-agent-session-v2'||JSON.stringify(sessionPlan(p.workflow,p.task,p.policy.locationKey,p.enrichment,p.policy.maxCalls))!==JSON.stringify(p))throw Error('Invalid whole-workflow session plan');
  const location=workflowLocation(repository);if(location.kind!=='repository'||location.key!==p.policy.locationKey)throw Error('Workflow belongs to a different repository');
  const source=request.authorization;
  if(!source||!['operator','discovery'].includes(source.kind))throw Error('Explicit workflow authority required');
@@ -19,7 +19,7 @@ function loadBrief(file,repository,commit){
     const response=await fetch(new URL('/api/factory'+(before?'?before='+before:''),source.origin),{signal,redirect:'error',cache:'no-store',headers:{Authorization:'Bearer '+process.env.DRAKEN_FACTORY_TOKEN}});
     if(!response.ok)throw Error('Workflow source unavailable');const page=await response.json();found=page.proposals.find(v=>v.id===p.workflow.id);if(found||page.nextCursor===null)break;before=page.nextCursor;
    }
-   if(!found||JSON.stringify(discoveryFromProposal(found))!==JSON.stringify(p.workflow))throw Error('Workflow source changed or permission was revoked');
+   if(!found||found.enrichment?.status!=='ready'||JSON.stringify(found.enrichment.value)!==JSON.stringify(p.enrichment)||JSON.stringify(discoveryFromProposal(found))!==JSON.stringify(p.workflow))throw Error('Workflow source changed or permission was revoked');
   }
   signal?.throwIfAborted();
  };

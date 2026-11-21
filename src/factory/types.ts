@@ -1,3 +1,4 @@
+import type { Enrichment } from '../factory-enrichment';
 import type { ContractDecision, ContractMatchInput } from '../workflow-learning';
 
 export interface WorkflowLocation {
@@ -6,7 +7,9 @@ export interface WorkflowLocation {
   path: string;
   name: string;
 }
+export type SavedEnrichment = { status: 'pending' | 'running' | 'failed' | 'ready'; value?: Enrichment };
 interface FactoryProposal {
+  enrichment?: SavedEnrichment;
   location: WorkflowLocation;
   id: string;
   model: string;

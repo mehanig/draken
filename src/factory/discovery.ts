@@ -8,7 +8,8 @@ import type { FactoryPage } from './types';
 export function discoveryFromProposal(proposal: FactoryPage['proposals'][number]): Discovery {
   const workflow = proposal.decision.assessment.workflow;
   if (!proposal.decision.sameWorkflow || !workflow || proposal.location.kind === 'unavailable') throw Error('Verified workflow proposal required');
-  return { id: proposal.id, revision: digest(JSON.stringify(proposal)), locationKey: proposal.location.key,
+  const { id, model, createdAt, decision, evidence, location } = proposal;
+  return { id: proposal.id, revision: digest(JSON.stringify({ id, model, createdAt, decision, evidence, location })), locationKey: proposal.location.key,
     purpose: workflow.purpose, appliesWhen: workflow.appliesWhen, method: [...workflow.method],
     limitations: [...new Set([...proposal.decision.assessment.limitations, ...proposal.evidence.flatMap(input => [...(input.limitations || []), ...input.gaps])])] };
 }

@@ -10,23 +10,23 @@ async function main(){
 import * as real from ${JSON.stringify(pathToFileURL(entry).href)};
 import {AssistantMessageEventStream} from ${JSON.stringify(pathToFileURL(streamFile).href)};
 export async function createAgentSession(options){
- const result=await real.createAgentSession(options);let call=0;
+ const result=await real.createAgentSession(options);let call=0,prompts=0;const prompt=result.session.prompt.bind(result.session);
+ result.session.prompt=(...args)=>{if(++prompts!==1)throw Error('Unexpected enrichment prompt during execution');return prompt(...args);};
  result.session.agent.getApiKey=async()=> 'fixture-no-provider';
  result.session.agent.streamFunction=(model,context)=>{
   call++;const stream=new AssistantMessageEventStream(),names=result.session.getActiveToolNames();let content,stopReason='stop';
-  if(call===1){if(names.length)throw Error('Enrichment exposed tools');content=[{type:'text',text:JSON.stringify({steps:[{step:1,approach:'Reproduce defect',checks:['Record failure']},{step:2,approach:'Fix parser',checks:['Regression passes']}],review:['Review edge cases and repair findings'],completion:['Requested behavior is checked'],risks:[]})}];}
-  else {if(names.sort().join(',')!=='bash,edit,read,write'||!JSON.stringify(context.messages).includes('factory-workflow-enrichment-v2'))throw Error('Missing enrichment or wrong tools');
-   if(call===2){content=[{type:'toolCall',id:'read-fixture',name:'read',arguments:{path:'index.cjs'}}];stopReason='toolUse';}
+  if(names.sort().join(',')!=='bash,edit,read,write'||!JSON.stringify(context.messages).includes('factory-workflow-enrichment-v3'))throw Error('Missing saved enrichment or wrong tools');
+   if(call===1){content=[{type:'toolCall',id:'read-fixture',name:'read',arguments:{path:'index.cjs'}}];stopReason='toolUse';}
    else content=[{type:'text',text:JSON.stringify({status:'completed',summary:'SDK contract fixture only'})}];
-  }
   const message={role:'assistant',content,api:model.api,provider:model.provider,model:model.id,stopReason,usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},timestamp:Date.now()};
   stream.push({type:'done',reason:stopReason,message});stream.end();return stream;
  };return result;
 }`);
  process.env.DRAKEN_FACTORY_PI_SDK=path.join(sdk,'dist/index.js');const operations=[];
- const result=await runAgent({directory:path.join(root,'run'),brief:{...sessionPlan({id:'fixture',revision:'1',locationKey:'fixture',purpose:'Repair parser',appliesWhen:'Bug',method:['Reproduce','Fix'],limitations:[]},'Fix parser','fixture',4),repository:root,locationKey:'fixture',commit:'fixture'},baseline:{},environment:{},invoke:async r=>{operations.push(r.op);if(r.op==='read')return {base64:Buffer.from('module.exports = 1;').toString('base64')};if(r.op==='access')return {};throw Error('Unexpected operation');},authorize:async()=>{},signal:new AbortController().signal,record:()=>{},maxCalls:4});
- assert.equal(result.modelCalls,3);assert.equal(result.completedCalls,3);assert.equal(result.accountingComplete,true);assert.ok(operations.includes('read'));
- const metadata=JSON.parse(fs.readFileSync(path.join(root,'run/session.json'))),messages=fs.readFileSync(metadata.file,'utf8').trim().split('\n').map(JSON.parse);assert.equal(messages.filter(e=>e.type==='message'&&e.message.role==='assistant').length,3);
- console.log(JSON.stringify({directory:root,sdk:pkg.version,oneSession:true,enrichmentThenExecution:true,containerAdapterInvoked:true,simulatedRequests:3,providerRequests:0}));
+ const workflow={id:'fixture',revision:'1',locationKey:'fixture',purpose:'Repair parser',appliesWhen:'Bug',method:['Reproduce','Fix'],limitations:[]},saved=require('./fixtures/workflow-enrichment.cjs')(workflow);
+ const result=await runAgent({directory:path.join(root,'run'),brief:{...sessionPlan(workflow,'Fix parser','fixture',saved,4),repository:root,locationKey:'fixture',commit:'fixture'},baseline:{},environment:{},invoke:async r=>{operations.push(r.op);if(r.op==='read')return {base64:Buffer.from('module.exports = 1;').toString('base64')};if(r.op==='access')return {};throw Error('Unexpected operation');},authorize:async()=>{},signal:new AbortController().signal,record:()=>{},maxCalls:4});
+ assert.equal(result.modelCalls,2);assert.equal(result.completedCalls,2);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root,'run/enrichment.json'))),saved);assert.equal(result.accountingComplete,true);assert.ok(operations.includes('read'));
+ const metadata=JSON.parse(fs.readFileSync(path.join(root,'run/session.json'))),messages=fs.readFileSync(metadata.file,'utf8').trim().split('\n').map(JSON.parse);assert.equal(messages.filter(e=>e.type==='message'&&e.message.role==='assistant').length,2);
+ console.log(JSON.stringify({directory:root,sdk:pkg.version,oneSession:true,savedEnrichmentReused:true,containerAdapterInvoked:true,simulatedRequests:2,providerRequests:0}));
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

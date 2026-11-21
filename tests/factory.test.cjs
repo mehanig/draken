@@ -45,8 +45,26 @@ test('Factory reads verified saved proposals without syncs, provider calls or ne
  assert.ok(!JSON.stringify(result).includes(path.join(dir,'sessions')));
 });
 test('enrichment rejects uncited source revocation after its accounted planning callback',async()=>{
- const {readDiscovery}=require('../dist/factory/discovery'),{sessionPlan,proposeEnrichment}=require('../dist/factory-enrichment');const {id}=await seed(),d=await readDiscovery(id,signal());let calls=0;
- await assert.rejects(proposeEnrichment(sessionPlan(d,'Repair parser',d.locationKey),{assertCurrent:async s=>{if((await readDiscovery(id,s)).revision!==d.revision)throw Error('Changed');},ask:async()=>{calls++;db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();return '{}';}},signal()));assert.equal(calls,1);
+ const {readDiscovery}=require('../dist/factory/discovery'),{proposeEnrichment}=require('../dist/factory-enrichment');const {id}=await seed(),d=await readDiscovery(id,signal());let calls=0;
+ await assert.rejects(proposeEnrichment(d,{assertCurrent:async s=>{if((await readDiscovery(id,s)).revision!==d.revision)throw Error('Changed');},ask:async()=>{calls++;db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();return '{}';}},signal()));assert.equal(calls,1);
+});
+test('Factory reads pending workflows without inference; preparation persists reusable source/policy-scoped enrichment',async()=>{
+ const {id}=await seed(),{readDiscovery}=require('../dist/factory/discovery'),{prepareEnrichment,requireEnrichment}=require('../dist/factory/enrichment'),{sessionPlan}=require('../dist/factory-enrichment');
+ const d=await readDiscovery(id,signal());assert.equal((await readFactory(undefined,signal())).proposals[0].enrichment.status,'pending');assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_enrichments').get().n,0);let calls=0;
+ const ask=async()=>{calls++;return JSON.stringify(require('./fixtures/workflow-enrichment.cjs')(d).guidance);};const saved=await prepareEnrichment(id,0,'fixture',ask,signal());
+ assert.deepEqual(await readDiscovery(id,signal()),d);assert.deepEqual((await readFactory(undefined,signal())).proposals[0].enrichment.value,saved);
+ assert.deepEqual(await prepareEnrichment(id,1,'another-model',ask,signal()),saved);assert.equal(calls,1);
+ for(const task of ['Fix integers','Fix escaped strings'])assert.deepEqual(sessionPlan(d,task,d.locationKey,await requireEnrichment(id,signal())).enrichment,saved);
+ assert.equal(calls,1);assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_enrichments').get().n,1);
+ db.prepare("UPDATE workflow_enrichments SET policy_version='old-policy'").run();assert.equal((await readFactory(undefined,signal())).proposals[0].enrichment.status,'pending');await assert.rejects(requireEnrichment(id,signal()),/not ready/);
+});
+test('invalid enrichment retains the paid output and needs explicit retry; background does not retry it',async()=>{
+ const {id}=await seed(),{readDiscovery}=require('../dist/factory/discovery'),{prepareEnrichment,prepareDiscoveredEnrichments}=require('../dist/factory/enrichment');let calls=0;
+ await assert.rejects(prepareEnrichment(id,0,'fixture',async()=>{calls++;return '{"steps":[]}';},signal()),/enrichment/);
+ assert.equal(db.prepare('SELECT raw_output FROM workflow_enrichments').get().raw_output,'{"steps":[]}');assert.equal((await readFactory(undefined,signal())).proposals[0].enrichment.status,'failed');
+ const d=await readDiscovery(id,signal()),ask=async()=>{calls++;return JSON.stringify(require('./fixtures/workflow-enrichment.cjs')(d).guidance);};
+ await prepareDiscoveredEnrichments(1,'fixture',ask,signal());await assert.rejects(prepareEnrichment(id,1,'fixture',ask,signal()),/explicit/);assert.equal(calls,1);
+ await prepareEnrichment(id,1,'fixture',ask,signal(),true);assert.equal(calls,2);assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_enrichments').get().n,2);
 });
 test('old saved comparisons cannot expose a workflow spanning different folders',async()=>{
  const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);
@@ -94,6 +112,9 @@ test('Factory rejects invalid cursors and cancellation without returning content
 test('agent workspace results and logs require fresh workflow source access, including uncited dependencies',async()=>{
  require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);const {id}=await seed();const {readDiscovery}=require('../dist/factory/discovery');const {readWorkspaces,workspaceLog,startWorkspace}=require('../dist/factory/workspace');const discovery=await readDiscovery(id,signal());
  Object.assign(process.env,{DRAKEN_WORKSPACE_REPO:path.join(dir,'work'),DRAKEN_WORKSPACE_ALLOWED_IMAGES:'["approved"]',DRAKEN_DOCKER_BIN:'/not-called',DRAKEN_DOCKER_HOST:'unix:///not-called',DRAKEN_FACTORY_PI_SDK:__filename,DRAKEN_PI_FINAL_MODEL:'fixture/test'});
+ await assert.rejects(startWorkspace({requestId:'22345678-1234-4234-8234-123456789abc',ref:'HEAD',workflowId:id,task:'Repair parser'},'fixture-token'),/enrichment is not ready/);
+ assert.equal(fs.existsSync(path.join(dir,'factory-workspaces')),false);
+ await require('../dist/factory/enrichment').prepareEnrichment(id,0,'fixture',async()=>JSON.stringify(require('./fixtures/workflow-enrichment.cjs')(discovery).guidance),signal());
  const requestId='12345678-1234-4234-8234-123456789abc',run=path.join(dir,'factory-workspaces',requestId);fs.mkdirSync(path.join(run,'work'),{recursive:true});
  fs.writeFileSync(path.join(run,'request.json'),JSON.stringify({id:requestId,ref:'HEAD',propose:false,workflowId:id,revision:discovery.revision,task:'Repair the parser',location:discovery.locationKey,createdAt:new Date().toISOString()}));
  fs.writeFileSync(path.join(run,'work/result.json'),JSON.stringify({status:'completed',modelCalls:2,sessionId:'fixture'}));fs.writeFileSync(path.join(run,'work/events.jsonl'),JSON.stringify({type:'stage-result',name:'Test',code:0,stdout:'Verified fixture output'})+'\n');
@@ -118,8 +139,10 @@ test('Factory API uses existing authentication, same-origin and no-store policy;
  assert.equal((await fetch(url+'?before=invalid')).status,400);
  assert.equal((await fetch(url,{headers:{Origin:'https://other.example'}})).status,403);
  assert.equal((await fetch(url+'/workspaces')).status,200);
+ assert.equal((await fetch(url+'/'+'a'.repeat(64)+'/enrichment',{method:'POST',headers:{Origin:'https://other.example','Content-Type':'application/json'},body:'{}'})).status,403);
  assert.equal((await fetch(url+'/workspaces',{method:'POST',headers:{Origin:'https://other.example','Content-Type':'application/json'},body:'{}'})).status,403);
  process.env.DRAKEN_NO_AUTH='false';assert.equal((await fetch(url)).status,401);
+ assert.equal((await fetch(url+'/'+'a'.repeat(64)+'/enrichment',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
  assert.equal((await fetch(url+'/workspaces')).status,401);
  assert.equal((await fetch(url+'/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,0);

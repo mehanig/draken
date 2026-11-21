@@ -1,12 +1,12 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{pathToFileURL}=require('node:url');
-const {sessionPlan}=require('../dist/factory-enrichment');
+const {sessionPlan}=require('../dist/factory-enrichment'),fixtureEnrichment=require('./fixtures/workflow-enrichment.cjs');
 const {createTools,runAgent}=require('../scripts/factory-workspace/agent.cjs');
 const {target}=require('../scripts/factory-workspace/tool.cjs');
 const workflow={id:'workflow',revision:'1',locationKey:'repo',purpose:'Fix a bug',appliesWhen:'Reproducible bug',method:['Reproduce','Edit','Test and repair'],limitations:[]};
 test('whole-workflow plan retains every step without fabricating a one-step discovery',()=>{
- const plan=sessionPlan(workflow,'Fix the issue','repo',8);assert.deepEqual(plan.workflow.method,workflow.method);assert.equal(plan.policy.publication,false);
+ const plan=sessionPlan(workflow,'Fix the issue','repo',fixtureEnrichment(workflow),8);assert.deepEqual(plan.workflow.method,workflow.method);assert.equal(plan.policy.publication,false);
  plan.workflow.method[0]='changed';assert.equal(workflow.method[0],'Reproduce');
- assert.throws(()=>sessionPlan(workflow,'Fix','other'),/scope/);assert.throws(()=>sessionPlan(workflow,'Fix','repo',0),/allowance/);
+ assert.throws(()=>sessionPlan(workflow,'Fix','other'),/scope/);assert.throws(()=>sessionPlan(workflow,'Fix','repo',fixtureEnrichment(workflow),0),/allowance/);
 });
 test('container file paths reject traversal, outside symlinks and dangling symlinks',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'agent-path-')),root=path.join(dir,'repo');fs.mkdirSync(root);fs.writeFileSync(path.join(root,'a'),'source');
@@ -28,12 +28,12 @@ async function sdkFixture(fn){
 }
 test('provider requests are durably reserved before dispatch and stop at the invocation allowance',async()=>sdkFixture(async dir=>{
  const output=path.join(dir,'run'),controller=new AbortController();
- await assert.rejects(runAgent({directory:output,brief:{...sessionPlan(workflow,'Fix','repo',1),repository:dir,locationKey:'repo',commit:'base'},baseline:{},invoke:async()=>{throw Error('Unexpected tool');},authorize:async()=>{},signal:controller.signal,record:()=>{},maxCalls:1}),/allowance/);
+ await assert.rejects(runAgent({directory:output,brief:{...sessionPlan(workflow,'Fix','repo',fixtureEnrichment(workflow),1),repository:dir,locationKey:'repo',commit:'base'},baseline:{},invoke:async()=>{throw Error('Unexpected tool');},authorize:async()=>{},signal:controller.signal,record:()=>{},maxCalls:1}),/allowance/);
  assert.equal(fs.readFileSync(path.join(output,'fixture-provider-calls'),'utf8'),'call\n');const entries=fs.readFileSync(path.join(output,'accounting.jsonl'),'utf8').trim().split('\n').map(JSON.parse);assert.deepEqual(entries.map(e=>e.type),['request','response']);assert.equal(entries[0].call,1);assert.equal(JSON.parse(fs.readFileSync(path.join(output,'result.json'))).modelCalls,1);
 }));
 test('one session accounts for all requests and source failure prevents subsequent provider work',async()=>sdkFixture(async dir=>{
- const common={brief:{...sessionPlan(workflow,'Fix','repo',2),repository:dir,locationKey:'repo',commit:'base'},baseline:{},invoke:async()=>{},signal:new AbortController().signal,record:()=>{},maxCalls:2};
- const result=await runAgent({...common,directory:path.join(dir,'success'),authorize:async()=>{}});assert.equal(result.modelCalls,2);assert.equal(result.completedCalls,2);assert.equal(result.accountingComplete,true);assert.equal(result.sessionId,'fixture-session');const enriched=JSON.parse(fs.readFileSync(path.join(dir,'success/enrichment.json')));assert.equal(enriched.guidance.steps.length,3);assert.ok(enriched.requirements.some(s=>s.includes('Review the diff')));
+ const common={brief:{...sessionPlan(workflow,'Fix','repo',fixtureEnrichment(workflow),2),repository:dir,locationKey:'repo',commit:'base'},baseline:{},invoke:async()=>{},signal:new AbortController().signal,record:()=>{},maxCalls:2};
+ const result=await runAgent({...common,directory:path.join(dir,'success'),authorize:async()=>{}});assert.equal(result.modelCalls,2);assert.equal(result.completedCalls,2);assert.equal(result.accountingComplete,true);assert.equal(result.sessionId,'fixture-session');const enriched=JSON.parse(fs.readFileSync(path.join(dir,'success/enrichment.json')));assert.deepEqual(enriched,common.brief.enrichment);assert.equal(enriched.guidance.steps.length,3);assert.ok(enriched.requirements.some(s=>s.includes('Review the diff')));
  const failed=path.join(dir,'revoked');await assert.rejects(runAgent({...common,directory:failed,authorize:async()=>{if(fs.existsSync(path.join(failed,'fixture-provider-calls')))throw Error('Source revoked');}}),/revoked/);assert.equal(fs.readFileSync(path.join(failed,'fixture-provider-calls'),'utf8'),'call\n');
 }));
 test('execution ownership is shared between profiles and interrupted workspace resources block starts',()=>{

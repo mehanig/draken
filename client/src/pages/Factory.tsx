@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { factory } from '../api';
+import { factory, prepareFactoryWorkflow } from '../api';
+import { requestId } from '../request-id';
 import { FactoryWorkspace, useFactoryWorkspaces } from '../components/FactoryWorkspace';
 import type { FactoryPage } from '../../../src/factory/types';
 import '../styles/factory.css';
@@ -8,7 +9,8 @@ export function Factory() {
   const workspaces = useFactoryWorkspaces();
   const [data, setData] = useState<FactoryPage | null>(null);
   const [error, setError] = useState(''), [loading, setLoading] = useState(false);
-  const request = useRef<AbortController | null>(null);
+  const request = useRef<AbortController | null>(null), preparation = useRef<AbortController | null>(null);
+  const [preparing, setPreparing] = useState<string | null>(null), [preparationError, setPreparationError] = useState('');
   const load = useCallback(async (before?: number) => {
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
@@ -22,7 +24,13 @@ export function Factory() {
       if (!controller.signal.aborted) { setData(null); setError(cause instanceof Error ? cause.message : 'Could not read workflow proposals.'); }
     } finally { if (!controller.signal.aborted) setLoading(false); }
   }, []);
-  useEffect(() => { void load(); return () => request.current?.abort(); }, [load]);
+  useEffect(() => { void load(); return () => { request.current?.abort(); preparation.current?.abort(); }; }, [load]);
+  async function prepare(id: string, retry: boolean) {
+    const controller = new AbortController(); preparation.current = controller; setPreparing(id); setPreparationError('');
+    try { await prepareFactoryWorkflow(id, requestId(), retry, controller.signal); }
+    catch (cause) { if (!controller.signal.aborted) setPreparationError(cause instanceof Error ? cause.message : 'Enrichment did not complete.'); }
+    finally { if (!controller.signal.aborted) { setPreparing(null); await load(); } }
+  }
   const groups = new Map<string, { location: FactoryPage['proposals'][number]['location']; proposals: FactoryPage['proposals'] }>();
   for (const proposal of data?.proposals || []) {
     if (!groups.has(proposal.location.key)) groups.set(proposal.location.key, { location: proposal.location, proposals: [] });
@@ -32,6 +40,7 @@ export function Factory() {
     <div className="factory-heading"><h1>Factory</h1>
       <button type="button" disabled={loading} onClick={() => { void load(); void workspaces.refresh(); }}>Refresh</button></div>
     {error && <p role="alert">{error}</p>}
+    {preparationError && <p role="alert">{preparationError}</p>}
     {workspaces.error && <p role="alert">{workspaces.error}</p>}
     {loading && <p role="status">Loading…</p>}
     {data && <>
@@ -51,7 +60,18 @@ export function Factory() {
           <h2>{workflow.purpose}</h2><p className="muted">{workflow.appliesWhen}</p>
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
           {!!proposal.decision.assessment.limitations.length && <><h3>Limitations</h3><ul>{proposal.decision.assessment.limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
-          <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} purpose={workflow.purpose} />
+          {proposal.enrichment?.status === 'ready' && proposal.enrichment.value ? <>
+            <h3>Execution guidance</h3><p className="muted small">Draken additions, separate from historical observations.</p>
+            <ol>{proposal.enrichment.value.guidance.steps.map(step => <li key={step.step}><p>{step.approach}</p><ul>{step.checks.map((check, i) => <li key={i}>{check}</li>)}</ul></li>)}</ol>
+            <h3>Review</h3><ul>{proposal.enrichment.value.guidance.review.map((item, i) => <li key={i}>{item}</li>)}</ul>
+            <h3>Completion</h3><ul>{proposal.enrichment.value.guidance.completion.map((item, i) => <li key={i}>{item}</li>)}</ul>
+            {!!proposal.enrichment.value.guidance.risks.length && <><h3>Execution risks</h3><ul>{proposal.enrichment.value.guidance.risks.map((item, i) => <li key={i}>{item}</li>)}</ul></>}
+            <details><summary>Host requirements</summary><ul>{proposal.enrichment.value.requirements.map((item, i) => <li key={i}>{item}</li>)}</ul></details>
+            <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} purpose={workflow.purpose} />
+          </> : <section aria-label="Workflow preparation"><p role="status">{preparing === proposal.id || proposal.enrichment?.status === 'running' ? 'Preparing workflow…' : proposal.enrichment?.status === 'failed' ? 'Enrichment failed. The attempt is retained.' : 'Awaiting enrichment — not ready to run.'}</p>
+            <button type="button" disabled={!!preparing || proposal.enrichment?.status === 'running'} onClick={() => void prepare(proposal.id, proposal.enrichment?.status === 'failed')}>{proposal.enrichment?.status === 'failed' ? 'Retry enrichment' : 'Enrich workflow'}</button>
+            <p className="muted small">One preparation call. Saved guidance is reused across tasks.</p>
+          </section>}
           <details><summary>Evidence</summary>
             <p>{proposal.decision.assessment.reason}</p>
             {proposal.evidence.map((input, i) => <section className="factory-evidence" key={i}>

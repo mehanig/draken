@@ -54,6 +54,7 @@ process.stdin.on('end', () => {
     return emit({ selections: value.citation_repairs.map(item => ({ observation: item.observation, evidence: [item.candidate_source_ids[0], item.candidate_source_ids.at(-1)] })) });
   }
   if (value.task === 'select_workflow_candidates') return emit({ selected: control.workflowSelection ?? value.candidates.slice(0, 1).map(c => c.id) });
+  if (value.task === 'enrich_workflow') return emit(control.invalidEnrichment ? { steps: [] } : { steps: value.workflow.method.map((_, i) => ({ step: i + 1, approach: 'Inspect and carry out this workflow step', checks: ['Verify the step result'] })), review: ['Review the diff and repair findings'], completion: ['Verify the requested endpoint'], risks: [] });
   if (value.task === 'compare_workflow_identity') return emit(control.workflowAssessment || { relation: 'same_workflow_candidate', workflow: { purpose: 'Repair a parser defect', method: ['Reproduce the defect and add a regression test', 'Correct the parser and verify compatibility'], appliesWhen: 'A reproducible parser defect must be repaired without changing the format' }, stagePairs: [{ left: 'S1', right: 'S1' }, { left: 'S2', right: 'S2' }], reason: 'Same purpose and method', limitations: [] });
   if (value.task === 'summarize') {
     let observations;

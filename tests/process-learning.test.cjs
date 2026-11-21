@@ -39,9 +39,9 @@ afterEach(() => {
   for (const [k,v] of Object.entries(prior)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 });
 
-test('additive migration creates exactly three process tables and is repeatable', () => {
+test('additive migration creates process and saved-enrichment tables and is repeatable', () => {
   initProcessSchema(store);
-  assert.deepEqual(store.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(x => x.name), ['episode_extractions', 'process_extractions', 'work_episodes']);
+  assert.deepEqual(store.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(x => x.name), ['episode_extractions', 'process_extractions', 'work_episodes', 'workflow_enrichments']);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE name='process_extractions'").get().n, 1);
   assert.equal(store.pragma('foreign_key_check').length, 0);
 });

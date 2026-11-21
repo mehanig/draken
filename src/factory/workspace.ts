@@ -5,6 +5,7 @@ import { getDataDir } from '../data-dir';
 import { HttpError } from '../errors';
 import { workflowLocation } from './location';
 import { readDiscovery } from './discovery';
+import { requireEnrichment } from './enrichment';
 import { sessionPlan } from '../factory-enrichment';
 import { claimFactoryExecution } from './execution-owner';
 
@@ -89,7 +90,8 @@ export async function startWorkspace(body: unknown, token = ''): Promise<Workspa
     if (!settings.agentAvailable || !token) throw new HttpError(409, 'An authenticated session and configured Factory Pi agent are required.');
     const discovery = await readDiscovery(input.workflowId, new AbortController().signal);
     if (discovery.locationKey !== settings.location!.key) throw new HttpError(409, 'Workflow belongs to a different repository.');
-    const plan = sessionPlan(discovery, input.task, settings.location!.key);
+    const enrichment = await requireEnrichment(input.workflowId, new AbortController().signal);
+    const plan = sessionPlan(discovery, input.task, settings.location!.key, enrichment);
     const existing = requests(), prior = existing.find(r => r.id === input.requestId);
     if (prior) {
       if (prior.ref !== input.ref || prior.location !== settings.location!.key || prior.workflowId !== input.workflowId || prior.task !== plan.task || prior.revision !== plan.workflow.revision) throw new HttpError(409, 'Run request ID already used.');

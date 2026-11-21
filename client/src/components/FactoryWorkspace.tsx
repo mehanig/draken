@@ -42,7 +42,7 @@ export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { 
   const runs = data.runs.filter(run => run.workflowId === workflowId);
   return <section className="factory-execution" aria-label="Agent workflow execution">
     <h3>Run workflow</h3>
-    <p className="muted small">Up to 16 model calls, including enrichment. Changes are retained as a patch; nothing is published.</p>
+    <p className="muted small">Uses the saved workflow guidance. Up to 16 execution calls. Changes are retained as a patch; nothing is published.</p>
     <form className="factory-run-form" onSubmit={event => { event.preventDefault(); void start(); }}>
       <label className="factory-task">Task<textarea className="input" value={task} onChange={event => setTask(event.target.value)} placeholder={purpose} required maxLength={4000} disabled={blocked} /></label>
       <label>Commit or branch<input className="input" value={ref} onChange={event => setRef(event.target.value)} required maxLength={200} disabled={blocked} /></label>
