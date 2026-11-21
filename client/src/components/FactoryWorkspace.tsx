@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { factoryWorkspaces, runWorkspace, cancelWorkspace, workspaceLog } from '../api';
+import { factoryWorkspaces, runWorkspace, cancelWorkspace, workspaceLog, saveFactoryExecutionSettings } from '../api';
 import { requestId } from '../request-id';
+import type { Guidance } from '../../../src/factory-enrichment';
 import type { WorkspacePage } from '../../../src/factory/workspace-types';
 
 export function useFactoryWorkspaces() {
@@ -17,16 +18,28 @@ export function useFactoryWorkspaces() {
   useEffect(() => { const timer = setInterval(() => { if (!request.current) void refresh(); }, active ? 1500 : 15000); return () => clearInterval(timer); }, [active, refresh]);
   return { data, error, refresh };
 }
-export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { state: ReturnType<typeof useFactoryWorkspaces>; workflowId: string; locationKey: string; purpose?: string }) {
+export function FactoryExecutionSettings({ state }: { state: ReturnType<typeof useFactoryWorkspaces> }) {
+  const [limit, setLimit] = useState(16), [error, setError] = useState(''), [saving, setSaving] = useState(false);
+  useEffect(() => { if (state.data) setLimit(state.data.maxCalls); }, [state.data?.maxCalls]);
+  if (!state.data?.agentAvailable) return null;
+  return <details><summary>Execution settings</summary><form className="factory-run-form" onSubmit={async event => {
+    event.preventDefault(); setSaving(true); setError('');
+    try { await saveFactoryExecutionSettings(limit); await state.refresh(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save execution settings.'); } finally { setSaving(false); }
+  }}><label>Model call limit per run<input className="input" type="number" min={1} max={64} required value={limit} onChange={event => setLimit(Number(event.target.value))} /></label><button type="submit" disabled={saving}>Save</button></form>
+    <p className="muted small">Applies to new runs. The host permits workspace changes only; it does not publish or push.</p>{error && <p role="alert">{error}</p>}
+  </details>;
+}
+export function FactoryWorkspace({ state, workflowId, locationKey, inputs }: { state: ReturnType<typeof useFactoryWorkspaces>; workflowId: string; locationKey: string; inputs: Guidance['inputs'] }) {
   const { data, refresh } = state;
-  const [error, setError] = useState(''), [ref, setRef] = useState('HEAD'), [task, setTask] = useState(''), [busy, setBusy] = useState(false);
+  const [error, setError] = useState(''), [ref, setRef] = useState('HEAD'), [values, setValues] = useState<Record<string, string>>({}), [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<Record<string, string>>({});
-  const pending = useRef<{ id: string; ref: string; task: string } | null>(null);
+  const pending = useRef<{ id: string; ref: string; inputs: string; maxCalls: number } | null>(null);
   useEffect(() => { if (!data) setLogs({}); }, [data]);
   async function start() {
     setBusy(true); setError('');
-    if (!pending.current || pending.current.ref !== ref || pending.current.task !== task) pending.current = { id: requestId(), ref, task };
-    try { await runWorkspace(ref, pending.current.id, { workflowId, task }); pending.current = null; await refresh(); }
+    const encoded = JSON.stringify(values);
+    if (!pending.current || pending.current.ref !== ref || pending.current.inputs !== encoded || pending.current.maxCalls !== data!.maxCalls) pending.current = { id: requestId(), ref, inputs: encoded, maxCalls: data!.maxCalls };
+    try { await runWorkspace(ref, pending.current.id, { workflowId, inputs: values }); pending.current = null; await refresh(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not start workspace.'); } finally { setBusy(false); }
   }
   async function cancel(id: string) {
@@ -41,10 +54,8 @@ export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { 
   const blocked = busy || data.runs.some(run => ['running', 'interrupted'].includes(run.status));
   const runs = data.runs.filter(run => run.workflowId === workflowId);
   return <section className="factory-execution" aria-label="Agent workflow execution">
-    <h3>Run workflow</h3>
-    <p className="muted small">Uses the saved workflow guidance. Up to 16 execution calls. Changes are retained as a patch; nothing is published.</p>
     <form className="factory-run-form" onSubmit={event => { event.preventDefault(); void start(); }}>
-      <label className="factory-task">Task<textarea className="input" value={task} onChange={event => setTask(event.target.value)} placeholder={purpose} required maxLength={4000} disabled={blocked} /></label>
+      {inputs.map(input => <label key={input.name}>{input.label}<input className="input" value={values[input.name] || ''} onChange={event => setValues(previous => ({ ...previous, [input.name]: event.target.value }))} title={input.description} required={input.required} maxLength={2000} disabled={blocked} /></label>)}
       <label>Commit or branch<input className="input" value={ref} onChange={event => setRef(event.target.value)} required maxLength={200} disabled={blocked} /></label>
       <button className="btn btn-primary" type="submit" disabled={blocked}>Run</button>
     </form>
@@ -54,7 +65,7 @@ export function FactoryWorkspace({ state, workflowId, locationKey, purpose }: { 
         <time className="muted small" dateTime={run.createdAt}>{new Date(run.createdAt).toLocaleString()}</time>
         {run.status === 'running' && <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => void cancel(run.id)}>Cancel run</button>}
       </div>
-      {run.task && <p>{run.task}</p>}
+      {run.inputs ? Object.entries(run.inputs).map(([name, value]) => <p key={name}>{inputs.find(input => input.name === name)?.label || name}: {value}</p>) : run.task && <p>{run.task}</p>}
       <p>{run.status === 'completed' ? run.detail : run.status === 'running' ? run.stages.find(stage => stage.status === 'running')?.name || 'Preparing workspace…' : run.detail}</p>
       {run.patchBytes > 0 && <p>Changes retained as a patch; not applied to your checkout.</p>}
       <details open={run.status === 'running'}><summary>{run.stages.filter(stage => stage.status === 'passed').length} stages passed</summary>

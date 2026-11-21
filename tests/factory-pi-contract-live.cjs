@@ -15,7 +15,7 @@ export async function createAgentSession(options){
  result.session.agent.getApiKey=async()=> 'fixture-no-provider';
  result.session.agent.streamFunction=(model,context)=>{
   call++;const stream=new AssistantMessageEventStream(),names=result.session.getActiveToolNames();let content,stopReason='stop';
-  if(names.sort().join(',')!=='bash,edit,read,write'||!JSON.stringify(context.messages).includes('factory-workflow-enrichment-v3'))throw Error('Missing saved enrichment or wrong tools');
+  if(names.sort().join(',')!=='bash,edit,read,write'||!JSON.stringify(context.messages).includes('factory-workflow-enrichment-v4'))throw Error('Missing saved enrichment or wrong tools');
    if(call===1){content=[{type:'toolCall',id:'read-fixture',name:'read',arguments:{path:'index.cjs'}}];stopReason='toolUse';}
    else content=[{type:'text',text:JSON.stringify({status:'completed',summary:'SDK contract fixture only'})}];
   const message={role:'assistant',content,api:model.api,provider:model.provider,model:model.id,stopReason,usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},timestamp:Date.now()};

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { factory, prepareFactoryWorkflow } from '../api';
 import { requestId } from '../request-id';
-import { FactoryWorkspace, useFactoryWorkspaces } from '../components/FactoryWorkspace';
+import { FactoryWorkspace, FactoryExecutionSettings, useFactoryWorkspaces } from '../components/FactoryWorkspace';
 import type { FactoryPage } from '../../../src/factory/types';
 import '../styles/factory.css';
 
@@ -39,6 +39,7 @@ export function Factory() {
   return <main className="factory-page" aria-label="Factory" aria-busy={loading}>
     <div className="factory-heading"><h1>Factory</h1>
       <button type="button" disabled={loading} onClick={() => { void load(); void workspaces.refresh(); }}>Refresh</button></div>
+    <FactoryExecutionSettings state={workspaces} />
     {error && <p role="alert">{error}</p>}
     {preparationError && <p role="alert">{preparationError}</p>}
     {workspaces.error && <p role="alert">{workspaces.error}</p>}
@@ -67,7 +68,7 @@ export function Factory() {
             <h3>Completion</h3><ul>{proposal.enrichment.value.guidance.completion.map((item, i) => <li key={i}>{item}</li>)}</ul>
             {!!proposal.enrichment.value.guidance.risks.length && <><h3>Execution risks</h3><ul>{proposal.enrichment.value.guidance.risks.map((item, i) => <li key={i}>{item}</li>)}</ul></>}
             <details><summary>Host requirements</summary><ul>{proposal.enrichment.value.requirements.map((item, i) => <li key={i}>{item}</li>)}</ul></details>
-            <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} purpose={workflow.purpose} />
+            <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} inputs={proposal.enrichment.value.guidance.inputs} />
           </> : <section aria-label="Workflow preparation"><p role="status">{preparing === proposal.id || proposal.enrichment?.status === 'running' ? 'Preparing workflow…' : proposal.enrichment?.status === 'failed' ? 'Enrichment failed. The attempt is retained.' : 'Awaiting enrichment — not ready to run.'}</p>
             <button type="button" disabled={!!preparing || proposal.enrichment?.status === 'running'} onClick={() => void prepare(proposal.id, proposal.enrichment?.status === 'failed')}>{proposal.enrichment?.status === 'failed' ? 'Retry enrichment' : 'Enrich workflow'}</button>
             <p className="muted small">One preparation call. Saved guidance is reused across tasks.</p>

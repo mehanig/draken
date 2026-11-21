@@ -6,7 +6,7 @@ Checkout-only prototype in draft PR #54, not published 0.10.0. Runtime scripts a
 
 **Discover → enrich during preparation → save the enriched workflow → display it in Factory → Run tasks using the saved enrichment.**
 
-Discovery records historical observations. Enrichment adds reusable preparation, execution, checks, self-review, recovery, completion criteria and risks. It is not tied to a particular task, checkout or execution session. The later coding session adapts its task plan after inspecting the repository; it does **not** regenerate workflow enrichment.
+Discovery records historical observations. Enrichment adds reusable preparation, execution, checks, self-review, recovery, completion criteria and risks. It defines the concrete inputs the workflow needs, if any, and is not tied to a particular checkout or execution session. Factory renders those saved input definitions, not a generic task/prompt box. The server derives the execution objective from the selected workflow and validates only its declared input values. The later coding session adapts its task plan after inspecting the repository; it does **not** regenerate workflow enrichment.
 
 - Normal background preparation enriches new verified discoveries before that preparation job completes. It uses the existing preparation owner, consent/cancellation checks and remaining invocation allowance.
 - Enrichment uses the final summarization model (`defaultModels().final`, currently `openai/gpt-6-astra`), through normal `modelCall` accounting. It is one call, with no repair loop or silent retry.
@@ -17,10 +17,10 @@ Discovery records historical observations. Enrichment adds reusable preparation,
 
 ## Run lifecycle
 
-1. Select a prepared workflow, concrete task and committed ref, then click **Run**. The API checks current sources and loads the saved enrichment. Missing/stale enrichment fails before creating a workspace; Run never prepares it implicitly.
+1. Select a prepared workflow, fill only its defined inputs (for example, a release version), choose the committed ref and click **Run**. A workflow with no additional inputs has no prompt box. The API checks current sources and loads the saved enrichment. Missing/stale enrichment fails before creating a workspace; Run never prepares it implicitly.
 2. The host snapshots that exact commit and requires committed `.draken/environment.json` with a host-approved pinned image, setup and frozen checks. Dirty/untracked host files, earlier Git history, remotes/configuration and credentials are excluded. Submodules/LFS are rejected rather than silently omitted.
 3. Setup and baseline checks run in an isolated persistent workspace. One host-side Pi session receives the task, saved enriched workflow, environment and baseline. All enabled read/write/edit/bash tools operate inside the container; there is no host fallback. The first prompt is execution, not enrichment.
-4. The session inspects, plans the particular task, implements, tests, self-reviews, repairs and reports completion or blockers. Same-session self-review is **not independent review**. The default run allowance is 16 execution provider calls; the separately saved enrichment does not consume that allowance. Automatic retries, compaction and cache warming are disabled.
+4. The session inspects, plans the particular task, implements, tests, self-reviews, repairs and reports completion or blockers. Same-session self-review is **not independent review**. The run allowance is configured once under **Execution settings** on Factory (1–64 provider calls; initial default 16), rather than repeated under each workflow. A change applies to new runs; each run freezes its allowance and repeated request IDs cannot change it. The separately saved enrichment does not consume that allowance. Automatic retries, compaction and cache warming are disabled.
 5. The host stops actual task processes, collects the patch using a read-only mount and pristine Git metadata, applies it to a fresh volume and runs the original setup/checks. The receipt records patch/check-definition hashes and scope `frozen-repository-checks`. Passing those checks does **not** infer arbitrary task acceptance.
 
 No publication, push, pull request creation, subagents or parallel agents. Unsupported endpoints/permissions must produce blockers, not expanded authority. Existing tests, scripts, CI, manifests/locks and environment policy are protected; new regression tests are allowed. These conservative restrictions can block legitimate tasks.
@@ -41,7 +41,7 @@ Host-selected configuration:
 
 The SDK remains separately qualified from the managed CLI. A different SDK is rejected, not silently substituted. Never forward provider credentials to the container.
 
-The browser invokes `scripts/factory-workspace.cjs REPOSITORY REF NEW_PRIVATE_OUTPUT_DIRECTORY BRIEF_FILE`. The source-authorized `factory-agent-session-v2` brief contains the exact saved `factory-workflow-enrichment-v3` result. The host checks that the current API still exposes that same enrichment before provider/tool work. Private operator briefs must also contain a valid prepared enrichment. Omitting the brief is a checks-only diagnostic, not a second Factory Run mode. Manual CLI invocations are outside the server's execution lock.
+The browser invokes `scripts/factory-workspace.cjs REPOSITORY REF NEW_PRIVATE_OUTPUT_DIRECTORY BRIEF_FILE`. The source-authorized `factory-agent-session-v2` brief contains the exact saved `factory-workflow-enrichment-v4` result. The host checks that the current API still exposes that same enrichment before provider/tool work. Private operator briefs must also contain a valid prepared enrichment. Omitting the brief is a checks-only diagnostic, not a second Factory Run mode. Manual CLI invocations are outside the server's execution lock.
 
 ## Ownership, isolation, accounting and learning
 

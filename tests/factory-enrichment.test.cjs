@@ -1,12 +1,19 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {sessionPlan,enrich,proposeEnrichment,ENRICHMENT_PROMPT}=require('../dist/factory-enrichment');
+const {sessionPlan,workflowRequest,enrich,proposeEnrichment,ENRICHMENT_PROMPT}=require('../dist/factory-enrichment');
 const workflow={id:'source',revision:'1',locationKey:'repo',purpose:'Repair parser',appliesWhen:'Parser defect',method:['Reproduce','Fix'],limitations:['Historical outcome not verified']};
-const guidance=()=>({steps:[{step:1,approach:'Reproduce the reported defect',checks:['Regression fails before fixing']},{step:2,approach:'Repair the parser with regression coverage',checks:['Regression and compatibility pass']}],review:['Review edge cases and unintended diff changes'],completion:['Requested format preserved'],risks:['Historical outcome not verified']});
+const guidance=()=>({inputs:[],steps:[{step:1,approach:'Reproduce the reported defect',checks:['Regression fails before fixing']},{step:2,approach:'Repair the parser with regression coverage',checks:['Regression and compatibility pass']}],review:['Review edge cases and unintended diff changes'],completion:['Requested format preserved'],risks:['Historical outcome not verified']});
 test('enrichment is workflow-owned and reused unchanged across different tasks',()=>{
  const saved=enrich(workflow,guidance());assert.deepEqual(saved.workflow,workflow);assert.equal(saved.task,undefined);
  const first=sessionPlan(workflow,'Fix escaped strings','repo',saved),second=sessionPlan(workflow,'Fix integers','repo',saved);
  assert.deepEqual(first.enrichment,second.enrichment);assert.notEqual(first.task,second.task);assert.match(saved.requirements.join(' '),/repair and retest/);assert.match(saved.requirements.join(' '),/not an independent reviewer/);
  first.enrichment.guidance.review[0]='changed';assert.notEqual(saved.guidance.review[0],'changed');
+});
+test('workflow-defined inputs replace a generic task and are validated before execution',()=>{
+ const g=guidance();g.inputs=[{name:'version',label:'Release version',description:'Published version to verify',required:true}];const saved=enrich(workflow,g);
+ assert.throws(()=>workflowRequest(saved,{}),/Release version/);assert.throws(()=>workflowRequest(saved,{version:'1',task:'other'}),/Unexpected/);
+ assert.throws(()=>workflowRequest(saved,{version:123}),/valid/);const request=workflowRequest(saved,{version:' 1.2.3 '});assert.deepEqual(request.inputs,{version:'1.2.3'});assert.match(request.task,/selected enriched workflow/);
+ assert.deepEqual(workflowRequest(enrich(workflow,guidance()),{}).inputs,{});
+ g.inputs.push(g.inputs[0]);assert.throws(()=>enrich(workflow,g),/workflow input/);
 });
 test('every detected step, review and endpoint criteria are required',()=>{
  for(const mutate of [g=>g.steps.pop(),g=>g.steps[1].step=1,g=>g.steps[0].step=3,g=>g.review=[],g=>g.completion=[],g=>g.steps[0].checks=[]]){const g=guidance();mutate(g);assert.throws(()=>enrich(workflow,g),/enrich|step/);}

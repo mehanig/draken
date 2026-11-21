@@ -20,7 +20,7 @@ export async function createAgentSession(options){
  const session={messages:[],agent:{streamFunction:async()=>{fs.appendFileSync(path.join(options.cwd,'fixture-provider-calls'),'call\n');}},getActiveToolNames:()=>[...active],subscribe:f=>listeners.push(f),clearQueue:()=>{},abort:async()=>{controller.abort();},dispose:()=>{},getLastAssistantText:()=>answer,
  prompt:async text=>{
   if(++prompts!==1)throw Error('Run must not add an enrichment prompt');
-  if(active.join(',')!=='read,write,edit,bash'||!text.includes('factory-workflow-enrichment-v3'))throw Error('Execution did not receive saved enrichment');
+  if(active.join(',')!=='read,write,edit,bash'||!text.includes('factory-workflow-enrichment-v4'))throw Error('Execution did not receive saved enrichment');
   for(let i=0;i<2;i++){
    await session.agent.streamFunction({},{});
    if(text.includes('"task":"fixture-weaken-check"'))await options.customTools.find(t=>t.name==='write').execute('weaken',{path:'verify.cjs',content:'process.exit(0);'},controller.signal);

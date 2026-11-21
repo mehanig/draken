@@ -1,7 +1,7 @@
 import { sessionPlan, enrich, proposeEnrichment, type Discovery, type Guidance, type Enrichment, type SessionPlan } from '../../src/factory-enrichment';
 async function proof() {
   const workflow: Discovery = { id: 'example', revision: '1', locationKey: 'repo', purpose: 'Fix parser', appliesWhen: 'Parser defect', method: ['Reproduce', 'Fix'], limitations: ['Historical gap'] };
-  const guidance: Guidance = { steps: [{ step: 1, approach: 'Reproduce escaping', checks: ['Failure confirmed'] }, { step: 2, approach: 'Repair escaping', checks: ['Regression passes'] }], review: ['Review edge cases'], completion: ['Format preserved'], risks: [] };
+  const guidance: Guidance = { inputs: [], steps: [{ step: 1, approach: 'Reproduce escaping', checks: ['Failure confirmed'] }, { step: 2, approach: 'Repair escaping', checks: ['Regression passes'] }], review: ['Review edge cases'], completion: ['Format preserved'], risks: [] };
   const expected: Enrichment = enrich(workflow, guidance);
   let calls = 0;
   const actual = await proposeEnrichment(workflow, { assertCurrent: async () => {}, ask: async () => { calls++; return JSON.stringify(guidance); } }, new AbortController().signal);

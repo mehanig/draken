@@ -27,7 +27,8 @@ export const factory = (before?: number, signal?: AbortSignal) => request<Factor
 export const prepareFactoryWorkflow = (id: string, requestId: string, retry: boolean, signal: AbortSignal) => request(`/factory/${encodeURIComponent(id)}/enrichment`, 'POST', { requestId, retry }, signal);
 export const factoryWorkspaces = (signal?: AbortSignal) => request<WorkspacePage>('/factory/workspaces', 'GET', undefined, signal);
 export const workspaceLog = (id: string) => request<{ text: string }>(`/factory/workspaces/${encodeURIComponent(id)}/log`);
-export const runWorkspace = (ref: string, requestId: string, workflow: { workflowId: string; task: string }) => request<WorkspaceRun>('/factory/workspaces', 'POST', { ref, requestId, ...workflow });
+export const saveFactoryExecutionSettings = (maxCalls: number) => request<void>('/factory/workspaces/settings', 'POST', { maxCalls });
+export const runWorkspace = (ref: string, requestId: string, workflow: { workflowId: string; inputs: Record<string, string> }) => request<WorkspaceRun>('/factory/workspaces', 'POST', { ref, requestId, ...workflow });
 export const cancelWorkspace = (id: string) => request<void>(`/factory/workspaces/${encodeURIComponent(id)}/cancel`, 'POST');
 export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir: string }>(`/setup${refresh ? '?refresh=1' : ''}`);
 export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);

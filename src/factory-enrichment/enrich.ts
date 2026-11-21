@@ -3,13 +3,14 @@ import type { Discovery } from './contracts';
 /** Bump when the host's execution permissions or required checks change. */
 export const ENRICHMENT_POLICY_VERSION = 'factory-host-policy-v1';
 export interface Guidance {
+  inputs: { name: string; label: string; description: string; required: boolean }[];
   steps: { step: number; approach: string; checks: string[] }[];
   review: string[];
   completion: string[];
   risks: string[];
 }
 export interface Enrichment {
-  format: 'factory-workflow-enrichment-v3';
+  format: 'factory-workflow-enrichment-v4';
   workflow: Discovery;
   policyVersion: typeof ENRICHMENT_POLICY_VERSION;
   /** Model additions, separate from unchanged historical observations. */
@@ -43,8 +44,15 @@ function checkedWorkflow(workflow: Discovery): Discovery {
 /** Reusable workflow guidance: no task, model client or execution session belongs here. */
 export function enrich(workflow: Discovery, value: unknown): Enrichment {
   const frozen = checkedWorkflow(workflow);
-  if (!keys(value, ['steps', 'review', 'completion', 'risks']) || !Array.isArray(value.steps)
+  if (!keys(value, ['inputs', 'steps', 'review', 'completion', 'risks']) || !Array.isArray(value.steps)
     || value.steps.length !== frozen.method.length || !strings(value.review, 1) || !strings(value.completion, 1) || !strings(value.risks)) throw Error('Incomplete workflow enrichment');
+  if (!Array.isArray(value.inputs) || value.inputs.length > 8) throw Error('Invalid workflow inputs');
+  const names = new Set<string>();
+  for (const input of value.inputs) {
+    if (!keys(input, ['name', 'label', 'description', 'required']) || typeof input.name !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(input.name)
+      || names.has(input.name) || !text(input.label) || !text(input.description) || typeof input.required !== 'boolean') throw Error('Invalid workflow input');
+    names.add(input.name);
+  }
   const seen = new Set<number>();
   for (const step of value.steps) {
     if (!keys(step, ['step', 'approach', 'checks']) || !Number.isInteger(step.step) || Number(step.step) < 1 || Number(step.step) > frozen.method.length
@@ -53,11 +61,12 @@ export function enrich(workflow: Discovery, value: unknown): Enrichment {
   }
   const guidance = structuredClone(value) as unknown as Guidance;
   guidance.steps.sort((a, b) => a.step - b.step);
-  return { format: 'factory-workflow-enrichment-v3', workflow: frozen, policyVersion: ENRICHMENT_POLICY_VERSION, guidance, requirements: [...requirements] };
+  return { format: 'factory-workflow-enrichment-v4', workflow: frozen, policyVersion: ENRICHMENT_POLICY_VERSION, guidance, requirements: [...requirements] };
 }
 export const ENRICHMENT_PROMPT = `Enrich this detected workflow once for reuse across future tasks. No task or execution run exists yet. Do not execute it.
 Historical steps describe observations, not a complete engineering recipe. Add reusable preparation/execution guidance, relevant checks, diff review, repair/retest guidance, completion criteria and risks. Explain how a later run should adapt to its task and repository baseline without inventing those inputs now.
-Return ONLY JSON: {"steps":[{"step":1,"approach":"how to perform this historical step","checks":["how to check its result"]}],"review":["review checks for this workflow"],"completion":["evidence needed for completion"],"risks":["missing information or limitations"]}.
+Define only concrete execution inputs this workflow needs, such as a target release version. Do not request a generic task/prompt, repository path, commit/ref, permissions or call budget: the host owns those. Use an empty inputs array if no additional input is necessary. Do not invent values for future runs.
+Return ONLY JSON: {"inputs":[{"name":"target_version","label":"Release version","description":"Published version to verify","required":true}],"steps":[{"step":1,"approach":"how to perform this historical step","checks":["how to check its result"]}],"review":["review checks for this workflow"],"completion":["evidence needed for completion"],"risks":["missing information or limitations"]}.
 Cover every historical step exactly once by its one-based index. Preserve historical qualifications. Do not add permissions, publication or replacement host checks. Host requirements are mandatory. Same-session self-review is not independent review. Unsupported endpoints require escalation, not assumed authority.`;
 export async function proposeEnrichment(workflow: Discovery, host: {
   assertCurrent(signal: AbortSignal): Promise<void>;
