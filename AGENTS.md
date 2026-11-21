@@ -15,6 +15,16 @@
 - Delete unnecessary explanations instead of moving them behind a collection of info icons. Use an info icon or disclosure only when the extra detail genuinely helps.
 - Keep real limitations, consequential warnings and actionable errors visible. Removing clutter must not hide problems or make unsupported claims.
 
+## Follow the Factory plan
+
+- Before changing Factory, read `docs/factory-plan.md`. It is the authoritative current design; research and old implementation reports in `../software-factory-approach-draken/archive/` are not requirements.
+- Workflows define their full endpoint. PR creation, push, review, publication and deployment are ordinary agent-executed workflow steps when authorized—not separate Factory features requiring dedicated executors.
+- Enrich during preparation, save the result, then run the complete workflow in one host Pi session using container tools. Do not regenerate enrichment per run or split execution into step sessions.
+- Use ordinary Docker networking and ordinary tool clients. Do not invent brokers, action catalogs, blanket delivery bans or other product restrictions.
+- Distinguish provider credentials kept on the host from explicitly configured credentials needed by workflow tools. Missing credentials are a specific prerequisite, not proof that an action is unsupported.
+- Before adding a module or restriction, check whether existing tools can execute the workflow step. If the change alters the agreed design, ask first. Passing tests does not establish that the design or requested endpoint was satisfied.
+- Audit the full preparation-to-result path for contradictory restrictions. Keep current implementation limitations separate from intended requirements; do not rewrite the plan to justify existing code.
+
 ## Keep evidence preparation separate
 
 - Application callers use only `src/evidence/index.ts`. Do not import its internals or add a separate text/voice search-and-selection path.

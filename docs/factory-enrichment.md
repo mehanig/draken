@@ -1,4 +1,6 @@
-# Factory: prepare workflows once, execute many tasks
+# Factory: current implementation and operating guide
+
+**Design authority: [Factory plan](factory-plan.md).** This guide describes the current code, not the desired limits of the product. The current publication prohibition, broad protected-file checks and incomplete Git/credential setup are implementation gaps to correct—not requirements to preserve. Updating the plan has not yet removed them from runtime code. Workflow actions such as PR creation and publication belong to the agent's complete workflow, not separate Factory executors.
 
 Checkout-only prototype in draft PR #54, not published 0.10.0. Runtime scripts are not yet shipped in npm. Opening or refreshing Factory starts no inference or execution.
 
@@ -23,7 +25,7 @@ Discovery records historical observations. Enrichment adds reusable preparation,
 4. The session inspects, plans the particular task, implements, tests, self-reviews, repairs and reports completion or blockers. Same-session self-review is **not independent review**. The run allowance is configured once under **Execution settings** on Factory (1–64 provider calls; initial default 16), rather than repeated under each workflow. A change applies to new runs; each run freezes its allowance and repeated request IDs cannot change it. The separately saved enrichment does not consume that allowance. Automatic retries, compaction and cache warming are disabled.
 5. The host stops actual task processes, collects the patch using a read-only mount and pristine Git metadata, applies it to a fresh volume and runs the original setup/checks. The receipt records patch/check-definition hashes and scope `frozen-repository-checks`. Passing those checks does **not** infer arbitrary task acceptance.
 
-No publication, push, pull request creation, subagents or parallel agents. Unsupported endpoints/permissions must produce blockers, not expanded authority. Existing tests, scripts, CI, manifests/locks and environment policy are protected; new regression tests are allowed. These conservative restrictions can block legitimate tasks.
+**Current implementation limitations:** prompts/contracts prohibit publication, push and PR creation; candidate validation rejects changes to existing tests, scripts, CI, manifests/locks and environment policy, while allowing new regression tests. These restrictions can prevent legitimate workflow endpoints and conflict with the current plan. They remain in the code pending correction. A missing credential or permission must still produce a specific blocker, not an invented grant. The agreed one-session design separately excludes subagents and parallel agents.
 
 ## Required environment and host configuration
 
@@ -71,4 +73,4 @@ Tests cover automatic preparation using the final model and shared allowance, ex
 
 Opt-in real-Docker tests use deterministic responses to prove lifecycle, ordinary networking, file/tool isolation, protected-check rejection, fresh verification, cancellation and patch recovery. The actual SDK 1.4.0 contract test uses simulated transport/container operations to prove one execution prompt, saved-enrichment reuse, tool continuations and reconciled usage. These are not model-quality proofs. Real container checks exercise ordinary npm lookup/install/audit, curl against GitHub and the deployment website, and git ls-remote. An owned test server on the container's private interface verifies that ordinary HTTP write methods and caller-supplied headers work without an application filter. Broker-only tests were removed with the broker.
 
-Earlier paid Luna parser-repair and fixed-release receipts remain historical, not evidence for the current lifecycle or Astra task quality. The earlier six-call/$0.00073426 accounting correction remains retained. Independent task acceptance, controlled delivery, automatic restart reconciliation, outcome-learning joins, SDK consolidation and packaged distribution remain unfinished.
+Earlier paid Luna parser-repair and fixed-release receipts remain historical, not evidence for the current lifecycle or Astra task quality. The earlier six-call/$0.00073426 accounting correction remains retained. End-to-end endpoint verification, usable Git/credential setup for agent-executed delivery, automatic restart reconciliation, outcome-learning joins, SDK consolidation and packaged distribution remain unfinished. Delivery is not a request to implement a separate host-side executor for each action.
