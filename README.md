@@ -10,7 +10,7 @@ A local-first engineering sync across your **pi, Codex CLI and Claude Code sessi
 
 **Sync with Draken → call or chat → keep a short recap.**
 
-**Draken 0.11.0** adds saved workflow enrichment to **Factory**: reusable guidance, checks and concrete inputs prepared from discovered workflows. Browse historical evidence and saved guidance by repository; opening Factory starts no model calls. Configured source checkouts can try one-session Docker execution, but execution scripts are not yet included in the npm package. Existing history and caches are preserved. See [the release notes](CHANGELOG.md#0110).
+**Draken 0.12.0** lets approved **Factory** workflows own their checks and delivery steps through ordinary container tools, without blanket publication or file-edit bans. The npm package now includes the execution scripts; running them requires configured Docker, an approved image and a qualified Pi SDK. Saved workflow guidance is reused, and opening Factory starts no model calls. Existing history and caches are preserved. See [the release notes](CHANGELOG.md#0120).
 
 **Automatic preparation:** **Settings → Automatically prepare history** controls one pipeline: scan, index locally, then cache reusable summaries through your configured provider and quota/API billing. Both stages default on; saved opt-outs remain unchanged until you explicitly enable the combined control. Idle minute checks include small tails. Disabling stops both stages and retains completed embeddings and summaries. Paid failures appear in the shared Home/Settings status and require **Retry automatic preparation**; local failures back off five minutes.
 
@@ -20,7 +20,7 @@ Only **Sync with Draken** or **Chat instead** creates a snapshot and opening bri
 
 The home page is compact history cards. Each sync has its own `/syncs/:id` URL, with the full briefing, conversations, notes and evidence behind it. **Search history** (`/history`) adds local semantic + keyword retrieval across retained older records, with dated source links. It prepares itself automatically—no enable/update buttons or search-mode choices. Progress counts only new or changed passages, with cached history shown separately and a measured time estimate. Local indexing reuses existing vectors and uses up to two embedding lanes/six CPU threads on sufficiently capable machines; smaller machines stay single-lane. Text questions and calls use it by default. See [MEMORY.md](MEMORY.md) for source scope, first-use download and limitations.
 
-For a plain-English guide to the code, with diagrams and reasons for the main design choices, see [ARCHITECTURE.md](ARCHITECTURE.md). The [standalone visual guide](docs/architecture.html) opens in a browser without connecting to Draken; it contains no live data or app controls. The checkout-only [Factory execution prototype](docs/factory-enrichment.md) saves reusable workflow enrichment before one-session task execution; its execution scripts are not included in the 0.11.0 npm package.
+For a plain-English guide to the code, with diagrams and reasons for the main design choices, see [ARCHITECTURE.md](ARCHITECTURE.md). The [standalone visual guide](docs/architecture.html) opens in a browser without connecting to Draken; it contains no live data or app controls. The [Factory execution guide](docs/factory-enrichment.md) covers saved enrichment, one-session execution and required Docker/SDK/credential configuration. Execution scripts are included starting with 0.12.0.
 
 Draken remembers which evidence a finished sync covered, what you decided, and what remains open. Reading logs or generating a response does **not** advance that checkpoint.
 
@@ -28,7 +28,7 @@ Draken remembers which evidence a finished sync covered, what you decided, and w
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.11.0](CHANGELOG.md#0110) and [upgrade instructions](SETUP.md#upgrade-to-0110), including idle ending of older inactive sessions.
+> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.12.0](CHANGELOG.md#0120) and [upgrade instructions](SETUP.md#upgrade-to-0120), including idle ending of older inactive sessions.
 
 ```sh
 npm install -g draken
@@ -219,7 +219,7 @@ This is not a drop-in replacement for the old Docker/Claude task dashboard or it
 
 Source builds, development commands, test/probe instructions and the code map live in [CONTRIBUTING.md](CONTRIBUTING.md). They are not needed for normal npm installation.
 
-See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist and focused high-risk review areas. The public landing page lives in `site/`; changes there on `master`/`main` trigger the existing website deployment workflow. Its `scripts/site-release.cjs` gate validates the version copy and withholds deployment until npm `latest` matches the root package version. Release copy describes 0.11.0 after release, not evidence of a live deployment. Qualify and publish npm separately before allowing the gated website deployment; this documentation change does not merge, publish or deploy anything. Focused lifecycle/readiness regressions are `tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs` and `tests/voice-live-updates.test.cjs`; browser coverage is `tests/ui/live-conversation.spec.ts`. Existing cache/consent regressions remain required.
+See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist and focused high-risk review areas. The public landing page lives in `site/`; changes there on `master`/`main` trigger the existing website deployment workflow. Its `scripts/site-release.cjs` gate validates the version copy and withholds deployment until npm `latest` matches the root package version. Release copy describes 0.12.0 after release, not evidence of a live deployment. Qualify and publish npm separately before allowing the gated website deployment; this documentation change does not merge, publish or deploy anything. Focused lifecycle/readiness regressions are `tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs` and `tests/voice-live-updates.test.cjs`; browser coverage is `tests/ui/live-conversation.spec.ts`. Existing cache/consent regressions remain required.
 
 ## License
 

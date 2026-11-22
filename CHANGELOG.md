@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0
+
+### Factory: execute approved workflows through ordinary tools
+
+- Remove blanket publication/push/PR prohibitions from execution plans and prompts, and remove patch rejection based on tests, scripts, dependency manifests or CI filenames. The selected, user-approved workflow owns its checks, self-review, repair and delivery steps in one Pi session.
+- Remove the forced baseline/fresh-verification sequence and separate checks-only runner. Environment checks are suggestions for the workflow, not an additional host acceptance gate. Preserve patch collection as a receipt, not proof of task completion.
+- Preserve reachable Git history, allow committed filenames/submodule/LFS declarations, and support an explicitly configured remote and Docker environment file for workflow credentials. Ordinary tools use normal Docker networking; host Git configuration, ambient secrets and provider credentials are not automatically copied.
+- Include the Factory execution scripts and operating guide in the npm package. Running workflows still requires configured rootless Docker, an approved image, a qualified Pi SDK and a committed `.draken/environment.json` in the target repository. Missing tools or credentials are specific prerequisites, not unsupported action types.
+- Preserve blocked outcomes in run/stage displays. Keep source permissions, durable accounting, cancellation, resource limits and uncertain-cleanup ownership checks.
+- Host policy v4 requires existing workflows to be explicitly enriched again before execution. Old enrichment attempts, failed-run receipts and unrelated background-learning errors are retained; upgrading does not rerun workflows.
+- Validation includes 803 automated tests, 75 browser tests, Docker/SDK/package checks and a real nine-call Astra session that edited tests, checked them, committed, pushed and created PR #55 through ordinary Git and GitHub REST calls. That is proof of the tested edit-to-PR path, not every possible workflow or release publication.
+
 ## 0.11.0
 
 ### Factory: prepared workflows and checkout execution

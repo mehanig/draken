@@ -89,7 +89,7 @@ These responsibilities are general execution support. They are not grounds to in
 
 ## 6. Implementation alignment
 
-The generic-workflow cleanup removes the publication prohibition, protected-file classifier, snapshot filename/submodule/LFS bans, checks-only execution mode and mandatory baseline/fresh-verification sequence. It preserves reachable Git history, accepts an explicitly configured remote and Docker environment file, records blocked outcomes, and includes the execution scripts in the package file list. These changes belong to a new PR after 0.11.0; they are not a claim that published 0.11.0 already has them.
+The generic-workflow cleanup removes the publication prohibition, protected-file classifier, snapshot filename/submodule/LFS bans, checks-only execution mode and mandatory baseline/fresh-verification sequence. It preserves reachable Git history, accepts an explicitly configured remote and Docker environment file, records blocked outcomes, and includes the execution scripts in the package file list. These changes were merged in PR #55 for 0.12.0; they are not present in 0.11.0.
 
 Ordinary Docker networking and preparation-time saved enrichment remain. SDK selection is still separately qualified and automatic restart reconciliation is unfinished. Workflow tools and credentials must actually be configured, and real endpoint proof must be reported separately from fixture tests. No implementation or test can establish that every possible workflow will succeed; the design must not impose action-specific prohibitions or require new code for ordinary workflow steps.
 
