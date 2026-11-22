@@ -70,6 +70,8 @@ export function initProcessSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS episode_memberships_episode ON episode_memberships(episode_id);
     CREATE INDEX IF NOT EXISTS episode_reconstruction_input ON episode_reconstructions(input_key);
   `);
+  const revisionColumns = new Set((db.prepare('PRAGMA table_info(episode_revisions)').all() as { name: string }[]).map(c => c.name));
+  if (!revisionColumns.has('assembly_index')) db.exec('ALTER TABLE episode_revisions ADD COLUMN assembly_index INTEGER');
   const enrichmentColumns = new Set((db.prepare('PRAGMA table_info(workflow_enrichments)').all() as { name: string }[]).map(c => c.name));
   if (!enrichmentColumns.has('run_table')) db.exec("ALTER TABLE workflow_enrichments ADD COLUMN run_table TEXT NOT NULL DEFAULT 'background_runs' CHECK(run_table IN ('background_runs','sync_runs'))");
   db.exec(`

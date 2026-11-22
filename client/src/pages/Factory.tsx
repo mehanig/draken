@@ -97,7 +97,7 @@ export function Factory() {
             <h3>Completion</h3><ul>{proposal.enrichment.value.guidance.completion.map((item, i) => <li key={i}>{item}</li>)}</ul>
             {!!proposal.enrichment.value.guidance.risks.length && <><h3>Execution risks</h3><ul>{proposal.enrichment.value.guidance.risks.map((item, i) => <li key={i}>{item}</li>)}</ul></>}
             <details><summary>Host requirements</summary><ul>{proposal.enrichment.value.requirements.map((item, i) => <li key={i}>{item}</li>)}</ul></details>
-            <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} inputs={proposal.enrichment.value.guidance.inputs} />
+            <FactoryWorkspace state={workspaces} workflowId={proposal.id} aliases={proposal.aliases} locationKey={group.location.key} inputs={proposal.enrichment.value.guidance.inputs} />
           </> : <section aria-label="Workflow preparation"><p role="status">{preparing === proposal.id || proposal.enrichment?.status === 'running' ? 'Preparing workflow…' : proposal.enrichment?.status === 'failed' ? 'Enrichment failed. The attempt is retained.' : 'Awaiting enrichment — not ready to run.'}</p>
             <button type="button" disabled={!!preparing || proposal.enrichment?.status === 'running'} onClick={() => void prepare(proposal.id, proposal.enrichment?.status === 'failed')}>{proposal.enrichment?.status === 'failed' ? 'Retry enrichment' : 'Enrich workflow'}</button>
             <p className="muted small">One preparation call. Saved guidance is reused across tasks.</p>

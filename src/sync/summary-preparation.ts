@@ -64,7 +64,7 @@ function cacheIntact(value: string | [string, string][]): boolean {
  * transcript bodies; the preparing owner and explicit sync validate originals. */
 export function summaryPreparationSettings(): SummaryPreparationSettings {
   const enabled = summaryPreparationEnabled(), error = setting('auto_summary_error') || '';
-  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key NOT LIKE 'workflow-enrichment:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
+  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key NOT LIKE 'workflow-enrichment:%' AND input_key NOT LIKE 'workflow-consolidation:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
   return { enabled, status: !enabled ? 'off' : error ? 'error' : !indexingEnabled() || !idle() || active?.controller.signal.aborted ? 'paused' : active?.working ? 'running' : 'waiting',
     prepared_entries: last?.total_entries || 0, last_completed_at: last?.completed_at || null, error };
 }

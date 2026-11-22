@@ -22,6 +22,18 @@ test('workflow inputs replace the prompt box; refresh only reads saved results',
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('a consolidated workflow retains execution history from its original IDs without replaying it', async ({ page }) => {
+  const data = state(), old = 'b'.repeat(64), writes: string[] = [];
+  data.runs = [{ id: 'old-run', workflowId: old, ref: 'old-branch', status: 'failed', detail: 'Original failed attempt retained', createdAt: new Date().toISOString(), stages: [], modelCalls: 3, patchBytes: 0 }];
+  page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) writes.push(request.url()); });
+  await page.route('**/api/factory', route => route.fulfill({ json: { proposals: [{ ...proposal, aliases: [old] }], nextCursor: null, learning: 'enabled' } }));
+  await page.route('**/api/factory/workspaces', route => route.fulfill({ json: data }));
+  await page.route('**/api/factory/workspaces/old-run/log', route => route.fulfill({ json: { text: 'Original execution log' } }));
+  await page.goto(`/factory#workflow-${old}`);
+  await expect(page.getByText('Original failed attempt retained')).toBeVisible();await page.getByRole('button', { name: 'View log' }).click();await expect(page.getByText('Original execution log')).toBeVisible();
+  expect(writes).toEqual([]);
+});
+
 test('prepare once, then reuse defined inputs for multiple runs without enrichment calls', async ({ page }) => {
   const item: any = { ...proposal, enrichment: { status: 'pending' } }, data = state(); let preparations = 0, runs = 0;
   await page.route('**/api/factory', route => route.fulfill({ json: { proposals: [item], nextCursor: null, learning: 'enabled' } }));

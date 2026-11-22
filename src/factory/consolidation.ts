@@ -25,6 +25,7 @@ export function consolidationReader(signal: AbortSignal, read: (id: string) => P
     const groups = consolidatedWorkflows(batch.output_json, sources.proposals.map(p => p.id));
     const first = db.prepare('SELECT MIN(d.rowid) n FROM workflow_consolidations c JOIN workflow_discoveries d ON d.id=c.workflow_id WHERE c.batch_id=?').get(id) as { n: number };
     let location: Proposal['location'] | undefined;
+    const aliases = new Map<string, string[]>();
     for (const source of sources.proposals) {
       const row = db.prepare('SELECT rowid n FROM workflow_discoveries WHERE id=?').get(source.id) as { n: number } | undefined;
       if (!row || row.n >= first.n) throw Error('Invalid consolidation lineage');
@@ -32,18 +33,19 @@ export function consolidationReader(signal: AbortSignal, read: (id: string) => P
       if (revision(proposal) !== source.revision) throw Error('Consolidation workflow source changed');
       if (location && location.key !== proposal.location.key) throw Error('Consolidation spans different locations');
       location = proposal.location;
+      aliases.set(source.id, [source.id, ...(proposal.aliases || [])]);
     }
     const tasks = await readLearningParents(sources.tasks, signal);
     if (tasks.some((task, i) => task.identity !== sources.tasks[i].identity || task.location.key !== location?.key)) throw Error('Consolidation task sources changed');
     signal.throwIfAborted();
-    return { batch, sources, groups, tasks, location: location! };
+    return { batch, sources, groups, tasks, aliases, location: location! };
   }
   const cache = new Map<string, ReturnType<typeof load>>();
   return async (id: string): Promise<Proposal | null> => {
     const row = getDb().prepare('SELECT * FROM workflow_consolidations WHERE workflow_id=?').get(id) as { batch_id: string; group_index: number; task_parents_json: string } | undefined;
     if (!row) return null;
     if (!cache.has(row.batch_id)) cache.set(row.batch_id, load(row.batch_id));
-    const { batch, sources, groups, tasks, location } = await cache.get(row.batch_id)!;
+    const { batch, sources, groups, tasks, aliases, location } = await cache.get(row.batch_id)!;
     if (consolidatedWorkflowId(batch, row.group_index, row.task_parents_json) !== id) throw Error('Consolidated workflow receipt changed');
     const group = groups[row.group_index];
     if (!group) throw Error('Consolidation group unavailable');
@@ -56,7 +58,7 @@ export function consolidationReader(signal: AbortSignal, read: (id: string) => P
       return tasks[index].input;
     });
     const independent = parents.every((left, i) => parents.slice(i + 1).every(right => independentTasks(left, right)));
-    return { id, model: batch.model, createdAt: batch.created_at, location, decision: null, aliases: group.members,
+    return { id, model: batch.model, createdAt: batch.created_at, location, decision: null, aliases: [...new Set(group.members.flatMap(member => aliases.get(member)!))],
       task: { workflow: group.workflow, reason: group.reason, request: batch.request, exampleCount: independent ? parents.length : null,
         limitations: [...new Set(evidence.flatMap(input => [...(input.limitations || []), ...input.gaps]))] }, evidence };
   };

@@ -7,6 +7,7 @@ export { TASK_WORKFLOW_PROMPT, taskWorkflow } from './task';
 export type { TaskWorkflow } from './task';
 export { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence } from './reconstruction';
 export type { TaskFragment } from './reconstruction';
+export { TASK_REVIEW_PROMPT, reviewTaskReconstruction } from './reconstruction-review';
 export { CONSOLIDATION_PROMPT, consolidatedWorkflows } from './consolidation';
 
 export const PROCEDURE_RECIPE = 'procedure-observations-v1';

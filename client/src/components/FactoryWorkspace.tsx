@@ -26,10 +26,10 @@ export function FactoryExecutionSettings({ state }: { state: ReturnType<typeof u
     event.preventDefault(); setSaving(true); setError('');
     try { await saveFactoryExecutionSettings(limit); await state.refresh(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save execution settings.'); } finally { setSaving(false); }
   }}><label>Model call limit per run<input className="input" type="number" min={1} max={64} required value={limit} onChange={event => setLimit(Number(event.target.value))} /></label><button type="submit" disabled={saving}>Save</button></form>
-    <p className="muted small">Applies to new runs. The host permits workspace changes only; it does not publish or push.</p>{error && <p role="alert">{error}</p>}
+    <p className="muted small">Applies to new runs, including publication or deployment steps in the selected workflow.</p>{error && <p role="alert">{error}</p>}
   </details>;
 }
-export function FactoryWorkspace({ state, workflowId, locationKey, inputs }: { state: ReturnType<typeof useFactoryWorkspaces>; workflowId: string; locationKey: string; inputs: Guidance['inputs'] }) {
+export function FactoryWorkspace({ state, workflowId, aliases = [], locationKey, inputs }: { state: ReturnType<typeof useFactoryWorkspaces>; workflowId: string; aliases?: string[]; locationKey: string; inputs: Guidance['inputs'] }) {
   const { data, refresh } = state;
   const [error, setError] = useState(''), [ref, setRef] = useState('HEAD'), [values, setValues] = useState<Record<string, string>>({}), [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<Record<string, string>>({});
@@ -52,7 +52,7 @@ export function FactoryWorkspace({ state, workflowId, locationKey, inputs }: { s
   }
   if (!data?.agentAvailable || locationKey !== data.locationKey) return null;
   const blocked = busy || data.runs.some(run => ['running', 'interrupted'].includes(run.status));
-  const runs = data.runs.filter(run => run.workflowId === workflowId);
+  const runs = data.runs.filter(run => run.workflowId === workflowId || !!run.workflowId && aliases.includes(run.workflowId));
   return <section className="factory-execution" aria-label="Agent workflow execution">
     <form className="factory-run-form" onSubmit={event => { event.preventDefault(); void start(); }}>
       {inputs.map(input => <label key={input.name}>{input.label}<input className="input" value={values[input.name] || ''} onChange={event => setValues(previous => ({ ...previous, [input.name]: event.target.value }))} title={input.description} required={input.required} maxLength={2000} disabled={blocked} /></label>)}

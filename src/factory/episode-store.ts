@@ -3,17 +3,26 @@ import { digest, cleanText } from '../sync/normalize';
 import { workflowLocation } from './location';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens } from '../sync/summary-budget';
 import { readProcessParent, readProcessParents, learningInputKey, LEARNING_FORMAT, type ProcessParent } from './process-store';
-import { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence, type TaskFragment } from '../workflow-learning';
+import { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence, reviewTaskReconstruction, type TaskFragment } from '../workflow-learning';
 
 export interface EpisodeParent { episode: string; revision: number }
 export type LearningParent = ProcessParent | EpisodeParent;
 type Loaded = Awaited<ReturnType<typeof readProcessParent>>;
 interface Group { episode?: string; parents: ProcessParent[] }
-interface Receipt { id: string; input_key: string; recipe_version: string; model: string; status: string; source_dependencies_json: string; output_json: string }
+interface Receipt { id: string; input_key: string; recipe_version: string; model: string; status: string; source_dependencies_json: string; output_json: string; assembly_index?: number | null }
 const FORMAT = 'task-reconstruction-v1';
 const key = (p: ProcessParent) => JSON.stringify([p.extraction, p.fragment]);
 const payload = (loaded: Loaded[], excerpts: false | 1000 | 2000 = 1000) => ({ task: 'reconstruct_task', stage: 'task_reconstruction', current: { fragment: 'F0', goal: loaded[0].fragment.goal, context: loaded[0].fragment.context }, fragments: loaded.map((v, i): TaskFragment => ({ id: `F${i}`, process: v.fragment, ...(excerpts ? reconstructionEvidence(v.fragment, v.records, excerpts) : { records: v.records }) })) });
 
+export function reviewReconstructionPayload(loaded: Loaded[], visible: number, context: unknown) {
+  return { task: 'review_task_reconstruction', stage: 'task_reconstruction_review', fragments: payload(loaded.slice(0, visible)).fragments, context };
+}
+function currentRoots(parents: ProcessParent[]) {
+  return [...new Set(parents.flatMap(parent => {
+    const row = getDb().prepare('SELECT episode_id FROM episode_memberships WHERE extraction_id=? AND fragment_key=?').get(parent.extraction, parent.fragment) as { episode_id: string } | undefined;
+    return row ? [row.episode_id] : [];
+  }))].sort();
+}
 const load = readProcessParents;
 function verify(loaded: Loaded[], identities: string[], location: string) {
   if (JSON.stringify(loaded.map(v => v.identity)) !== JSON.stringify(identities) || loaded.some(v => v.location.kind === 'unavailable' || v.location.key !== location)) throw Error('Task reconstruction sources or location changed');
@@ -21,11 +30,11 @@ function verify(loaded: Loaded[], identities: string[], location: string) {
 export async function readLearningParents(parents: LearningParent[], signal: AbortSignal) {
   const frames = parents.map(parent => {
     if ('extraction' in parent) return { parent, row: undefined, deps: { parents: [parent] } };
-    const row = getDb().prepare(`SELECT r.* FROM episode_revisions v JOIN episode_reconstructions r ON r.id=v.reconstruction_id
+    const row = getDb().prepare(`SELECT r.*,v.assembly_index FROM episode_revisions v JOIN episode_reconstructions r ON r.id=v.reconstruction_id
       WHERE v.episode_id=? AND v.revision=? AND r.status='completed'`).get(parent.episode, parent.revision) as Receipt | undefined;
     if (!row) throw Error('Reconstructed task unavailable');
     const deps = JSON.parse(row.source_dependencies_json);
-    if (deps.format !== FORMAT || !Array.isArray(deps.parents) || !deps.parents.length || deps.parents.length > 64) throw Error('Invalid task reconstruction receipt');
+    if (![FORMAT, 'task-reconstruction-review-v1'].includes(deps.format) || !Array.isArray(deps.parents) || !deps.parents.length || deps.parents.length > 64) throw Error('Invalid task reconstruction receipt');
     return { parent, row, deps };
   });
   const unique = [...new Map(frames.flatMap(frame => frame.deps.parents as ProcessParent[]).map(parent => [key(parent), parent])).values()];
@@ -35,12 +44,25 @@ export async function readLearningParents(parents: LearningParent[], signal: Abo
     if (!row) throw Error('Reconstructed task unavailable');
     const loaded = (deps.parents as ProcessParent[]).map(p => byParent.get(key(p))!); verify(loaded, deps.identities, deps.location);
     if (deps.projection !== undefined && !['task-excerpts-v1', 'task-excerpts-v2'].includes(deps.projection)) throw Error('Unknown task evidence projection');
-    const input = payload(loaded, deps.projection === undefined ? false : deps.projection === 'task-excerpts-v1' ? 2000 : 1000);
+    const review = deps.format === 'task-reconstruction-review-v1';
+    if (review && (deps.projection !== 'task-excerpts-v2' || !Number.isInteger(deps.visible) || deps.visible < 1 || deps.visible > loaded.length || !Array.isArray(deps.reviewedReceipts))) throw Error('Invalid task review receipt');
+    if (review) for (const prior of deps.reviewedReceipts) {
+      const saved = getDb().prepare('SELECT source_dependencies_json,raw_output,output_json FROM episode_reconstructions WHERE id=?').get(prior.id) as Pick<Receipt, 'source_dependencies_json' | 'output_json'> & { raw_output: string } | undefined;
+      if (!saved || digest(JSON.stringify(saved)) !== prior.fingerprint) throw Error('Reviewed task receipt changed');
+      const priorSources = JSON.parse(saved.source_dependencies_json);
+      for (const [i, source] of (priorSources.parents as ProcessParent[]).entries()) {
+        const index = (deps.parents as ProcessParent[]).findIndex(parent => key(parent) === key(source));
+        if (index < 0 || loaded[index].identity !== priorSources.identities[i]) throw Error('Reviewed task context is unavailable or changed');
+      }
+    }
+    const input = review ? reviewReconstructionPayload(loaded, deps.visible, deps.context) : payload(loaded, deps.projection === undefined ? false : deps.projection === 'task-excerpts-v1' ? 2000 : 1000);
     if (typeof deps.prompt !== 'string' || row.recipe_version !== digest(deps.prompt) || row.input_key !== learningInputKey(deps, input, row.model)) throw Error('Task reconstruction input changed');
-    const result = reconstructTask(row.output_json, input.fragments);
+    const result = review ? reviewTaskReconstruction(row.output_json, input.fragments)[row.assembly_index!] : reconstructTask(row.output_json, input.fragments);
+    if (!result) throw Error('Reviewed task assembly unavailable');
     const selected = result.members.map(id => loaded[Number(id.slice(1))]);
+    const roots = currentRoots(result.members.map(id => deps.parents[Number(id.slice(1))]));
     return { location: loaded[0].location, input: assembledTaskInput(result, selected.map(v => ({ fragment: v.fragment, limitations: v.input.limitations }))),
-      identity: digest(JSON.stringify([{ episode: parent.episode, revision: parent.revision }, row.output_json, deps, loaded.map(v => v.identity)])), leaf: parent.episode,
+      identity: digest(JSON.stringify([{ episode: parent.episode, revision: parent.revision }, row.output_json, deps, loaded.map(v => v.identity), ...(roots.length > 1 ? [{ splitInto: roots }] : [])])), leaf: parent.episode,
       primary: [...new Set(selected.flatMap(v => v.primary))] };
   });
 }
@@ -61,15 +83,17 @@ export function independentTasks(left: LearningParent, right: LearningParent): b
   };
   if (root(left.episode) === root(right.episode)) return false;
   const snapshot = (parent: EpisodeParent) => {
-    const row = getDb().prepare(`SELECT r.source_dependencies_json,r.output_json FROM episode_revisions v
+    const row = getDb().prepare(`SELECT r.source_dependencies_json,r.output_json,v.assembly_index FROM episode_revisions v
       JOIN episode_reconstructions r ON r.id=v.reconstruction_id WHERE v.episode_id=? AND v.revision=? AND r.status='completed'`)
-      .get(parent.episode, parent.revision) as Pick<Receipt, 'source_dependencies_json' | 'output_json'> | undefined;
+      .get(parent.episode, parent.revision) as Pick<Receipt, 'source_dependencies_json' | 'output_json' | 'assembly_index'> | undefined;
     if (!row) throw Error('Task identity proof unavailable');
-    const parents: ProcessParent[] = JSON.parse(row.source_dependencies_json).parents, members: string[] = JSON.parse(row.output_json).members;
-    return { considered: new Set(parents.map(key)), selected: new Set(members.map(id => key(parents[Number(id.slice(1))]))) };
+    const deps = JSON.parse(row.source_dependencies_json), review = deps.format === 'task-reconstruction-review-v1';
+    const parents: ProcessParent[] = deps.parents, output = JSON.parse(row.output_json), members: string[] = review ? output.tasks[row.assembly_index!].members : output.members;
+    const selected = members.map(id => parents[Number(id.slice(1))]);
+    return { considered: new Set((review ? parents.slice(0, deps.visible) : parents).map(key)), selected: new Set(selected.map(key)), split: currentRoots(selected).length > 1 };
   };
   const a = snapshot(left), b = snapshot(right);
-  if (!a.selected.size || !b.selected.size || [...a.selected].some(id => b.selected.has(id))) return false;
+  if (a.split || b.split || !a.selected.size || !b.selected.size || [...a.selected].some(id => b.selected.has(id))) return false;
   return [...b.selected].every(id => a.considered.has(id)) || [...a.selected].every(id => b.considered.has(id));
 }
 
@@ -104,7 +128,7 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
       if (groups.length === 24 || parents.length === 64) break;
       if (++scanned % 32 === 0) { await new Promise<void>(resolve => setImmediate(resolve)); signal.throwIfAborted(); }
       const members = db.prepare(`SELECT l.extraction_id extraction,l.fragment_key fragment,json_extract(p.source_dependencies_json,'$.input.workspace') workspace
-        FROM episode_extractions l JOIN process_extractions p ON p.id=l.extraction_id WHERE l.episode_id=? ORDER BY p.rowid,l.fragment_key`).all(candidate.id) as (ProcessParent & { workspace: string })[];
+        FROM ${candidate.assembly === 'reconciled' ? 'episode_memberships' : 'episode_extractions'} l JOIN process_extractions p ON p.id=l.extraction_id WHERE l.episode_id=? ORDER BY p.rowid,l.fragment_key`).all(candidate.id) as (ProcessParent & { workspace: string })[];
       if (!members.length || parents.length + members.length > 64 || members.some(p => workflowLocation(p.workspace).key !== first.location.key || seen.has(key(p)))) continue;
       let values: Loaded[];
       try { values = await load(members, signal); }
@@ -138,7 +162,7 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
           const state = result.coverage.triggerRefs.length && result.coverage.outcomeRefs.length && !result.coverage.gaps.length ? 'completed' : 'partial';
           if (existing) db.prepare("UPDATE work_episodes SET revision=?,state=?,description_json=?,learning_status='pending' WHERE id=?").run(revision, state, JSON.stringify(result), episode);
           else db.prepare("INSERT INTO work_episodes(id,revision,state,description_json,assembly,learning_status) VALUES (?,?,?,?,'reconciled','pending')").run(episode, revision, state, JSON.stringify(result));
-          db.prepare('INSERT INTO episode_revisions VALUES (?,?,?)').run(episode, revision, id);
+          db.prepare('INSERT INTO episode_revisions(episode_id,revision,reconstruction_id) VALUES (?,?,?)').run(episode, revision, id);
           for (const parent of members) {
             db.prepare('INSERT OR REPLACE INTO episode_memberships VALUES (?,?,?)').run(parent.extraction, parent.fragment, episode);
             db.prepare('INSERT OR IGNORE INTO episode_extractions VALUES (?,?,?)').run(episode, parent.extraction, parent.fragment);
