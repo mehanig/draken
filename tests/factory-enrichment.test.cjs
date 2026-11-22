@@ -36,3 +36,31 @@ test('revocation after preparation and cancellation prevent accepting enrichment
  let checks=0,calls=0;await assert.rejects(proposeEnrichment(workflow,{assertCurrent:async()=>{if(++checks===2)throw Error('Revoked');},ask:async()=>{calls++;return JSON.stringify(guidance());}},new AbortController().signal),/Revoked/);assert.equal(calls,1);
  const c=new AbortController();c.abort();await assert.rejects(proposeEnrichment(workflow,{assertCurrent:async()=>{},ask:async()=>{calls++;return '';}},c.signal));assert.equal(calls,1);
 });
+
+for(const endpoint of [
+ {id:'feature-to-pr',method:['Implement the feature with regression coverage','Run focused checks; self-review, repair and retest','Commit and push the approved branch','Open a draft PR against the requested base'],completion:['Record the commit and draft PR URL; verify head and base']},
+ {id:'release',method:['Prepare version and release notes','Run release checks; self-review, repair and retest','Commit and tag the approved release','Publish the package and deploy the release','Verify the published version and live deployment'],completion:['Record the release tag, published package version and verified deployment URL']},
+])test(`${endpoint.id} retains its complete endpoint in saved enrichment and execution plans without publication bans`,()=>{
+ const fixtureEnrichment=require('./fixtures/workflow-enrichment.cjs');
+ const source={...workflow,id:endpoint.id,purpose:endpoint.id,appliesWhen:'Operator approves this workflow',method:endpoint.method};
+ const g=fixtureEnrichment(source).guidance;
+ g.steps=source.method.map((approach,i)=>({step:i+1,approach,checks:[`Record the actual result of step ${i+1}`]}));
+ g.completion=endpoint.completion;
+ // Exercise the persisted JSON contract, not just the in-memory return value.
+ const saved=JSON.parse(JSON.stringify(enrich(source,g))),before=structuredClone(saved);
+ const request=workflowRequest(saved,{});
+ const plan=JSON.parse(JSON.stringify(sessionPlan(source,request.task,'repo',saved)));
+ assert.deepEqual(saved.workflow,source);assert.deepEqual(saved.guidance,g);
+ assert.deepEqual(plan.workflow,source);assert.deepEqual(plan.enrichment,saved);
+ assert.deepEqual(plan.enrichment.guidance.steps.map(s=>s.approach),endpoint.method);
+ assert.deepEqual(plan.enrichment.guidance.completion,endpoint.completion);
+ assert.deepEqual(plan.policy,{locationKey:'repo',maxCalls:16,tools:['read','write','edit','bash']});
+ for(const contract of [saved,plan.enrichment]){
+  assert.equal(Object.hasOwn(contract,'publication'),false);
+  const requirements=contract.requirements.join(' ');
+  assert.match(requirements,/including commits, push, PR creation, publication or deployment when required/);
+  assert.doesNotMatch(requirements,/never (?:push|publish|deploy)|publication.{0,20}(?:false|prohibited|forbidden)|do not.{0,40}(?:push|publish|deploy|publication)/i);
+ }
+ plan.enrichment.guidance.steps.pop();plan.workflow.method.pop();
+ assert.deepEqual(saved,before);assert.deepEqual(source.method,endpoint.method);
+});
