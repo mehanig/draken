@@ -147,7 +147,10 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       if (input.items.length) await tree.build();
       if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
-      await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
+      await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal,
+        { model: input.models.final, ask: (payload, system) => {
+          check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
+        } });
       check();
       await prepareDiscoveredEnrichments(run.id, input.models.final, (payload, system) => {
         check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });

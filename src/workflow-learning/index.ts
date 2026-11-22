@@ -5,7 +5,7 @@ export { PROCESS_RECIPE, PROCESS_PROMPT, MATCH_PROMPT, validateProcess, validate
 export type { ProcessExtraction, ProcessFragment, ProcessMatch } from './process';
 export { TASK_WORKFLOW_PROMPT, taskWorkflow } from './task';
 export type { TaskWorkflow } from './task';
-export { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput } from './reconstruction';
+export { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence } from './reconstruction';
 export type { TaskFragment } from './reconstruction';
 
 export const PROCEDURE_RECIPE = 'procedure-observations-v1';

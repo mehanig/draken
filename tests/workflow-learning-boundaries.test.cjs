@@ -41,7 +41,7 @@ test('both public modules compile away from Draken and process originals with tw
     execFileSync(process.execPath,['-e',`
       const assert=require('node:assert/strict');
       const {prepareProcedureEvidence,readTaskEvidence}=require(${JSON.stringify(path.join(out,'evidence/index.js'))});
-      const {extractProcedures,validateProcess,validateProcessMatch,validateContractAssessment,decideContractMatch,taskWorkflow,reconstructTask,assembledTaskInput}=require(${JSON.stringify(path.join(out,'workflow-learning/index.js'))});
+      const {extractProcedures,validateProcess,validateProcessMatch,validateContractAssessment,decideContractMatch,taskWorkflow,reconstructTask,assembledTaskInput,reconstructionEvidence}=require(${JSON.stringify(path.join(out,'workflow-learning/index.js'))});
       assert.deepEqual(validateProcess('{"summary":"No supported process","fragments":[],"limitations":["Insufficient evidence"]}',[]).fragments,[]);
       const empty={primary:{goal:'Unknown',context:'Unknown',stages:[],branches:[],dependencies:[],decisions:[]},coverage:{complete:false,triggerPresent:false,outcomePresent:false,gaps:['No evidence']},secondary:{recoveries:[],toolsAndSkills:[]}};
       assert.equal(validateProcessMatch('{"relation":"insufficient","reason":"No episodes","sharedStages":[],"importantDifferences":[],"toolSkillDifferences":[],"missingEvidence":["No examples"]}',[empty,empty]).relation,'insufficient');
@@ -55,7 +55,7 @@ test('both public modules compile away from Draken and process originals with tw
           read:async ref=>({ref,sessionId,sequence:1,at:'2026-11-18T00:00:00Z',role:'user',text:'secret request'}),
         });
         const fragment={key:'task',goal:'Release 1.2.3',context:'Requested publication',state:'partial',refs:['R1'],coverage:{triggerRefs:['R1'],outcomeRefs:[],gaps:['Outcome missing']},stages:[{key:'release',action:'Publish 1.2.3',normalizedAction:'Publish the target release',role:'main',condition:null,claims:[{description:'Publication requested',basis:'requested',refs:['R1']}],refs:['R1'],tools:[],skills:[]}],dependencies:[],decisions:[],exceptions:[],questions:[],matching:{goal:'Publish a release',context:'Requested publication'}};
-        const fragments=[{id:'F0',process:fragment,records:packet.records}];
+        const fragments=[{id:'F0',process:fragment,...reconstructionEvidence(fragment,packet.records)}];
         const assembly=reconstructTask(JSON.stringify({status:'task',members:['F0'],reason:'The supplied release request identifies this task',coverage:fragment.coverage}),fragments);
         const reconstructed=assembledTaskInput(assembly,[{fragment,limitations:[]}]);
         assert.equal(reconstructed.goal,'Release 1.2.3');assert.equal(reconstructed.complete,false);assert.equal(reconstructed.stages[0].id,'S1');

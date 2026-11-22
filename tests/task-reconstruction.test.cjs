@@ -13,7 +13,7 @@ let root,db,prior,controller,calls;
 beforeEach(()=>{closeDb();prior={...process.env};root=fs.mkdtempSync(path.join(os.tmpdir(),'task-reconstruction-'));fs.mkdirSync(root+'/repo');Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions'});db=getDb();controller=new AbortController();calls=[];});
 afterEach(()=>{controller.abort();closeDb();for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(root,{recursive:true,force:true});});
 async function fragment(label,{session='one',goal='Release 1.2.3',text='Continue the release of 1.2.3.',cwd=root+'/repo',uncited=false,pointer}={}){
- const primary=pointer||frozenEvidence(db,root+'/sessions',text,{session,cwd,role:'user'}),background=uncited?[frozenEvidence(db,root+'/sessions','Uncited context.',{session,cwd,role:'assistant'})]:[];
+ const primary=pointer||frozenEvidence(db,root+'/sessions',text,{session,cwd,role:'user'}),background=Array.from({length:typeof uncited==='number'?uncited:Number(uncited)},()=>frozenEvidence(db,root+'/sessions','Uncited context.',{session,cwd,role:'assistant'}));
  const records=await readWorkflowOriginals([primary,...background],controller.signal);
  const process={summary:goal,fragments:[{key:label,goal,context:'The requested release',state:'partial',refs:['S1'],coverage:{triggerRefs:[],outcomeRefs:[],gaps:['Partial task history']},
   stages:[{key:'work',action:text,normalizedAction:'Perform release work',role:'main',condition:null,claims:[{description:text,basis:'requested',refs:['S1']}],refs:['S1'],tools:[],skills:[]}],dependencies:[],decisions:[],exceptions:[],questions:[],matching:{goal:'Publish a release',context:'A release is requested'}}],limitations:['Historical fragment']};
@@ -106,6 +106,11 @@ for(const change of ['uncited','unselected','bytes','location','cancel'])test(`$
   return output;
  }));
  assert.equal(tasks().length,0);const row=db.prepare('SELECT * FROM episode_reconstructions').get();assert.equal(row.status,change==='cancel'?'cancelled':'failed');assert.ok(row.raw_output);assert.ok(row.error);
+});
+test('originals omitted from the model excerpt still require fresh permission checks',async()=>{
+ const source=await fragment('first',{uncited:20});
+ await assert.rejects(reconstruct(async input=>{assert.equal(input.fragments[0].records.length,12);assert.equal(input.fragments[0].omittedRecords,9);const hidden=source.background.at(-1);db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(hidden.entry_id,hidden.session_id);return JSON.stringify(decision(input));}));
+ assert.equal(tasks().length,0);assert.equal(db.prepare('SELECT status FROM episode_reconstructions').get().status,'failed');
 });
 test('shared reconstruction dependencies are read once per batch, never cached across reads',async()=>{
  const source=await fragment('first',{uncited:true});await fragment('second',{session:'other'});await reconstruct(async input=>JSON.stringify(decision(input,f=>f.id==='F0')));

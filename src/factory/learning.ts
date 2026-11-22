@@ -8,9 +8,9 @@ import { reconstructPendingTasks, readLearningParent, readLearningParents, indep
 type Ask = (payload: unknown, system: string) => Promise<string>;
 type Episode = EpisodeParent;
 /** Owned by the summarization job: no scheduler, provider client or allowance of its own. */
-export async function learnSummaryWorkflows(run: number, model: string, ask: Ask, signal: AbortSignal): Promise<void> {
+export async function learnSummaryWorkflows(run: number, model: string, ask: Ask, signal: AbortSignal, reconstruction = { model, ask }): Promise<void> {
   const db = getDb();
-  await reconstructPendingTasks(run, model, ask, signal);
+  await reconstructPendingTasks(run, reconstruction.model, reconstruction.ask, signal);
   const pending = db.prepare("SELECT id episode,revision FROM work_episodes WHERE assembly='reconciled' AND superseded_by IS NULL AND learning_status='pending' ORDER BY rowid").all() as Episode[];
   const load = (parents: EpisodeParent[]) => readLearningParents(parents, signal);
   async function invoke<T>(parents: EpisodeParent[], expectedIdentities: string[], locationKey: string, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T): Promise<T> {
