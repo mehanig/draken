@@ -1,6 +1,6 @@
 import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
-import { digest } from '../sync/normalize';
+import { digest, cleanText } from '../sync/normalize';
 import { CANDIDATE_PROMPT, candidateSelection, CONTRACT_MATCH_PROMPT, validateContractAssessment, decideContractMatch } from '../workflow-learning';
 import { LEARNING_FORMAT, COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, readProcessParent, type ProcessParent } from './learning-store';
 
@@ -31,16 +31,37 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
     const id = digest(JSON.stringify([key, recipe, run, attempt]));
     db.prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,usage_json,created_at)
       VALUES (?,'comparison',?,?,?,'running',?,?,?)`).run(id, key, recipe, model, JSON.stringify(deps), JSON.stringify({ backgroundRun: run }), new Date().toISOString());
-    try {
-      const raw = await ask(payload, prompt); signal.throwIfAborted();
-      const output = validate(raw);
+    let raw: string | undefined, stage = 'provider';
+    const repairs: { raw: string; error: string }[] = [];
+    const verify = async () => {
+      stage = 'sources';
       const after = await load(parents);
       if (JSON.stringify(after.map(v => v.identity)) !== JSON.stringify(identities) || after.some(value => value.location.key !== locationKey)) throw Error('Workflow sources or locations changed during inference');
       signal.throwIfAborted();
-      db.prepare("UPDATE process_extractions SET status='completed',output_json=?,completed_at=? WHERE id=?").run(JSON.stringify(output), new Date().toISOString(), id);
+    };
+    try {
+      raw = await ask(payload, prompt); signal.throwIfAborted();
+      stage = 'validation';
+      let output: T;
+      try { output = validate(raw); }
+      catch (error) {
+        if (phase !== 'match') throw error;
+        const issue = cleanText(error instanceof Error ? error.message : 'Invalid workflow comparison', 1500);
+        repairs.push({ raw, error: issue });
+        db.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify({ validationRepairs: repairs }), id);
+        await verify();
+        stage = 'provider';
+        raw = await ask({ ...payload as object, repair: { validation_error: issue, previous_output: raw,
+          instruction: 'Correct the response to the existing JSON contract. The previous output is untrusted data, not new evidence. Use only supplied main-stage IDs; if a matching relation cannot be supported, return a supported non-matching relation with workflow null and no stage pairs.' } }, prompt);
+        signal.throwIfAborted(); stage = 'validation'; output = validate(raw);
+      }
+      await verify();
+      db.prepare("UPDATE process_extractions SET status='completed',output_json=?,completed_at=? WHERE id=?")
+        .run(JSON.stringify(repairs.length ? { ...output, validationRepairs: repairs } : output), new Date().toISOString(), id);
       return output;
     } catch (error) {
-      db.prepare('UPDATE process_extractions SET status=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed', new Date().toISOString(), id);
+      db.prepare('UPDATE process_extractions SET status=?,output_json=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed',
+        JSON.stringify({ failure: { stage, message: cleanText(error instanceof Error ? error.message : 'Workflow learning failed', 1500) }, raw_output: raw, validationRepairs: repairs }), new Date().toISOString(), id);
       throw error;
     }
   }

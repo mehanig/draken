@@ -127,6 +127,47 @@ test('shared subprocedures remain different parent workflows',async()=>{
  await warm();assert.equal((await factory()).proposals.length,0);assert.equal(pendingWorkflows(),false);
  const row=getDb().prepare("SELECT output_json FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get();assert.equal(JSON.parse(row.output_json).sameWorkflow,false);
 });
+const nonMatch={relation:'different',workflow:null,stagePairs:[],reason:'Different supported methods',limitations:[]};
+for(const invalid of ['not JSON',{relation:'same_workflow_candidate',workflow:{purpose:'Parser fix',method:['Repair parser'],appliesWhen:'Parser defects'},stagePairs:[{left:'S999',right:'S1'}],reason:'Invalid stage ID',limitations:[]}])test(`invalid comparison gets one accounted correction and preparation finishes (${typeof invalid})`,async()=>{
+ history();await scanSessions();controls({workflowAssessment:invalid,workflowRepairAssessment:nonMatch});await warm();
+ const db=getDb(),matches=calls().filter(c=>c.task==='compare_workflow_identity');assert.equal(matches.length,2);assert.ok(matches[1].repair);
+ const row=db.prepare("SELECT * FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get(),output=JSON.parse(row.output_json);
+ assert.equal(row.status,'completed');assert.equal(output.sameWorkflow,false);assert.equal(output.validationRepairs.length,1);assert.ok(output.validationRepairs[0].raw);assert.ok(output.validationRepairs[0].error);
+ const run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'completed');assert.equal(run.invocations,calls().length);
+ assert.ok(JSON.parse(run.metrics_json).some(m=>m.task==='compare_workflow_identity'&&m.repair&&m.accounting.complete));
+ const count=calls().length;await warm();assert.equal(calls().length,count,'successful correction is cached');noSync();
+});
+test('a corrected matching response remains readable and gets normal saved enrichment',async()=>{
+ history();await scanSessions();controls({workflowAssessment:'not JSON',workflowRepairAssessment:{relation:'same_workflow_candidate',workflow:{purpose:'Repair parser defects',method:['Reproduce the parser defect','Correct parsing and verify compatibility'],appliesWhen:'A parser regression needs a compatible fix'},stagePairs:[{left:'S1',right:'S1'},{left:'S2',right:'S2'}],reason:'Same supported parser method',limitations:[]}});
+ await warm();const page=await factory();assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].enrichment.status,'ready');assert.equal(getDb().prepare('SELECT status FROM background_runs').get().status,'completed');
+});
+test('a comparison without main stages can correct an unsupported match without inventing stage pairs',async()=>{
+ history();await scanSessions();const process=fixture();process.fragments[0].stages.forEach(s=>{s.role='unknown';s.condition=null;});
+ fs.writeFileSync(controlFile,JSON.stringify({workflowProcess:process,workflowAssessment:{relation:'same_workflow_candidate',workflow:{purpose:'Parser work',method:['Repair parsing'],appliesWhen:'Parser changes'},stagePairs:[],reason:'Unsupported identity',limitations:[]},workflowRepairAssessment:{...nonMatch,relation:'insufficient',reason:'No supplied main stages support identity'}}));
+ await warm();assert.equal(getDb().prepare('SELECT status FROM background_runs').get().status,'completed');assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,2);assert.equal((await factory()).proposals.length,0);
+});
+test('two invalid comparison responses retain the exact error and outputs, then stop without a retry loop',async()=>{
+ history();await scanSessions();controls({workflowAssessment:'not JSON'});await warm();
+ const db=getDb(),row=db.prepare("SELECT * FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get(),output=JSON.parse(row.output_json);
+ assert.equal(row.status,'failed');assert.equal(output.failure.stage,'validation');assert.match(output.failure.message,/JSON|Unexpected/);assert.equal(output.raw_output,'not JSON');assert.equal(output.validationRepairs[0].raw,'not JSON');
+ assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,2);const count=calls().length;await warm();assert.equal(calls().length,count);
+});
+test('comparison correction cannot obtain a new invocation allowance',async()=>{
+ history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='4';controls({workflowAssessment:'not JSON',workflowRepairAssessment:nonMatch});await warm();
+ const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'failed');assert.equal(run.invocations,4);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
+ const output=JSON.parse(db.prepare("SELECT output_json FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get().output_json);assert.match(output.failure.message,/Invocation budget/);assert.equal(output.validationRepairs.length,1);
+});
+for(const stop of ['revoke','cancel'])test(`${stop} after an invalid comparison prevents a correction call`,async()=>{
+ history();await scanSessions();controls({workflowAssessment:'not JSON',workflowRepairAssessment:nonMatch,taskDelays:{compare_workflow_identity:400}});
+ const done=warm();await waitFor(()=>calls().some(c=>c.task==='compare_workflow_identity'));
+ if(stop==='revoke')getDb().prepare("UPDATE agent_sessions SET included=0 WHERE id='job-0'").run();else controller.abort();
+ await done;assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);assert.equal((await factory()).proposals.length,0);
+});
+test('comparison provider failures are retained but are not retried as formatting corrections',async()=>{
+ history();await scanSessions();controls({failStage:'workflow_match'});await warm();
+ assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
+ const row=getDb().prepare("SELECT output_json FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get();assert.equal(JSON.parse(row.output_json).failure.stage,'provider');assert.ok(JSON.parse(row.output_json).failure.message);
+});
 test('failed process extraction does not replace or break the ordinary summary and is visible on Factory',async()=>{
  history(1);await scanSessions();controls({invalidProcess:true});await warm();
  const db=getDb();assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);
