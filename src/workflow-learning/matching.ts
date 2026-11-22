@@ -55,6 +55,11 @@ function object(v: unknown, keys: string[]): asserts v is Record<string, unknown
 }
 function text(v: unknown): asserts v is string { if (typeof v !== 'string' || !v.trim() || v.length > 1200) throw Error('Invalid matching text'); }
 function list(v: unknown): asserts v is unknown[] { if (!Array.isArray(v) || v.length > 12) throw Error('Invalid matching list'); }
+export function validateWorkflow(value: unknown): NonNullable<ContractAssessment['workflow']> {
+  object(value, ['purpose', 'method', 'appliesWhen']); text(value.purpose); text(value.appliesWhen);
+  list(value.method); if (!value.method.length) throw Error('Workflow needs a method'); value.method.forEach(text);
+  return value as unknown as NonNullable<ContractAssessment['workflow']>;
+}
 export function validateContractAssessment(raw: string, inputs: readonly ContractMatchInput[]): ContractAssessment {
   if (inputs.length !== 2) throw Error('Matching requires two inputs');
   if (new TextEncoder().encode(raw).length > 30000) throw Error('Matching output exceeds limit');
@@ -63,8 +68,7 @@ export function validateContractAssessment(raw: string, inputs: readonly Contrac
   if (typeof v.relation !== 'string' || !['same_workflow_candidate', 'shared_subprocedure', 'common_practice', 'different', 'insufficient'].includes(v.relation)) throw Error('Invalid matching relation');
   const matching = v.relation === 'same_workflow_candidate' || v.relation === 'shared_subprocedure';
   if (matching) {
-    object(v.workflow, ['purpose', 'method', 'appliesWhen']); text(v.workflow.purpose); text(v.workflow.appliesWhen);
-    list(v.workflow.method); if (!v.workflow.method.length) throw Error('Matching workflow needs a method'); v.workflow.method.forEach(text);
+    validateWorkflow(v.workflow);
   } else if (v.workflow !== null) throw Error('Non-match cannot propose a shared workflow');
   list(v.stagePairs); if (matching && !v.stagePairs.length) throw Error('Matching workflow needs supporting stage pairs');
   const seen = new Set<string>();

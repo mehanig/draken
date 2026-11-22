@@ -86,7 +86,7 @@ test('preparation cost covers all aggregation calls and retries, but not questio
  let records=calls();assert.ok(records.some(call=>call.repair));assert.equal(ready.aggregation_cost.complete,true);assert.ok(Math.abs(ready.aggregation_cost.usd-records.length*.0031)<1e-12);
  assert.equal(ready.tree.run.metrics.length,records.length);assert.ok(ready.tree.run.metrics.every(metric=>metric.accounting.source==='pi-usage/catalog-pricing'));
  const cost=ready.aggregation_cost;assert.deepEqual(store.homeOverview().syncs[0].aggregation_cost,cost);assert.deepEqual(store.overview().syncs[0].aggregation_cost,cost);
- fs.writeFileSync(control,'{}');ready=await generateReply(sync.id,'What remains unverified?');assert.deepEqual(ready.aggregation_cost,cost);assert.ok(ready.tree.run.metrics.every(metric=>!metric.accounting));
+ fs.writeFileSync(control,'{}');ready=await generateReply(sync.id,'What remains unverified?');assert.deepEqual(ready.aggregation_cost,cost);assert.ok(ready.tree.run.metrics.every(metric=>metric.accounting?.source==='pi-usage/catalog-pricing'),'Chat usage is retained separately, not added to preparation cost');
  launchRecap(sync.id);await waitIdle();assert.deepEqual(store.getSync(sync.id).aggregation_cost,cost);
  const before=calls().length;ready=await generateReply(sync.id);assert.equal(calls().length,before,'An already prepared sync makes no new request');assert.deepEqual(ready.aggregation_cost,cost);
  store.configureModels(sync.id,{...ready.models,final:'test/other'});ready=await generateReply(sync.id);assert.equal(calls().length-before,1,'Cached summaries add no new model charges on rebuild');assert.ok(Math.abs(ready.aggregation_cost.usd-cost.usd-.0031)<1e-12);

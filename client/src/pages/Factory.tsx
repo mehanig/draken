@@ -25,6 +25,13 @@ export function Factory() {
     } finally { if (!controller.signal.aborted) setLoading(false); }
   }, []);
   useEffect(() => { void load(); return () => { request.current?.abort(); preparation.current?.abort(); }; }, [load]);
+  useEffect(() => {
+    const target = window.location.hash.slice(1);
+    if (!/^workflow-[a-f0-9]{64}$/.test(target) || !data || loading) return;
+    const element = document.getElementById(target);
+    if (element) element.scrollIntoView({ block: 'start' });
+    else if (data.nextCursor !== null) void load(data.nextCursor);
+  }, [data, loading, load]);
   async function prepare(id: string, retry: boolean) {
     const controller = new AbortController(); preparation.current = controller; setPreparing(id); setPreparationError('');
     try { await prepareFactoryWorkflow(id, requestId(), retry, controller.signal); }
@@ -55,12 +62,14 @@ export function Factory() {
           <span className="muted small factory-group-count">{group.proposals.length} {group.proposals.length === 1 ? 'proposal' : 'proposals'}</span></div>
           <p className="muted small factory-location-path">{group.location.path}</p></header>
       {group.proposals.map(proposal => {
-        const workflow = proposal.decision.assessment.workflow;
+        const workflow = proposal.task?.workflow || proposal.decision?.assessment.workflow;
+        const limitations = proposal.task?.limitations || proposal.decision?.assessment.limitations || [];
         if (!workflow) return null;
-        return <article className="factory-card" key={proposal.id}>
+        return <article className="factory-card" key={proposal.id} id={`workflow-${proposal.id}`}>
           <h2>{workflow.purpose}</h2><p className="muted">{workflow.appliesWhen}</p>
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
-          {!!proposal.decision.assessment.limitations.length && <><h3>Limitations</h3><ul>{proposal.decision.assessment.limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
+          {proposal.task && <p className="muted small">Derived from one task</p>}
+          {!!limitations.length && <><h3>Limitations</h3><ul>{limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
           {proposal.enrichment?.status === 'ready' && proposal.enrichment.value ? <>
             <h3>Execution guidance</h3><p className="muted small">Draken additions, separate from historical observations.</p>
             <ol>{proposal.enrichment.value.guidance.steps.map(step => <li key={step.step}><p>{step.approach}</p><ul>{step.checks.map((check, i) => <li key={i}>{check}</li>)}</ul></li>)}</ol>
@@ -74,7 +83,8 @@ export function Factory() {
             <p className="muted small">One preparation call. Saved guidance is reused across tasks.</p>
           </section>}
           <details><summary>Evidence</summary>
-            <p>{proposal.decision.assessment.reason}</p>
+            <p>{proposal.task?.reason || proposal.decision?.assessment.reason}</p>
+            {proposal.task && <p>Requested scope: {proposal.task.request}</p>}
             {proposal.evidence.map((input, i) => <section className="factory-evidence" key={i}>
               <h3>{input.goal}</h3><p>{input.context}</p>
               <p>{input.complete ? 'Episode boundaries recorded.' : 'Episode coverage is incomplete.'}</p>

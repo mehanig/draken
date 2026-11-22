@@ -40,8 +40,8 @@ test('both public modules compile away from Draken and process originals with tw
     assert.equal(program.emit().emitSkipped,false);
     execFileSync(process.execPath,['-e',`
       const assert=require('node:assert/strict');
-      const {prepareProcedureEvidence}=require(${JSON.stringify(path.join(out,'evidence/index.js'))});
-      const {extractProcedures,validateProcess,validateProcessMatch,validateContractAssessment,decideContractMatch}=require(${JSON.stringify(path.join(out,'workflow-learning/index.js'))});
+      const {prepareProcedureEvidence,readTaskEvidence}=require(${JSON.stringify(path.join(out,'evidence/index.js'))});
+      const {extractProcedures,validateProcess,validateProcessMatch,validateContractAssessment,decideContractMatch,taskWorkflow}=require(${JSON.stringify(path.join(out,'workflow-learning/index.js'))});
       assert.deepEqual(validateProcess('{"summary":"No supported process","fragments":[],"limitations":["Insufficient evidence"]}',[]).fragments,[]);
       const empty={primary:{goal:'Unknown',context:'Unknown',stages:[],branches:[],dependencies:[],decisions:[]},coverage:{complete:false,triggerPresent:false,outcomePresent:false,gaps:['No evidence']},secondary:{recoveries:[],toolsAndSkills:[]}};
       assert.equal(validateProcessMatch('{"relation":"insufficient","reason":"No episodes","sharedStages":[],"importantDifferences":[],"toolSkillDifferences":[],"missingEvidence":["No examples"]}',[empty,empty]).relation,'insufficient');
@@ -57,6 +57,11 @@ test('both public modules compile away from Draken and process originals with tw
         let calls=0;
         const result=await extractProcedures(packet,async payload=>{ calls++;assert.ok(!JSON.stringify(payload).includes('secret'));return '{"episodes":[],"limitations":["Insufficient evidence"]}'; },signal);
         assert.equal(calls,1);assert.equal(result.episodes.length,0);
+        const cross=await readTaskEvidence({before:'2026-11-19T00:00:00Z',selections:[{ref:'H1',offset:0},{ref:'H2',offset:0}],signal},{
+          cleanText:s=>s.replaceAll('secret','[redacted]'),read:async ref=>({offset:0,neighbors:[],record:{ref,session_id:sessionId+ref,sync_id:null,kind:'session',workspace:'/repo',title:'Task',role:'user',sequence:1,at:'2026-11-18T00:00:00Z',qualification:'Original',text:'secret task'}}),
+        });
+        assert.equal(cross.records.length,2);assert.equal(new Set(cross.records.map(r=>r.sessionId)).size,2);assert.ok(!JSON.stringify(cross.records).includes('secret'));
+        assert.equal(taskWorkflow(JSON.stringify({kind:'insufficient',message:'No identifiable method',process:null,fragment:null,repositoryRef:null,workflow:null}),cross.records).kind,'insufficient');
       }
       Promise.all([host('one'),host('two')]).catch(e=>{console.error(e);process.exitCode=1;});
     `],{cwd:temp,env:{},timeout:30000});

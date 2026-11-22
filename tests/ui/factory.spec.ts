@@ -66,6 +66,21 @@ test('Factory shows qualifications and source labels without executing model tex
   }
 });
 
+test('a task workflow link loads its older page without fabricating recurrence or starting preparation', async ({ page }) => {
+  const id = 'a'.repeat(64), mutations: string[] = [];
+  page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
+  const task = { ...proposal, id, decision: null, task: { workflow: proposal.decision.assessment.workflow,
+    reason: 'Derived from the selected recovery task', request: 'Make a workflow from that recovery task', limitations: [] } };
+  await page.route('**/api/factory*', route => route.fulfill({ json: new URL(route.request().url()).searchParams.has('before')
+    ? { ...empty, proposals: [task] } : { ...empty, nextCursor: 7 } }));
+  await page.goto(`/factory#workflow-${id}`);
+  await expect(page.locator(`#workflow-${id}`)).toBeVisible();
+  await expect(page.getByText('Derived from one task', { exact: true })).toBeVisible();
+  await page.getByText('Evidence', { exact: true }).click();
+  await expect(page.getByText('Requested scope: Make a workflow from that recovery task')).toBeVisible();
+  expect(mutations).toEqual([]);
+});
+
 test('Factory explains paused learning and preparation errors without starting work', async ({ page }) => {
   let learning = 'paused'; const mutations: string[] = [];
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });

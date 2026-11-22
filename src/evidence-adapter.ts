@@ -53,12 +53,21 @@ export async function readWorkflowOriginals(pointers: Record<string, unknown>[],
   } finally { reader.close(); }
 }
 
-/** Actual user turns only. Collapse mirrored voice text; interpretation belongs to the module. */
-export function evidenceQuestions(syncId: number, textId = -1, voiceId = -1): string[] {
+function discussionBefore(textId: number, voiceId: number): string {
   const db = getDb();
   const current = (textId !== -1 ? db.prepare('SELECT created_at at FROM sync_messages WHERE id=?').get(textId)
     : db.prepare('SELECT started_at at FROM live_messages WHERE id=?').get(voiceId)) as { at: string } | undefined;
-  const before = current?.at || new Date().toISOString();
+  return current?.at || new Date().toISOString();
+}
+/** Conversation is context for follow-ups, never source proof or action authority. */
+export function evidenceDiscussion(syncId: number, textId = -1, voiceId = -1): { role: string; text: string }[] {
+  return (getDb().prepare('SELECT role,content FROM sync_messages WHERE sync_id=? AND created_at<? ORDER BY id DESC LIMIT 12')
+    .all(syncId, discussionBefore(textId, voiceId)) as { role: string; content: string }[]).reverse()
+    .map(m => ({ role: m.role, text: cleanText(m.content, 1000) }));
+}
+/** Actual user turns only. Collapse mirrored voice text; interpretation belongs to the module. */
+export function evidenceQuestions(syncId: number, textId = -1, voiceId = -1): string[] {
+  const db = getDb(), before = discussionBefore(textId, voiceId);
   return (db.prepare(`SELECT content,MAX(at) at FROM (
     SELECT content,created_at at FROM sync_messages WHERE sync_id=? AND role='user' AND created_at<?
     UNION ALL SELECT m.text content,m.started_at at FROM live_messages m JOIN live_calls c ON c.id=m.call_id

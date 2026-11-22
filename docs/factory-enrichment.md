@@ -2,6 +2,16 @@
 
 See [the Factory plan](factory-plan.md) for the product design. Discover → enrich during preparation → save → display → run the selected workflow. Opening Factory starts no model calls. Run uses saved guidance, concrete workflow-defined inputs and the selected repository ref; it does not regenerate enrichment.
 
+## Create from the current sync conversation
+
+The development version after 0.12.0 supports requests in the existing text chat or native voice call, such as “Make a workflow from that parser fix, ending at a review-ready PR.” No separate chat or creation switch is needed. This capability is not in the published 0.12.0 package.
+
+The existing evidence planner recognizes the current user's request and selects permitted originals across sessions. Shared process validation reconstructs the task; current-user changes to scope/endpoints stay separate from historical facts. One task is enough and is labelled **Derived from one task**, not recurring practice. If the task is ambiguous or its method cannot be established, the conversation asks for clarification or reports missing evidence instead of saving a generic template.
+
+The operation checks existing workflows, saves or reuses a discovery, then prepares enrichment under the same turn's invocation allowance. The reply contains a Factory link and the real preparation state. Creating a workflow never runs it. A failed enrichment retains the discovery and attempt; use Factory's existing retry button. Status reads, transport retries and repeated native history callbacks do not start creation again.
+
+Text and voice share the same application operation. Native history lookup remains read-only; only an actual user turn can initiate creation, and voice receives a separate application result. Stop, a new voice turn and call end cancel owned work without deleting committed discoveries or paid-call records. Conversation usage is recorded separately from briefing-preparation cost. No unrelated background-learning error is cleared.
+
 ## Execution
 
 The host creates a Docker workspace from the selected committed revision and its reachable Git history. Dirty/untracked host files, host Git configuration, hooks and credentials are not copied. Committed filenames are not filtered. Submodules and LFS declarations are not rejected: the workflow can initialize/fetch their content using ordinary Git tools, its configured remote and credentials.

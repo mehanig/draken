@@ -3,6 +3,8 @@ export { MATCHING_RECIPE, CONTRACT_MATCH_PROMPT, contractMatchInput, validateCon
 export type { ContractMatchInput, ContractAssessment, ContractDecision } from './matching';
 export { PROCESS_RECIPE, PROCESS_PROMPT, MATCH_PROMPT, validateProcess, validateProcessEvidence, validateProcessMatch, processMatchInput } from './process';
 export type { ProcessExtraction, ProcessFragment, ProcessMatch } from './process';
+export { TASK_WORKFLOW_PROMPT, taskWorkflow } from './task';
+export type { TaskWorkflow } from './task';
 
 /** Pure procedural extraction. No repository/technology categories and no execution tools. */
 export const PROCEDURE_RECIPE = 'procedure-observations-v1';

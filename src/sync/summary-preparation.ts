@@ -86,7 +86,7 @@ export async function prepareWorkflowEnrichment(id: string, body: unknown, signa
     const run = Number(db.prepare(`INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key,stage)
       VALUES (?,?,1,0,?,?,'Workflow enrichment')`).run(models.summary, models.final, new Date().toISOString(), key).lastInsertRowid);
     try {
-      await prepareEnrichment(id, run, models.final, (payload, system) => modelCall(payload, system, { models, runId: run, table: 'background_runs', final: true, signal: controller.signal }), controller.signal, input.retry as boolean);
+      await prepareEnrichment(id, { table: 'background_runs', id: run }, models.final, (payload, system) => modelCall(payload, system, { models, runId: run, table: 'background_runs', final: true, signal: controller.signal }), controller.signal, input.retry as boolean);
       db.prepare("UPDATE background_runs SET status='completed',stage='Workflow ready',completed_at=? WHERE id=?").run(new Date().toISOString(), run);
     } catch (error) {
       db.prepare('UPDATE background_runs SET status=?,error=?,completed_at=? WHERE id=?').run(controller.signal.aborted ? 'cancelled' : 'failed', 'Workflow enrichment did not complete. Attempt and accounting retained.', new Date().toISOString(), run);

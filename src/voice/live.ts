@@ -10,8 +10,10 @@ import { cleanText } from '../sync/normalize';
 import { SyncDetail } from '../types';
 import { invalidateRecap } from '../sync/recap';
 import { LIVE_PROMPT, liveEvidence, liveRetrievalQuestion } from './live-context';
-import { prepareEvidence } from '../evidence';
-import { evidenceDependencies, evidenceQuestions } from '../evidence-adapter';
+import { prepareEvidence, type EvidenceResult } from '../evidence';
+import { readDiscovery } from '../factory/discovery';
+import { createWorkflowFromHistory, type WorkflowCreationResult } from '../factory/create-from-history';
+import { evidenceDependencies, evidenceQuestions, evidenceDiscussion } from '../evidence-adapter';
 import { modelCall } from '../sync/model-call';
 import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyProgress, stopHistory } from '../memory/service';
@@ -27,7 +29,8 @@ const isStopRequest = (text: string) => text.trim() === STOP_TEXT || /^(?:please
 type Native = { subscribe(fn: (event: any) => void): () => void; open(sdp: string, options: any): Promise<string>; text(text: string): Promise<void>; context(text: string): Promise<void>; continueAnswer(question: string): Promise<void>; close(): Promise<{ helperExited: boolean }> };
 const runtime = () => require('../../voice/realtime/native.mjs') as { nativeStatus(options?: any): Promise<any>; NativeVoice: new (options?: any) => Native };
 interface Message { id: number; role: 'user' | 'assistant'; text: string; final: boolean; interrupted?: boolean; refs: string[]; started: number; turn?: Turn; release?: () => void; completionTimer?: NodeJS.Timeout }
-interface Turn { selectionRun?: number; user: Message; life: AbortController; continuation: ReplyContinuation; historyBefore: string | null; backgroundReady: Promise<void>; drained: boolean; completed: boolean; release?: () => void; refs: string[]; lookups: Map<string, Promise<EvidencePacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
+type PreparedPacket = EvidencePacket & { workflowCreation?: Extract<EvidenceResult, { kind: 'ready' }>['workflowCreation'] };
+interface Turn { initial?: Promise<string>; initialEvidence?: Promise<PreparedPacket>; workflowPending?: boolean; workflowReply?: string; workflowId?: string; selectionRun?: number; user: Message; life: AbortController; continuation: ReplyContinuation; historyBefore: string | null; backgroundReady: Promise<void>; drained: boolean; completed: boolean; release?: () => void; refs: string[]; lookups: Map<string, Promise<PreparedPacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
 interface Call { turn?: Turn; id: string; sync: SyncDetail; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; release: VoiceLease; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; contextDelivery: Promise<void>; drains: Set<Promise<void>>; nativeDrains: Set<Promise<void>> }
 const calls = new Map<string, Call>();
 // End can overtake creation on a second HTTP connection. Retain unknown-ID
@@ -230,7 +233,7 @@ function beginTurn(call: Call, user: Message, spoken: boolean) {
   if (spoken) turn.continuation.inputStarted();
   return turn;
 }
-async function lookup(call: Call, question: string, turn: Turn) {
+async function lookup(call: Call, question: string, turn: Turn, recognizeCreation = false): Promise<PreparedPacket> {
   await turn.backgroundReady;
   if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
   const currentQuestion = turn.user.text;
@@ -247,8 +250,8 @@ async function lookup(call: Call, question: string, turn: Turn) {
       const db = getDb();
       const previous = evidenceQuestions(call.sync.id, -1, turn.user.id);
       try {
-        const packet = await prepareEvidence({ question: currentQuestion, lookupQuestion: refined, before: turn.historyBefore, signal,
-          briefing: call.sync.briefing || '', previousQuestions: previous, ask: async (payload, system) => {
+        const packet = await prepareEvidence({ question: currentQuestion, lookupQuestion: refined, allowWorkflowCreation: recognizeCreation, before: turn.historyBefore, signal,
+          briefing: call.sync.briefing || '', previousQuestions: previous, discussion: evidenceDiscussion(call.sync.id, -1, turn.user.id), ask: async (payload, system) => {
           signal.throwIfAborted();
           if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
           if (!turn.selectionRun) turn.selectionRun = Number(db.prepare(`INSERT INTO sync_runs
@@ -267,7 +270,7 @@ async function lookup(call: Call, question: string, turn: Turn) {
         throw error;
       }
     }).then(packet =>
-      packet.kind === 'unrelated' || packet.kind === 'clarify' || packet.refs.length ? packet : { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'No matching original records were found for this question in the prepared history. This does not establish that the information is absent. Ask which project or detail is intended; do not substitute an old conversation as current project status.' }), refs: [] }
+      packet.kind === 'unrelated' || packet.kind === 'clarify' || ('workflowCreation' in packet && packet.workflowCreation) || packet.refs.length ? packet : { text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'No matching original records were found for this question in the prepared history. This does not establish that the information is absent. Ask which project or detail is intended; do not substitute an old conversation as current project status.' }), refs: [] }
     ).catch(() => ({
       text: JSON.stringify({ type: 'read_only_history', sources: [], limitations: 'Archive lookup failed or is busy. No other search mode or provider was substituted. Say earlier history could not be checked; do not invent a historical answer.' }), refs: [],
     })).then(packet => snapshot && !('kind' in packet && packet.kind !== 'ready') ? { ...packet, snapshot } : packet));
@@ -310,7 +313,7 @@ async function deliverContext(call: Call, turn: Turn, packet: EvidencePacket) {
   }
   return turn.deliveries.get(packet)!;
 }
-async function requestedContext(call: Call, turn: Turn, question: string) {
+async function turnResponse(call: Call, turn: Turn, respond: () => Promise<string>) {
   if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
   const reacquired = !turn.release;
   turn.release ||= call.release.beginTurn();
@@ -321,9 +324,7 @@ async function requestedContext(call: Call, turn: Turn, question: string) {
     // Publish the wait on the turn too: concurrent delegations must not use
     // its old, already-resolved admission drain while this one is still held.
     if (reacquired) turn.backgroundReady = drainBackground(call);
-    const packet = await lookup(call, question, turn);
-    if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
-    const receipt = await deliverContext(call, turn, packet);
+    const receipt = await respond();
     delivered = true; return receipt;
   } finally {
     // Failed or superseded multipart delivery is NEVER a ready continuation.
@@ -331,9 +332,56 @@ async function requestedContext(call: Call, turn: Turn, question: string) {
     releaseTurnIfSettled(turn);
   }
 }
+async function requestedContext(call: Call, turn: Turn, question: string) {
+  return turnResponse(call, turn, async () => deliverContext(call, turn, await lookup(call, question, turn)));
+}
+async function deliverWorkflowResult(call: Call, turn: Turn, result: WorkflowCreationResult): Promise<string> {
+  const delivery = call.contextDelivery.then(async () => {
+    if (!ownsTurn(call, turn) || !call.native) throw Error('Workflow reply superseded');
+    await nativeOperation(call, 'Workflow result delivery', async () => {
+      if (result.id) await readDiscovery(result.id, turn.life.signal);
+      if (!ownsTurn(call, turn)) throw Error('Workflow reply superseded');
+      await call.native!.context(JSON.stringify({ type: 'workflow_creation_result', turn: turn.user.id, result }));
+    });
+    if (result.id) await readDiscovery(result.id, turn.life.signal);
+    if (!ownsTurn(call, turn)) throw Error('Workflow reply superseded');
+    const receipt = result.message + (result.url ? `\n${result.url}` : '');
+    // Keep the actionable link in the existing transcript, even if speech is interrupted.
+    getDb().prepare("INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,'assistant',?,?)").run(call.sync.id, receipt, new Date().toISOString());
+    invalidateRecap(call.sync.id);
+    turn.workflowReply = receipt; turn.workflowId = result.id;
+    return receipt;
+  });
+  call.contextDelivery = delivery.then(() => {}, () => {});
+  return delivery;
+}
 async function supplyRequestedContext(call: Call, turn: Turn) {
   if (!ownsTurn(call, turn) || !call.native) return;
-  await requestedContext(call, turn, turn.user.text);
+  // Only admission of an actual user turn can dispatch creation. Native backend
+  // history refinements never grant write authority or start another attempt.
+  turn.initial ||= turnResponse(call, turn, async () => {
+    turn.initialEvidence ||= lookup(call, turn.user.text, turn, true);
+    const packet = await turn.initialEvidence;
+    if (!packet.workflowCreation) return deliverContext(call, turn, packet);
+    if (!ownsTurn(call, turn) || !turn.selectionRun) throw Error('Workflow request superseded');
+    turn.workflowPending = true; turn.completed = false; turn.continuation.actionStarted();
+    const db = getDb(), runId = turn.selectionRun, signal = turn.life.signal;
+    db.prepare("UPDATE sync_runs SET status='running',completed_at=NULL,stage='Creating workflow' WHERE id=?").run(runId);
+    let result: WorkflowCreationResult;
+    try {
+      result = await createWorkflowFromHistory({ syncId: call.sync.id, turn: { kind: 'voice', id: turn.user.id }, runId,
+        model: call.sync.models.final, selection: packet.workflowCreation, signal,
+        checkCurrent: () => { if (!ownsTurn(call, turn)) throw Error('Workflow request superseded'); assertCallEvidence(call); },
+        ask: (payload, system) => modelCall(payload, system, { models: call.sync.models, runId, signal, final: true }) });
+      db.prepare("UPDATE sync_runs SET status='completed',stage='Workflow request complete',completed_at=? WHERE id=?").run(new Date().toISOString(), runId);
+    } catch (error) {
+      db.prepare('UPDATE sync_runs SET status=?,error=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed', cleanText(error instanceof Error ? error.message : 'Workflow creation failed', 1500), new Date().toISOString(), runId);
+      if (!ownsTurn(call, turn)) throw error;
+      result = { kind: 'failed', message: 'Workflow creation did not complete. The attempt and any saved discovery are retained; check Factory before requesting another attempt.' };
+    }
+    return deliverWorkflowResult(call, turn, result);
+  });
+  try { await turn.initial; } finally { turn.workflowPending = false; }
 }
 function nativeEvent(call: Call, event: any) {
   if (call.closed) return;
@@ -438,7 +486,15 @@ export async function connectLiveCall(id: string, sdp: string, signal: AbortSign
       return 'Read-only voice is ready. Wait for the user to finish the question and for its read-only context. Do not invent a result.';
     }
     if (!ownsTurn(call, turn)) throw new Error('Lookup superseded');
-    const receipt = await requestedContext(call, turn, liveRetrievalQuestion(input, turn.user.text));
+    if (turn.initialEvidence) await turn.initialEvidence;
+    if (turn.workflowPending) {
+      if (backendSignal.aborted || !ownsTurn(call, turn)) throw Error('Workflow request superseded');
+      assertCallEvidence(call);
+      return 'The application is preparing the workflow requested by this user turn. Wait for its workflow_creation_result. Do not claim it is saved or repeat the request.';
+    }
+    if (turn.initial) await turn.initial;
+    if (turn.workflowId) await readDiscovery(turn.workflowId, turn.life.signal);
+    const receipt = turn.workflowReply || await requestedContext(call, turn, liveRetrievalQuestion(input, turn.user.text));
     if (backendSignal.aborted || !ownsTurn(call, turn)) throw new Error('Lookup superseded');
     // Returning a cached receipt also resumes the native request. Recheck after
     // asynchronous appends (or a reused delivery), not just before appending.
