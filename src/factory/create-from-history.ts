@@ -1,4 +1,5 @@
 import { getDb } from '../db/schema';
+import { saveMissingWorkflowDisplays } from './display-store';
 import { readTaskEvidence, type EvidenceResult } from '../evidence';
 import { evidenceDependencies, evidenceQuestions, evidenceDiscussion } from '../evidence-adapter';
 import { cleanText, digest } from '../sync/normalize';
@@ -116,6 +117,7 @@ export async function createWorkflowFromHistory(input: {
       }
       db.prepare('UPDATE workflow_requests SET workflow_id=? WHERE request_id=?').run(savedId, requestId);
     })();
+    saveMissingWorkflowDisplays([savedId!]);
     const url = `/factory#workflow-${savedId}`;
     try {
       await prepareEnrichment(savedId!, { table: 'sync_runs', id: runId }, input.model,

@@ -1,11 +1,22 @@
 # Instructions for coding assistants
 
+**More defensive does not automatically mean better.**
+
 ## Use plain English
 
 - Explain things in simple, direct English. Do not use corporate buzzwords or vague technical jargon.
 - Do not use words such as “bounded,” “guarded,” or “guardrails” in explanations. Say exactly what the code does or what limit applies.
 - For example, say “search at most three times” instead of “bounded retrieval,” and “check source permissions before reading” instead of “guarded access.”
 - State what failed, why it failed, and what you will change. Do not substitute jargon for an explanation.
+
+## Do not invent checks or repeat completed work
+
+- Implement the requested behavior, not an imagined stricter product. Do not add validation, verification, prerequisites, restrictions or failure conditions merely because they seem safer or more thorough. Each must address an explicit user requirement, an applicable documented contract or a concrete failure in the requested operation. A hypothetical concern is not enough.
+- Apply requirements only where they belong. A check required when preparing evidence or accepting input does not automatically belong in page loads, saved-result reads or every later operation. Existing checks and passing tests are not proof that those checks are necessary.
+- Treat saved results as saved results. Display them from storage; do not repeat inference, reopen original inputs, walk provenance chains or revalidate completed preparation unless the requested behavior explicitly requires it. Preserve ordinary application authentication and authorization without turning them into a reason to redo preparation.
+- Before adding work to a frequently used path, identify its actual cost: database queries, file reads, network requests and growth with the number of records. Prefer doing necessary work once at the operation that owns it, rather than making every reader repeat it.
+- Measure the affected user-facing path with representative saved data before calling the change finished. Correct output and green tests do not excuse a slow page. Report any material delay and its cause; do not silently accept it.
+- When a check causes complexity or latency, first ask whether it is required at that point. Remove unnecessary work rather than building caches, background jobs or more infrastructure around it. If an existing contract conflicts with the requested behavior, explain the specific conflict and ask instead of silently expanding the scope.
 
 ## Keep UI content focused
 

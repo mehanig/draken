@@ -57,25 +57,14 @@ function view(request: Request): WorkspaceRun {
   return { id: request.id, ref: request.ref, workflowId: request.workflowId, task: request.task, inputs: request.inputs, sessionId: session?.id || result?.sessionId, commit: source?.commit || '', status, detail: result?.detail || (status === 'interrupted' ? 'Cleanup is not confirmed. Inspect the workspace before another run.' : status === 'failed' ? 'Repository checks failed. See the private run log.' : ''),
     modelCalls: result ? result.modelCalls ?? null : accounting ? accounting.modelCalls ?? null : request.workflowId || request.propose ? null : 0, createdAt: request.createdAt, stages, patchBytes: fs.existsSync(patch) ? fs.statSync(patch).size : 0 };
 }
-async function assertSource(request: Request): Promise<void> {
-  if (!request.workflowId) return;
-  try { const current = await readDiscovery(request.workflowId, new AbortController().signal); if (current.revision !== request.revision || current.locationKey !== request.location) throw Error('Changed'); }
-  catch { throw new HttpError(409, 'Workflow source changed or is unavailable. Check history access in Settings.'); }
-}
 export async function readWorkspaces(): Promise<WorkspacePage> {
-  const settings = config(), runs: WorkspaceRun[] = [], checked = new Map<string, boolean>();
-  if (settings.available) for (const request of requests().filter(r => r.location === settings.location!.key).slice(0, 10)) {
-    const key = `${request.workflowId}/${request.revision}/${request.location}`;
-    if (!checked.has(key)) { try { await assertSource(request); checked.set(key, true); } catch { checked.set(key, false); } }
-    if (checked.get(key)) runs.push(view(request));
-  }
+  const settings = config(), runs = settings.available ? requests().filter(r => r.location === settings.location!.key).slice(0, 10).map(view) : [];
   return { maxCalls: settings.maxCalls, available: settings.available, agentAvailable: settings.agentAvailable, locationKey: settings.location?.key || '', repository: settings.available ? settings.repository : '', runs };
 }
 export async function workspaceLog(id: string): Promise<{ text: string }> {
   if (!validId(id)) throw new HttpError(400, 'Invalid workspace run ID.');
   const settings = config(), item = requests().find(r => r.id === id && r.location === settings.location?.key);
   if (!settings.available || !item) throw new HttpError(404, 'Workspace log unavailable.');
-  await assertSource(item);
   const file = path.join(root(), id, 'work/events.jsonl'); let text = '';
   if (fs.existsSync(file)) for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
     try { const event = JSON.parse(line); if (event.type === 'stage-result') text = (text + `\n${event.name} — exit ${event.code}\n${event.stdout || ''}${event.stderr || ''}`).slice(-64000); }

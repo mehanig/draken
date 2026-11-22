@@ -80,7 +80,7 @@ test('enrichment uses the remaining shared preparation allowance, not a new budg
 test('uncited source revocation during enrichment prevents publication and retains the attempt',async()=>{
  history();await scanSessions();controls({taskDelays:{enrich_workflow:500}});const done=warm();await waitFor(()=>calls().some(c=>c.task==='enrich_workflow'));
  const db=getDb(),entries=db.prepare("SELECT entry_id FROM agent_entries WHERE session_id='job-0'").all();db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='job-0' AND entry_id=?").run(entries.at(-1).entry_id);await done;
- assert.equal((await factory()).proposals.length,0);assert.equal(db.prepare('SELECT status FROM workflow_enrichments').get().status,'failed');assert.ok(db.prepare('SELECT raw_output FROM workflow_enrichments').get().raw_output);
+ assert.equal((await factory()).proposals[0].enrichment.status,'failed');assert.equal(db.prepare('SELECT status FROM workflow_enrichments').get().status,'failed');assert.ok(db.prepare('SELECT raw_output FROM workflow_enrichments').get().raw_output);
 });
 test('different repositories never reach candidate selection or workflow matching',async()=>{
  const {execFileSync}=require('node:child_process');const a=root+'/a',b=root+'/b';
@@ -238,14 +238,14 @@ test('source revocation during candidate inference prevents admission and furthe
  assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,0);assert.equal((await factory()).proposals.length,0);
  const count=calls().length;await warm();assert.equal(calls().length,count);
 });
-test('uncited originals and unselected candidate dependencies are revalidated before Factory display',async()=>{
+test('uncited originals and unselected dependencies remain required for preparation, not saved display',async()=>{
  history(3);await scanSessions();await warm();const page=await factory();assert.equal(page.proposals.length,2);
  const db=getDb(),row=db.prepare("SELECT source_dependencies_json FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match' ORDER BY rowid DESC LIMIT 1").get(),deps=JSON.parse(row.source_dependencies_json);
  assert.equal(deps.parents.length,3);assert.ok(!deps.pair.includes(2));
  const task=deps.parents[2],receipt=db.prepare('SELECT r.source_dependencies_json FROM episode_revisions v JOIN episode_reconstructions r ON r.id=v.reconstruction_id WHERE v.episode_id=? AND v.revision=?').get(task.episode,task.revision);
  const parent=db.prepare('SELECT source_dependencies_json FROM process_extractions WHERE id=?').get(JSON.parse(receipt.source_dependencies_json).parents[0].extraction),input=JSON.parse(parent.source_dependencies_json).input;
  db.prepare('UPDATE agent_entries SET active=0 WHERE session_id=? AND entry_id=?').run(input.session,input.evidence[3].entry_id);
- const after=await factory();assert.equal(after.proposals.length,0);assert.equal(after.unavailable,2);
+ const after=await factory();assert.equal(after.proposals.length,2);assert.equal(after.unavailable,0);for(const proposal of after.proposals)await assert.rejects(require('../dist/factory/discovery').readDiscovery(proposal.id,controller.signal));
 });
 test('cancelled matching retains accounting and resumes with cached summaries and candidate selection',async()=>{
  history();await scanSessions();controls({taskDelays:{compare_workflow_identity:1000}});

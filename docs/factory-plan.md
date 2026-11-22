@@ -34,7 +34,7 @@ Permitted history
 - Enrichment keeps the workflow's intended endpoint, including external actions. Do not remove those actions because an earlier prototype could not perform them.
 - Save enrichment during preparation; reuse it across runs. Execution-time planning adapts to current repository state without regenerating the workflow.
 - Run collects only saved workflow-defined inputs plus the ref. No generic task/prompt box. No extra fields when the workflow needs none.
-- Opening or refreshing Factory does not trigger inference, execution or retries.
+- Opening or refreshing Factory reads saved database records only. Do not reopen transcripts, revalidate historical evidence, walk source dependencies or regenerate saved enrichment. Saved execution history and logs likewise do not require renewed access to their historical sources. Target under 100 ms for the Factory page on the current saved dataset; measure the live experience, not just correctness tests. No inference, execution or retries on reads.
 - Preparation and execution use the configured final model and normal accounting. The execution allowance is configured once in Execution settings and frozen for each new run.
 
 ## 3. Responsibility split
@@ -83,7 +83,7 @@ Provide the authorized repository identity, remote, base/ref and sufficient Git 
 
 ## 5. Existing responsibilities that remain
 
-Preserve source consent and revocation checks, verification of original evidence, accounting including failed paid attempts and unknown usage, explicit cancellation, run identity, retained patches/results, and ownership checks when cleanup is uncertain. Keep the host checkout unchanged and tools inside the container. Retain the current explicit runtime/resource limits rather than quietly changing them during unrelated work.
+Preserve source consent and revocation checks and verification of original evidence when preparing new evidence-derived work—not when displaying already saved workflows. Preserve accounting including failed paid attempts and unknown usage, explicit cancellation, run identity, retained patches/results, and ownership checks when cleanup is uncertain. Keep the host checkout unchanged and tools inside the container. Retain the current explicit runtime/resource limits rather than quietly changing them during unrelated work.
 
 Keep discovery and enrichment modules independent of host services. Integrate through their public contracts and retain standalone tests. Learning from execution must distinguish recorded outcomes from the agent's claims; do not retroactively turn incomplete historical evidence into proof of success.
 

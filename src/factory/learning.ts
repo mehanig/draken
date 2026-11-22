@@ -1,3 +1,4 @@
+import { saveMissingWorkflowDisplays } from './display-store';
 import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
 import { digest, cleanText } from '../sync/normalize';
@@ -54,6 +55,7 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       await verify();
       db.prepare("UPDATE process_extractions SET status='completed',output_json=?,completed_at=? WHERE id=?")
         .run(JSON.stringify(repairs.length ? { ...output, validationRepairs: repairs } : output), new Date().toISOString(), id);
+      if (phase === 'match' && (output as { sameWorkflow?: boolean }).sameWorkflow) saveMissingWorkflowDisplays([id]);
       return output;
     } catch (error) {
       db.prepare('UPDATE process_extractions SET status=?,output_json=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed',

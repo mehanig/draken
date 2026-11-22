@@ -131,6 +131,7 @@ export function initProcessSchema(db: Database.Database): void {
       WHEN NEW.kind='comparison' AND NEW.status='completed' AND CASE WHEN json_valid(NEW.output_json) THEN json_extract(NEW.output_json,'$.sameWorkflow')=1 ELSE 0 END
       BEGIN INSERT OR IGNORE INTO workflow_discoveries(id,origin,model,created_at) VALUES(NEW.id,'recurring',NEW.model,NEW.created_at); END;
   `);
+  if (!(db.prepare('PRAGMA table_info(workflow_discoveries)').all() as { name: string }[]).some(c => c.name === 'display_json')) db.exec('ALTER TABLE workflow_discoveries ADD COLUMN display_json TEXT');
   if ((db.prepare('PRAGMA foreign_key_list(workflow_enrichments)').all() as { table: string }[]).some(fk => fk.table === 'process_extractions')) db.transaction(() => {
     db.exec(`CREATE TABLE workflow_enrichments_next (
       id INTEGER PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflow_discoveries(id),

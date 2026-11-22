@@ -76,15 +76,15 @@ test('enrichment failure retains discovery and paid output, and duplicate delive
  assert.match(result.messages.at(-1).content,/enrichment did not complete/);const p=(await readFactory(undefined,signal())).proposals[0];assert.equal(p.enrichment.status,'failed');
  await chat(request);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);assert.ok(db.prepare('SELECT raw_output FROM workflow_enrichments').get().raw_output);
 });
-test('revoking an uncited task original withholds the workflow and its enrichment',async()=>{
+test('revoking an uncited original blocks new evidence use but leaves the saved workflow visible',async()=>{
  await chat();const id=db.prepare('SELECT id FROM workflow_discoveries').get().id;
  db.prepare("UPDATE agent_sessions SET included=0 WHERE id='parser-finish'").run();
- assert.equal((await readFactory(undefined,signal())).proposals.length,0);await assert.rejects(readDiscovery(id,signal()));
+ assert.equal((await readFactory(undefined,signal())).proposals.length,1);await assert.rejects(readDiscovery(id,signal()));
 });
 test('changed original bytes invalidate the task receipt without inference',async()=>{
  await chat();const beforeCalls=calls().length;
  const files=fs.readdirSync(process.env.DRAKEN_PI_SESSIONS_DIR);for(const file of files){const p=path.join(process.env.DRAKEN_PI_SESSIONS_DIR,file);if(fs.statSync(p).isFile())fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace('Uncited task context','Changed task context'));}
- assert.equal((await readFactory(undefined,signal())).proposals.length,0);assert.equal(calls().length,beforeCalls);
+ const page=await readFactory(undefined,signal());assert.equal(page.proposals.length,1);await assert.rejects(readDiscovery(page.proposals[0].id,signal()));assert.equal(calls().length,beforeCalls);
 });
 test('creation cannot substitute a model-supplied turn or accounting owner',async()=>{
  await chat();const run=db.prepare('SELECT id FROM sync_runs').get().id;

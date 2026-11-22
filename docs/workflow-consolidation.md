@@ -6,7 +6,7 @@ Consolidation is explicit preparation, not a Factory page action or a workflow e
 
 - Original discovery IDs, comparisons, enrichments and execution receipts remain intact. Active-list aliases connect old deep links to their replacements; direct original reads still return the original records.
 - Draft replacements stay hidden. The original list remains active until the whole batch succeeds.
-- Batch receipts bind the selected source revisions, reconstructed task revisions, model output and grouping. Reads verify every dependency, including unselected context. A revoked or changed dependency can withhold the entire batch.
+- Preparation receipts bind the selected source revisions, reconstructed task revisions, model output and grouping. Preparation checks its evidence, including unselected context. The resulting workflow presentation is persisted in `workflow_discoveries.display_json`; Factory reads that saved value and saved enrichment, without reopening originals or revalidating the batch. Later changes to historical sources do not hide saved workflows.
 - One reconstructed task is labelled “Derived from one task”. Multiple IDs alone do not establish independent examples. Without a recorded distinction, the label is “Recurrence unconfirmed”.
 - Changing versions, branches and commits belong in run inputs rather than fixed reusable instructions. Different endpoints—such as publishing a release versus verifying one already published—stay separate. Explanations and rejected suggestions do not become implementation instructions.
 
@@ -24,4 +24,4 @@ The background detector does not automatically request or apply these reviews. A
 
 Prepare on a private database copy first. Before a live import, confirm server shutdown and resource ownership, take a backup, and recheck the current source revisions. Import only the new preparation records and task-state changes in one transaction; do not replace the production database or overwrite old records. Verify all replacement enrichments before committing. Restart and check the actual API and UI, including old links, without executing workflows.
 
-Controlled tests cover partition validation, historical revision reads, changed and unselected dependencies, activation, old IDs and read-only navigation. Provider-backed history preparation is a separate check and must be reported separately from those tests.
+Controlled tests cover partition validation, historical revision reads during preparation, changed and unselected preparation dependencies, activation, old IDs and database-only display. Existing records receive their saved presentation once during startup, using stored database results only; page reads never perform this migration or write data. Provider-backed history preparation is a separate check and must be reported separately from those tests.
