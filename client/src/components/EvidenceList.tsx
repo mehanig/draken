@@ -40,7 +40,8 @@ export function SourceInspector({ syncId }: { syncId: number }) {
 }
 
 export function CitedText({ text }: { text: string }) {
-  return <div className="prose">{text.split(/(\[(?:[EC]\d+|H[a-f0-9]{24})\])/g).map((part, index) => {
+  return <div className="prose">{text.split(/(\[(?:[EC]\d+|H[a-f0-9]{24})\]|\/factory#workflow-[a-f0-9]{64})/g).map((part, index) => {
+    if (/^\/factory#workflow-[a-f0-9]{64}$/.test(part)) return <a key={index} href={part}>Open workflow in Factory</a>;
     const ref = part.slice(1, -1);
     if (/^H[a-f0-9]{24}$/.test(ref)) return <a className="citation" key={index} href={`/history/${ref}`} target="_blank" rel="noopener noreferrer" aria-label={`Inspect historical source ${ref}`}>[history {ref.slice(-6)}]</a>;
     if (!/^\[(E|C)\d+\]$/.test(part)) return <span key={index}>{part}</span>;

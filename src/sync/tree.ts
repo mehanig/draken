@@ -326,7 +326,7 @@ export class SummaryTree {
     if (this.background && final) throw new HttpError(409, 'Background preparation cannot call the final provider');
     if (this.accountAggregation) assertRecentSessions(this.db, this.sync.items.map(item => item.session_id));
     return modelCall(payload, system, { models: this.sync.models, runId: this.runId, signal: this.signal,
-      table: this.runTable, final, reserveAnswer: !final && !this.background, accounting: this.accountAggregation });
+      table: this.runTable, final, reserveAnswer: !final && !this.background });
   }
 
   private register(spec: Spec) {

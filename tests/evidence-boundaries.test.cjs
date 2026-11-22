@@ -36,7 +36,7 @@ test('application code imports evidence only through its public entry point', ()
       if (target.startsWith(folder + path.sep)) assert.equal(target, path.join(folder, 'index'), `${file}: ${item.name}`);
     }
   }
-  assert.deepEqual(Object.keys(require('../dist/evidence')).sort(), ['DISCUSSION_HISTORY_BYTES', 'prepareEvidence', 'prepareProcedureEvidence']);
+  assert.deepEqual(Object.keys(require('../dist/evidence')).sort(), ['DISCUSSION_HISTORY_BYTES', 'prepareEvidence', 'prepareProcedureEvidence', 'readTaskEvidence']);
 });
 
 test('evidence has no application, package or builtin imports, including type-only dependencies', () => {

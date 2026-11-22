@@ -36,6 +36,14 @@ test('a pending refinement defers the scheduled cue until its full context is re
   f.turn.cancel();
 });
 
+test('an explicit application action waits for its result even after premature speech, then continues once', t => {
+  const f=fixture(t);f.turn.inputStarted();f.turn.lookupStarted();
+  f.turn.response('I cannot save workflows.',true);assert.equal(f.states.at(-1).pending,false);
+  f.turn.actionStarted();f.turn.response('I will create it.',true);f.tick(120000);assert.equal(f.calls(),0);
+  f.turn.contextReady();f.tick(1500);assert.equal(f.calls(),1);
+  f.turn.response('Saved the workflow in Factory.',true);f.tick(120000);assert.equal(f.calls(),1);
+});
+
 test('context alone cannot cue a typed question before its actual input is sent', t => {
   const f = fixture(t); f.turn.lookupStarted(); f.turn.contextReady(); f.tick(10000); assert.equal(f.calls(), 0);
   f.turn.inputStarted(); f.tick(1500); assert.equal(f.calls(), 1);

@@ -1,5 +1,5 @@
 import type { Enrichment } from '../factory-enrichment';
-import type { ContractDecision, ContractMatchInput } from '../workflow-learning';
+import type { ContractDecision, ContractMatchInput, TaskWorkflow } from '../workflow-learning';
 
 export interface WorkflowLocation {
   kind: 'repository' | 'folder' | 'unavailable';
@@ -14,7 +14,8 @@ interface FactoryProposal {
   id: string;
   model: string;
   createdAt: string;
-  decision: ContractDecision;
+  decision: ContractDecision | null;
+  task?: { workflow: TaskWorkflow['workflow']; limitations: string[]; reason: string; request: string };
   evidence: ContractMatchInput[];
 }
 export interface FactoryPage {

@@ -223,7 +223,7 @@ export class NativeVoice {
     if (!this.#thread || this.#closed || typeof question !== 'string' || !question.trim() || question.length > 2000) throw new Error('Cannot continue this native voice answer.');
     // Official V3 speakable-context operation, not a fabricated user message.
     // Ordinary developer context is only background data and may not resume speech.
-    const text = `DRAKEN_LOOKUP_READY — application control, not words to read aloud or a new user utterance. The read-only lookup is complete for this pending question: ${JSON.stringify([...question].slice(0, 500).join(''))} (bounded reminder; the original question is already in this call). Finish answering it now from the supplied context, briefly, with its uncertainty. If lookup failed, explain that instead. Do not merely acknowledge or promise to check; do not repeat an answer already completed. Do not answer an older question if the user has since interrupted or moved on.`;
+    const text = `DRAKEN_LOOKUP_READY — application control, not words to read aloud or a new user utterance. The application has supplied the evidence or workflow-creation result for this pending question: ${JSON.stringify([...question].slice(0, 500).join(''))} (bounded reminder; the original question is already in this call). Finish answering it now from the supplied context, briefly, with its uncertainty. If lookup failed, explain that instead. Do not merely acknowledge or promise to check; do not repeat an answer already completed. Do not answer an older question if the user has since interrupted or moved on.`;
     await this.#rpc.request('thread/realtime/appendSpeech', { threadId: this.#thread, text });
   }
   close() {

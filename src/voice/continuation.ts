@@ -8,6 +8,7 @@ export class ReplyContinuation {
   private acknowledged = false;
   private sent = false;
   private finished = false;
+  private actionPending = false;
   private timer?: NodeJS.Timeout;
   private deadline?: NodeJS.Timeout;
 
@@ -16,13 +17,20 @@ export class ReplyContinuation {
   lookupStarted() {
     if (!this.finished) { this.ready = false; clearTimeout(this.timer); this.changed(true); }
   }
+  /** An application action needs its actual result even if speech answered early. */
+  actionStarted() {
+    clearTimeout(this.timer); clearTimeout(this.deadline);
+    this.actionPending = true; this.finished = false; this.ready = false; this.sent = false;
+    this.changed(true);
+  }
   inputStarted() { if (!this.finished) { this.input = true; this.schedule(); } }
-  contextReady() { if (!this.finished) { this.ready = true; this.schedule(); } }
+  contextReady() { if (!this.finished) { this.actionPending = false; this.ready = true; this.schedule(); } }
   response(text: string, final: boolean) {
     if (this.finished || !this.input) return;
     this.busy = !final;
     clearTimeout(this.timer);
     if (!final) return;
+    if (this.actionPending) { this.acknowledged = true; return; }
     // A final transcript PART is not necessarily the end of an answer: V3
     // also emits short backchannels. Neither those nor a lookup promise is the
     // requested explanation.

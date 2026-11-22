@@ -41,7 +41,7 @@ afterEach(() => {
 
 test('additive migration creates process and saved-enrichment tables and is repeatable', () => {
   initProcessSchema(store);
-  assert.deepEqual(store.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(x => x.name), ['episode_extractions', 'process_extractions', 'work_episodes', 'workflow_enrichments']);
+  assert.deepEqual(store.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(x => x.name), ['episode_extractions', 'process_extractions', 'work_episodes', 'workflow_discoveries', 'workflow_enrichments', 'workflow_requests']);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE name='process_extractions'").get().n, 1);
   assert.equal(store.pragma('foreign_key_check').length, 0);
 });

@@ -1,7 +1,7 @@
 import { getDb } from '../db/schema';
 import { HttpError } from '../errors';
-import { COMPARISON_FORMAT, LEARNING_FORMAT, readWorkflowComparison, type LearningRow } from './learning-store';
-import { discoveryFromProposal } from './discovery';
+import { LEARNING_FORMAT } from './learning-store';
+import { discoveryFromProposal, readProposal } from './discovery';
 import { savedEnrichment } from './enrichment';
 import type { FactoryPage } from './types';
 
@@ -12,18 +12,16 @@ export async function readFactory(cursor: number | undefined, signal: AbortSigna
   const db = getDb();
   const setting = (key: string) => (db.prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
   const enabled = setting('auto_index') === 'true' && setting('auto_summary') !== 'false';
-  const rows = db.prepare(`SELECT rowid cursor,* FROM process_extractions WHERE kind='comparison' AND status='completed'
-    AND json_extract(source_dependencies_json,'$.format')=? AND json_extract(source_dependencies_json,'$.phase')='match'
-    AND rowid<? ORDER BY rowid DESC LIMIT 21`).all(COMPARISON_FORMAT, cursor ?? Number.MAX_SAFE_INTEGER) as (LearningRow & { cursor: number })[];
+  const rows = db.prepare('SELECT rowid cursor,id FROM workflow_discoveries WHERE rowid<? ORDER BY rowid DESC LIMIT 21')
+    .all(cursor ?? Number.MAX_SAFE_INTEGER) as { id: string; cursor: number }[];
   const failedExtractions = (db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='failed' AND json_extract(source_dependencies_json,'$.format')=?").get(LEARNING_FORMAT) as { n: number }).n;
   const result: FactoryPage = { proposals: [], nextCursor: rows.length > 20 ? rows[19].cursor : null, unavailable: 0,
     learning: !enabled ? 'paused' : setting('auto_summary_error') ? 'error' : 'enabled', failedExtractions };
   for (const row of rows.slice(0, 20)) {
     try {
-      const { decision, evidence, location } = await readWorkflowComparison(row, signal);
+      const proposal = await readProposal(row.id, signal);
       signal.throwIfAborted();
-      if (decision.sameWorkflow) {
-        const proposal = { id: row.id, model: row.model, createdAt: row.created_at, decision, evidence, location };
+      if (proposal.task || proposal.decision?.sameWorkflow) {
         result.proposals.push({ ...proposal, enrichment: savedEnrichment(discoveryFromProposal(proposal)) });
       }
     } catch {

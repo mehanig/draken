@@ -44,6 +44,8 @@ export interface EvidenceDependencies {
 }
 export interface EvidenceRequest {
   question: string;
+  /** Only the host handling a new, actual user turn may enable action recognition. */
+  allowWorkflowCreation?: boolean;
   /** Optional retrieval refinement; never replaces the actual user request. */
   lookupQuestion?: string;
   before: string;
@@ -51,10 +53,11 @@ export interface EvidenceRequest {
   /** Explicit host restriction, not a guess about the user's intent. */
   scope?: EvidenceScope;
   previousQuestions?: string[];
+  discussion?: { role: string; text: string }[];
   briefing?: string;
   /** The host owns provider choice, invocation accounting and cancellation. */
   ask: (payload: unknown, system: string) => Promise<string>;
 }
 export type EvidenceResult =
-  | { kind: 'ready'; text: string; refs: string[] }
+  | { kind: 'ready'; text: string; refs: string[]; workflowCreation?: { before: string; selections: { ref: string; offset: number }[] } }
   | { kind: 'unrelated' | 'clarify'; text: string; refs: string[]; message: string };
