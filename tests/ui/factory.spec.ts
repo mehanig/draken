@@ -53,6 +53,7 @@ test('workflows start as compact numbered rows; keyboard expansion and paginatio
   await expect(rows).toHaveCount(2);
   await expect(page.locator('.factory-workflow-number')).toHaveText(['1.', '2.']);
   await expect(page.locator('.factory-workflow[open]')).toHaveCount(0);
+  await expect(page.locator('.factory-workflow-body')).toHaveCount(0);
   await expect(page.getByText('Needs preparation', { exact: true })).toHaveCount(2);
   const summary = rows.first().locator(':scope > summary');
   await summary.focus(); await page.keyboard.press('Enter');

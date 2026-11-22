@@ -16,7 +16,9 @@ test('workflow inputs replace the prompt box; refresh only reads saved results',
   await page.locator('.factory-workflow-summary').first().click();
   const panel = page.getByRole('region', { name: 'Agent workflow execution', exact: true }); await expect(panel).toHaveCount(1);
   await expect(page.locator('textarea')).toHaveCount(0); await expect(page.getByRole('heading', { name: 'Run workflow', exact: true })).toHaveCount(0); await expect(page.getByText(/Up to 16 execution calls/)).toHaveCount(0); expect(posts).toBe(0);
-  await panel.getByLabel('Release version', { exact: true }).fill('0.10.1'); await panel.getByRole('button', { name: 'Run', exact: true }).click();
+  await panel.getByLabel('Release version', { exact: true }).fill('0.10.1');
+  await page.locator('.factory-workflow-summary').first().click();await page.locator('.factory-workflow-summary').first().click();
+  await expect(panel.getByLabel('Release version', { exact: true })).toHaveValue('0.10.1');await panel.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(panel.getByText('Release version: 0.10.1', { exact: true })).toBeVisible(); await panel.locator('summary').click(); await expect(panel.getByText('6 model calls · Session one-session')).toBeVisible();
   await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await page.reload(); await page.locator('.factory-workflow-summary').first().click(); await expect(panel.getByText('Release version: 0.10.1', { exact: true })).toBeVisible(); expect(posts).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

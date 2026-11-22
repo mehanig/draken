@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { factory, prepareFactoryWorkflow } from '../api';
 import { requestId } from '../request-id';
 import { FactoryWorkspace, FactoryExecutionSettings, useFactoryWorkspaces } from '../components/FactoryWorkspace';
@@ -9,6 +9,7 @@ export function Factory() {
   const workspaces = useFactoryWorkspaces();
   const [data, setData] = useState<FactoryPage | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const opened = useRef(new Set<string>());
   const [error, setError] = useState(''), [loading, setLoading] = useState(false);
   const request = useRef<AbortController | null>(null), preparation = useRef<AbortController | null>(null);
   const [preparing, setPreparing] = useState<string | null>(null), [preparationError, setPreparationError] = useState('');
@@ -25,7 +26,7 @@ export function Factory() {
       if (!controller.signal.aborted) { setData(null); setError(cause instanceof Error ? cause.message : 'Could not read workflow proposals.'); }
     } finally { if (!controller.signal.aborted) setLoading(false); }
   }, []);
-  useEffect(() => { void load(); return () => { request.current?.abort(); preparation.current?.abort(); }; }, [load]);
+  useLayoutEffect(() => { void load(); return () => { request.current?.abort(); preparation.current?.abort(); }; }, [load]);
   useEffect(() => {
     const openTarget = () => {
       const target = window.location.hash.slice(1);
@@ -78,6 +79,7 @@ export function Factory() {
         return <article className="factory-card" key={proposal.id} id={`workflow-${proposal.id}`}>
           <details className="factory-workflow" open={expanded.has(proposal.id)} onToggle={event => {
             const open = event.currentTarget.open;
+            if (open) opened.current.add(proposal.id);
             setExpanded(previous => {
               if (previous.has(proposal.id) === open) return previous;
               const next = new Set(previous);
@@ -90,7 +92,7 @@ export function Factory() {
             <h3>{workflow.purpose}</h3>
             <span className="factory-workflow-status muted">{preparing === proposal.id || proposal.enrichment?.status === 'running' ? 'Preparing' : proposal.enrichment?.status === 'ready' ? 'Ready' : proposal.enrichment?.status === 'failed' ? 'Preparation failed' : 'Needs preparation'}</span>
           </summary>
-          <div className="factory-workflow-body"><p className="muted">{workflow.appliesWhen}</p>
+          {opened.current.has(proposal.id) && <div className="factory-workflow-body"><p className="muted">{workflow.appliesWhen}</p>
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
           {proposal.task && <p className="muted small">{proposal.task.exampleCount === null ? 'Recurrence unconfirmed' : (proposal.task.exampleCount || 1) === 1 ? 'Derived from one task' : `Derived from ${proposal.task.exampleCount} tasks`}</p>}
           {!!limitations.length && <><h3>Limitations</h3><ul>{limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
@@ -118,7 +120,7 @@ export function Factory() {
             </section>)}
             <p className="muted small">Model: {proposal.model} · Saved {new Date(proposal.createdAt).toLocaleString()}</p>
           </details>
-          </div></details>
+          </div>}</details>
         </article>;
       })}</section>)}
       {data.nextCursor !== null && <button type="button" disabled={loading} onClick={() => void load(data.nextCursor!)}>Load more</button>}
