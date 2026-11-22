@@ -28,6 +28,7 @@ Permitted history
 ```
 
 - Discovery may start from background matching or an explicit request in the existing sync text chat/native call. A chosen historical task can support a saved workflow without recurrence. Both origins use shared process validation, matching, discovery loading, enrichment and Factory display. Record current-user steering separately from historical observations. Creation does not execute the workflow.
+- Before background workflow matching, reconstruct task instances from summary fragments. A task can span chunks and sessions; matching fragments of that same task is not evidence of recurrence. Use historical instance details to distinguish repetitions, and retain uncertainty when continuity or independence cannot be established. Save source-backed task revisions; compare distinct tasks rather than raw fragments.
 - Discovery records what the evidence supports, including gaps and failures.
 - Enrichment adds reusable instructions for preparation, execution, checks, review, repair, completion and recovery. Preserve historical observations separately from model-added guidance.
 - Enrichment keeps the workflow's intended endpoint, including external actions. Do not remove those actions because an earlier prototype could not perform them.

@@ -12,6 +12,14 @@ The operation checks existing workflows, saves or reuses a discovery, then prepa
 
 Text and voice share the same application operation. Native history lookup remains read-only; only an actual user turn can initiate creation, and voice receives a separate application result. Stop, a new voice turn and call end cancel owned work without deleting committed discoveries or paid-call records. Conversation usage is recorded separately from briefing-preparation cost. No unrelated background-learning error is cleared.
 
+## Background task reconstruction
+
+The development version after 0.14.0 reconstructs historical tasks before comparing reusable workflows. The preparation model uses concrete task details and verified originals to join fragments across chunks or sessions, or distinguish separate attempts in the same session. Uncertain assignments are retained without treating them as independent examples. Different task IDs alone do not prove independence: matching requires a reconstruction that considered the other task's member fragments and kept them separate. Tasks missed by the candidate window are not assumed to be different. One task still does not establish recurrence.
+
+Reconstruction shares the existing background owner, summary model, invocation allowance and cancellation. It considers up to 24 candidate groups and 64 fragments per request, never truncating an existing group's membership to make it fit. Original bytes, permissions and location are checked before and after inference, including uncited context and unselected candidates. Saved task revisions retain their source links and are rechecked on use. New continuation fragments can extend or join tasks without rewriting earlier revisions. A response that would partially split an existing task fails visibly and retains its output rather than silently changing the old membership.
+
+Completed legacy fragments and existing proposals are not automatically reprocessed or consolidated by this change. Matching against existing workflow identities and cleaning up old duplicate proposals remain separate work. Opening Factory and running a workflow do not reconstruct tasks or start preparation.
+
 ## Execution
 
 The host creates a Docker workspace from the selected committed revision and its reachable Git history. Dirty/untracked host files, host Git configuration, hooks and credentials are not copied. Committed filenames are not filtered. Submodules and LFS declarations are not rejected: the workflow can initialize/fetch their content using ordinary Git tools, its configured remote and credentials.

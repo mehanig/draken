@@ -47,6 +47,29 @@ export function initProcessSchema(db: Database.Database): void {
   `);
   const columns = new Set((db.prepare('PRAGMA table_info(work_episodes)').all() as { name: string }[]).map(c => c.name));
   if (!columns.has('learning_status')) db.exec("ALTER TABLE work_episodes ADD COLUMN learning_status TEXT NOT NULL DEFAULT 'pending' CHECK(learning_status IN ('pending','completed'))");
+  if (!columns.has('superseded_by')) db.exec('ALTER TABLE work_episodes ADD COLUMN superseded_by TEXT REFERENCES work_episodes(id)');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS episode_reconstructions (
+      id TEXT PRIMARY KEY, input_key TEXT NOT NULL, recipe_version TEXT NOT NULL, model TEXT NOT NULL,
+      current_extraction TEXT NOT NULL REFERENCES process_extractions(id), current_fragment TEXT NOT NULL,
+      run_id INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('running','completed','failed','cancelled')),
+      source_dependencies_json TEXT NOT NULL, raw_output TEXT, output_json TEXT, error TEXT,
+      created_at TEXT NOT NULL, completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS episode_revisions (
+      episode_id TEXT NOT NULL REFERENCES work_episodes(id), revision INTEGER NOT NULL,
+      reconstruction_id TEXT NOT NULL REFERENCES episode_reconstructions(id),
+      PRIMARY KEY(episode_id,revision)
+    );
+    CREATE TABLE IF NOT EXISTS episode_memberships (
+      extraction_id TEXT NOT NULL REFERENCES process_extractions(id), fragment_key TEXT NOT NULL,
+      episode_id TEXT NOT NULL REFERENCES work_episodes(id),
+      PRIMARY KEY(extraction_id,fragment_key)
+    );
+    CREATE INDEX IF NOT EXISTS episode_memberships_episode ON episode_memberships(episode_id);
+    CREATE INDEX IF NOT EXISTS episode_reconstruction_input ON episode_reconstructions(input_key);
+  `);
   const enrichmentColumns = new Set((db.prepare('PRAGMA table_info(workflow_enrichments)').all() as { name: string }[]).map(c => c.name));
   if (!enrichmentColumns.has('run_table')) db.exec("ALTER TABLE workflow_enrichments ADD COLUMN run_table TEXT NOT NULL DEFAULT 'background_runs' CHECK(run_table IN ('background_runs','sync_runs'))");
   db.exec(`
