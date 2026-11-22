@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0
+
+### Compact Factory workflow list
+
+- Show saved workflows as numbered rows, collapsed by default, with their purpose and preparation status. Expand a row to inspect steps, guidance, evidence and execution controls.
+- Keep expanded rows open across refresh, preparation and pagination. Direct workflow links load and expand their target. Preserve keyboard interaction and mobile layouts without horizontal overflow.
+- Keep all saved proposals and source checks. This release does not merge similar workflows or fix duplicate workflow discovery: background learning can still create separate proposals from matching pairs of task fragments.
+- Remove redundant implementation comments while preserving API contracts, compiler directives and external platform/protocol explanations. Executable output, model prompts, fixture data and application behavior remain unchanged by that cleanup.
+- Preserve existing history, caches, workflows, failed attempts and execution settings. Upgrading does not start workflow execution or retry failed preparation.
+
 ## 0.13.0
 
 ### Create workflows from chat and voice

@@ -50,11 +50,11 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/existing text chat or native voice call to create a workflow from historical work/);
-  assert.match(notes,/even one task/);
-  assert.match(notes,/Creating a workflow does not execute it/);
-  assert.match(notes,/correct invalid model output once within the existing allowance/);
-  assert.match(notes,/execution still requires configured Docker, an approved image and a qualified Pi SDK/);
+  assert.match(notes,/compact numbered rows, collapsed by default/);
+  assert.match(notes,/Expand one to inspect its steps, saved guidance, evidence and Run controls/);
+  assert.match(notes,/Direct workflow links open their target/);
+  assert.match(notes,/Similar proposals are not merged; duplicate workflow discovery remains a separate issue/);
+  assert.match(notes,/Execution still requires configured Docker, an approved image and a qualified Pi SDK/);
   assert.match(notes,/Existing history and caches stay intact/);
   assert.match(notes,/newly prepared original history between user turns as dated H evidence/);
   assert.match(notes,/Each answer pins one history cutoff/);
