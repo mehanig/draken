@@ -53,7 +53,7 @@ export async function prepareEnrichment(id: string, owner: PreparationOwner, mod
 }
 /** New discoveries are prepared by the same background owner, never by a page read or execution run. */
 export async function prepareDiscoveredEnrichments(run: number, model: string, ask: (payload: unknown, prompt: string) => Promise<string>, signal: AbortSignal): Promise<void> {
-  const rows = getDb().prepare(`SELECT id FROM process_extractions WHERE kind='comparison' AND status='completed'
+  const rows = getDb().prepare(`SELECT id FROM process_extractions WHERE id IN (SELECT id FROM active_workflow_discoveries) AND kind='comparison' AND status='completed'
     AND json_extract(source_dependencies_json,'$.format')=? AND json_extract(source_dependencies_json,'$.phase')='match'
     AND json_extract(output_json,'$.sameWorkflow')=1 ORDER BY rowid`).all(COMPARISON_FORMAT) as {id: string}[];
   for (const row of rows) {

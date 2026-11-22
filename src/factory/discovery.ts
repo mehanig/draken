@@ -4,6 +4,7 @@ import { getDb } from '../db/schema';
 import type { Discovery } from '../factory-enrichment';
 import type { FactoryPage } from './types';
 import { readTaskProposal, type DiscoveryRow } from './task-store';
+import { consolidationReader } from './consolidation';
 
 /** Call only with freshly verified Factory output. No new search or extraction path. */
 export function discoveryFromProposal(proposal: FactoryPage['proposals'][number]): Discovery {
@@ -17,7 +18,17 @@ export function discoveryFromProposal(proposal: FactoryPage['proposals'][number]
 export async function readDiscovery(id: string, signal: AbortSignal): Promise<Discovery> {
   return discoveryFromProposal(await readProposal(id, signal));
 }
+export function proposalReader(signal: AbortSignal) {
+  const consolidated = consolidationReader(signal, read, proposal => discoveryFromProposal(proposal).revision);
+  async function read(id: string): Promise<FactoryPage['proposals'][number]> {
+    return await consolidated(id) || readOriginalProposal(id, signal);
+  }
+  return read;
+}
 export async function readProposal(id: string, signal: AbortSignal): Promise<FactoryPage['proposals'][number]> {
+  return proposalReader(signal)(id);
+}
+async function readOriginalProposal(id: string, signal: AbortSignal): Promise<FactoryPage['proposals'][number]> {
   const saved = getDb().prepare('SELECT * FROM workflow_discoveries WHERE id=?').get(id) as DiscoveryRow | undefined;
   if (saved?.origin === 'requested') return readTaskProposal(saved, signal);
   const row = getDb().prepare("SELECT * FROM process_extractions WHERE id=? AND kind='comparison' AND status='completed'").get(id) as LearningRow | undefined;

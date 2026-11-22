@@ -29,7 +29,8 @@ export function Factory() {
   useEffect(() => {
     const target = window.location.hash.slice(1);
     if (!/^workflow-[a-f0-9]{64}$/.test(target) || !data || loading) return;
-    const element = document.getElementById(target);
+    const current = data.proposals.find(proposal => proposal.aliases?.includes(target.slice('workflow-'.length)));
+    const element = document.getElementById(current ? `workflow-${current.id}` : target);
     if (element) {
       const details = element.querySelector<HTMLDetailsElement>(':scope > details');
       if (details) details.open = true;
@@ -87,7 +88,7 @@ export function Factory() {
           </summary>
           <div className="factory-workflow-body"><p className="muted">{workflow.appliesWhen}</p>
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
-          {proposal.task && <p className="muted small">Derived from one task</p>}
+          {proposal.task && <p className="muted small">{proposal.task.exampleCount === null ? 'Recurrence unconfirmed' : (proposal.task.exampleCount || 1) === 1 ? 'Derived from one task' : `Derived from ${proposal.task.exampleCount} tasks`}</p>}
           {!!limitations.length && <><h3>Limitations</h3><ul>{limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
           {proposal.enrichment?.status === 'ready' && proposal.enrichment.value ? <>
             <h3>Execution guidance</h3><p className="muted small">Draken additions, separate from historical observations.</p>

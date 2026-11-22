@@ -1,8 +1,9 @@
 import { getDb } from '../db/schema';
 import { digest, cleanText } from '../sync/normalize';
 import { workflowLocation } from './location';
+import { isBatchSummaryModel, LUNA_BATCH, promptTokens } from '../sync/summary-budget';
 import { readProcessParent, readProcessParents, learningInputKey, LEARNING_FORMAT, type ProcessParent } from './process-store';
-import { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, type TaskFragment } from '../workflow-learning';
+import { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence, type TaskFragment } from '../workflow-learning';
 
 export interface EpisodeParent { episode: string; revision: number }
 export type LearningParent = ProcessParent | EpisodeParent;
@@ -11,7 +12,7 @@ interface Group { episode?: string; parents: ProcessParent[] }
 interface Receipt { id: string; input_key: string; recipe_version: string; model: string; status: string; source_dependencies_json: string; output_json: string }
 const FORMAT = 'task-reconstruction-v1';
 const key = (p: ProcessParent) => JSON.stringify([p.extraction, p.fragment]);
-const payload = (loaded: Loaded[]) => ({ task: 'reconstruct_task', stage: 'task_reconstruction', current: { fragment: 'F0', goal: loaded[0].fragment.goal, context: loaded[0].fragment.context }, fragments: loaded.map((v, i): TaskFragment => ({ id: `F${i}`, process: v.fragment, records: v.records })) });
+const payload = (loaded: Loaded[], excerpts: false | 1000 | 2000 = 1000) => ({ task: 'reconstruct_task', stage: 'task_reconstruction', current: { fragment: 'F0', goal: loaded[0].fragment.goal, context: loaded[0].fragment.context }, fragments: loaded.map((v, i): TaskFragment => ({ id: `F${i}`, process: v.fragment, ...(excerpts ? reconstructionEvidence(v.fragment, v.records, excerpts) : { records: v.records }) })) });
 
 const load = readProcessParents;
 function verify(loaded: Loaded[], identities: string[], location: string) {
@@ -33,7 +34,8 @@ export async function readLearningParents(parents: LearningParent[], signal: Abo
     if ('extraction' in parent) return byParent.get(key(parent))!;
     if (!row) throw Error('Reconstructed task unavailable');
     const loaded = (deps.parents as ProcessParent[]).map(p => byParent.get(key(p))!); verify(loaded, deps.identities, deps.location);
-    const input = payload(loaded);
+    if (deps.projection !== undefined && !['task-excerpts-v1', 'task-excerpts-v2'].includes(deps.projection)) throw Error('Unknown task evidence projection');
+    const input = payload(loaded, deps.projection === undefined ? false : deps.projection === 'task-excerpts-v1' ? 2000 : 1000);
     if (typeof deps.prompt !== 'string' || row.recipe_version !== digest(deps.prompt) || row.input_key !== learningInputKey(deps, input, row.model)) throw Error('Task reconstruction input changed');
     const result = reconstructTask(row.output_json, input.fragments);
     const selected = result.members.map(id => loaded[Number(id.slice(1))]);
@@ -85,6 +87,11 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
     catch { signal.throwIfAborted(); db.prepare("UPDATE work_episodes SET learning_status='completed' WHERE id=?").run(current.id); continue; }
     if (first.location.kind === 'unavailable') continue;
     const groups: Group[] = [], parents: ProcessParent[] = [{ extraction: current.extraction, fragment: current.fragment }], loaded = [first];
+    const fits = (values: Loaded[]) => {
+      const input = JSON.stringify(payload(values));
+      return Buffer.byteLength(input) <= LUNA_BATCH.requestBytes && promptTokens(input, TASK_RECONSTRUCTION_PROMPT) <= (isBatchSummaryModel(model) ? LUNA_BATCH.plannedRequestTokens : LUNA_BATCH.finalTokens);
+    };
+    if (!fits(loaded)) throw Error('Task fragment exceeds the reconstruction input budget');
     const seen = new Set([key(current)]);
     const candidates = db.prepare(`SELECT e.id,e.assembly FROM work_episodes e WHERE e.id<>? AND e.superseded_by IS NULL AND (
       e.assembly='reconciled' OR (e.assembly='fragment' AND (e.learning_status='pending' OR EXISTS (
@@ -102,11 +109,11 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
       let values: Loaded[];
       try { values = await load(members, signal); }
       catch { signal.throwIfAborted(); continue; }
-      if (values.some(v => v.location.key !== first.location.key)) continue;
+      if (values.some(v => v.location.key !== first.location.key) || !fits([...loaded, ...values])) continue;
       const group = { ...(candidate.assembly === 'reconciled' ? { episode: candidate.id } : {}), parents: members.map(({ extraction, fragment }) => ({ extraction, fragment })) };
       groups.push(group); for (const p of group.parents) seen.add(key(p)); parents.push(...group.parents); loaded.push(...values);
     }
-    const identities = loaded.map(v => v.identity), deps = { format: FORMAT, prompt: TASK_RECONSTRUCTION_PROMPT, parents, identities, location: first.location.key };
+    const identities = loaded.map(v => v.identity), deps = { format: FORMAT, projection: 'task-excerpts-v2', prompt: TASK_RECONSTRUCTION_PROMPT, parents, identities, location: first.location.key };
     const input = payload(loaded), inputKey = learningInputKey(deps, input, model), recipe = digest(TASK_RECONSTRUCTION_PROMPT);
     const previous = db.prepare('SELECT status,run_id FROM episode_reconstructions WHERE input_key=? ORDER BY rowid DESC LIMIT 1').get(inputKey) as { status: string; run_id: number } | undefined;
     if (previous?.run_id === run && previous.status !== 'cancelled') throw Error('Task reconstruction needs an explicit retry');

@@ -15,7 +15,8 @@ interface FactoryProposal {
   model: string;
   createdAt: string;
   decision: ContractDecision | null;
-  task?: { workflow: TaskWorkflow['workflow']; limitations: string[]; reason: string; request: string };
+  aliases?: string[];
+  task?: { workflow: TaskWorkflow['workflow']; limitations: string[]; reason: string; request: string; exampleCount?: number | null };
   evidence: ContractMatchInput[];
 }
 export interface FactoryPage {

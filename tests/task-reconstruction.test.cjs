@@ -13,7 +13,7 @@ let root,db,prior,controller,calls;
 beforeEach(()=>{closeDb();prior={...process.env};root=fs.mkdtempSync(path.join(os.tmpdir(),'task-reconstruction-'));fs.mkdirSync(root+'/repo');Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions'});db=getDb();controller=new AbortController();calls=[];});
 afterEach(()=>{controller.abort();closeDb();for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(root,{recursive:true,force:true});});
 async function fragment(label,{session='one',goal='Release 1.2.3',text='Continue the release of 1.2.3.',cwd=root+'/repo',uncited=false,pointer}={}){
- const primary=pointer||frozenEvidence(db,root+'/sessions',text,{session,cwd,role:'user'}),background=uncited?[frozenEvidence(db,root+'/sessions','Uncited context.',{session,cwd,role:'assistant'})]:[];
+ const primary=pointer||frozenEvidence(db,root+'/sessions',text,{session,cwd,role:'user'}),background=Array.from({length:typeof uncited==='number'?uncited:Number(uncited)},()=>frozenEvidence(db,root+'/sessions','Uncited context.',{session,cwd,role:'assistant'}));
  const records=await readWorkflowOriginals([primary,...background],controller.signal);
  const process={summary:goal,fragments:[{key:label,goal,context:'The requested release',state:'partial',refs:['S1'],coverage:{triggerRefs:[],outcomeRefs:[],gaps:['Partial task history']},
   stages:[{key:'work',action:text,normalizedAction:'Perform release work',role:'main',condition:null,claims:[{description:text,basis:'requested',refs:['S1']}],refs:['S1'],tools:[],skills:[]}],dependencies:[],decisions:[],exceptions:[],questions:[],matching:{goal:'Publish a release',context:'A release is requested'}}],limitations:['Historical fragment']};
@@ -107,6 +107,11 @@ for(const change of ['uncited','unselected','bytes','location','cancel'])test(`$
  }));
  assert.equal(tasks().length,0);const row=db.prepare('SELECT * FROM episode_reconstructions').get();assert.equal(row.status,change==='cancel'?'cancelled':'failed');assert.ok(row.raw_output);assert.ok(row.error);
 });
+test('originals omitted from the model excerpt still require fresh permission checks',async()=>{
+ const source=await fragment('first',{uncited:20});
+ await assert.rejects(reconstruct(async input=>{assert.equal(input.fragments[0].records.length,12);assert.equal(input.fragments[0].omittedRecords,9);const hidden=source.background.at(-1);db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(hidden.entry_id,hidden.session_id);return JSON.stringify(decision(input));}));
+ assert.equal(tasks().length,0);assert.equal(db.prepare('SELECT status FROM episode_reconstructions').get().status,'failed');
+});
 test('shared reconstruction dependencies are read once per batch, never cached across reads',async()=>{
  const source=await fragment('first',{uncited:true});await fragment('second',{session:'other'});await reconstruct(async input=>JSON.stringify(decision(input,f=>f.id==='F0')));
  const adapter=require('../dist/evidence-adapter'),original=adapter.readWorkflowOriginals;let batches=0,records=0;
@@ -148,6 +153,30 @@ test('a partial selection cannot silently split an existing reconstructed task',
 test('migration does not replay completed legacy fragments or rewrite old extraction receipts',async()=>{
  await fragment('legacy');db.prepare("UPDATE work_episodes SET learning_status='completed'").run();const before=db.prepare('SELECT * FROM process_extractions').all();initProcessSchema(db);initProcessSchema(db);await reconstruct();
  assert.equal(calls.length,0);assert.deepEqual(db.prepare('SELECT * FROM process_extractions').all(),before);assert.equal(db.pragma('foreign_key_check').length,0);
+});
+test('consolidation drafts stay hidden; activation preserves originals and old-ID aliases with fresh source checks',async()=>{
+ await fragment('one',{goal:'Release 1.2.3'});await fragment('two',{goal:'Release 1.2.4',session:'other'});
+ const separate=async input=>input.task==='reconstruct_task'?JSON.stringify(decision(input,(f,current)=>f.process.goal===current.process.goal)):ask(input);
+ await learnSummaryWorkflows(1,'fixture/model',separate,controller.signal);
+ const {readProposal,discoveryFromProposal}=require('../dist/factory/discovery'),{consolidationBatchId,consolidatedWorkflowId}=require('../dist/factory/consolidation');
+ const original=(await readFactory(undefined,controller.signal)).proposals[0],parents=tasks(),loaded=await readLearningParents(parents,controller.signal);
+ const source={format:'workflow-consolidation-v1',proposals:[{id:original.id,revision:discoveryFromProposal(original).revision,tasks:parents}],tasks:parents.map((p,i)=>({...p,identity:loaded[i].identity}))};
+ const batch={run_id:1,model:'fixture/model',source_json:JSON.stringify(source),request:'Consolidate the current workflows.',created_at:new Date().toISOString(),output_json:JSON.stringify({groups:[{members:[original.id],workflow:original.decision.assessment.workflow,reason:'Same procedure, retaining the original source evidence'}]})};batch.id=consolidationBatchId(batch);
+ db.prepare("INSERT INTO workflow_consolidation_batches(id,run_id,model,status,source_json,output_json,request,created_at) VALUES (?,?,?,'running',?,?,?,?)").run(batch.id,1,batch.model,batch.source_json,batch.output_json,batch.request,batch.created_at);
+ const parentJson=JSON.stringify(parents),id=consolidatedWorkflowId(batch,0,parentJson);
+ db.prepare("INSERT INTO workflow_discoveries(id,origin,model,created_at) VALUES (?,'requested',?,?)").run(id,batch.model,batch.created_at);
+ db.prepare('INSERT INTO workflow_consolidations VALUES (?,?,?,?)').run(id,batch.id,0,parentJson);
+ assert.deepEqual((await readFactory(undefined,controller.signal)).proposals.map(p=>p.id),[original.id]);
+ const draft=await readProposal(id,controller.signal);assert.equal(draft.task.exampleCount,2);assert.deepEqual(draft.aliases,[original.id]);
+ db.transaction(()=>{db.prepare("UPDATE workflow_consolidation_batches SET status='completed' WHERE id=?").run(batch.id);db.prepare('INSERT INTO workflow_consolidation_members VALUES (?,?)').run(original.id,id);})();
+ assert.deepEqual((await readFactory(undefined,controller.signal)).proposals.map(p=>p.id),[id]);assert.equal(discoveryFromProposal(await readProposal(original.id,controller.signal)).revision,source.proposals[0].revision);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_discoveries').get().n,2);assert.equal(db.pragma('foreign_key_check').length,0);
+ db.prepare("UPDATE agent_sessions SET included=0 WHERE id='other'").run();await assert.rejects(readProposal(id,controller.signal));assert.equal((await readFactory(undefined,controller.signal)).proposals.length,0);
+});
+test('consolidation must cover every workflow exactly once and cannot invent source IDs',()=>{
+ const {CONSOLIDATION_PROMPT,consolidatedWorkflows}=require('../dist/workflow-learning');assert.match(CONSOLIDATION_PROMPT,/not execution/);
+ const good={groups:[{members:['A','B'],workflow:{purpose:'Publish the requested release',method:['Check, publish and verify the release'],appliesWhen:'A release is requested'},reason:'Same method and endpoint'}]};assert.equal(consolidatedWorkflows(JSON.stringify(good),['A','B']).length,1);
+ for(const change of [v=>v.groups[0].members.pop(),v=>v.groups[0].members.push('C'),v=>v.groups.push(v.groups[0]),v=>v.groups[0].workflow.method=[],v=>v.groups[0].extra=true]){const bad=structuredClone(good);change(bad);assert.throws(()=>consolidatedWorkflows(JSON.stringify(bad),['A','B']));}
 });
 test('public task contract rejects unknown members, duplicate members and boundary refs from unselected fragments',async()=>{
  await fragment('first');await fragment('second',{session:'other'});

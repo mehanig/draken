@@ -85,7 +85,7 @@ export async function createWorkflowFromHistory(input: {
     const row = { model: input.model, source_json: sourceJson, output_json: raw, request_json: requestJson };
     const id = taskDiscoveryId(row), createdAt = new Date().toISOString();
     const proposal = await readTaskProposal({ ...row, id, origin: 'requested', created_at: createdAt }, signal);
-    const existing = db.prepare('SELECT id FROM workflow_discoveries ORDER BY rowid DESC').all() as { id: string }[];
+    const existing = db.prepare('SELECT id FROM active_workflow_discoveries ORDER BY cursor DESC').all() as { id: string }[];
     for (const entry of existing) {
       if (candidates.length === 24) break;
       try {

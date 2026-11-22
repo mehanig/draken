@@ -82,6 +82,28 @@ export function initProcessSchema(db: Database.Database): void {
       output_json TEXT,
       request_json TEXT
     );
+    CREATE TABLE IF NOT EXISTS workflow_consolidation_batches (
+      id TEXT PRIMARY KEY, run_id INTEGER NOT NULL, model TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('running','completed','failed','cancelled')),
+      source_json TEXT NOT NULL, raw_output TEXT, output_json TEXT, error TEXT,
+      request TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS workflow_consolidations (
+      workflow_id TEXT PRIMARY KEY REFERENCES workflow_discoveries(id),
+      batch_id TEXT NOT NULL REFERENCES workflow_consolidation_batches(id),
+      group_index INTEGER NOT NULL, task_parents_json TEXT NOT NULL,
+      UNIQUE(batch_id,group_index)
+    );
+    CREATE TABLE IF NOT EXISTS workflow_consolidation_members (
+      source_id TEXT PRIMARY KEY REFERENCES workflow_discoveries(id),
+      workflow_id TEXT NOT NULL REFERENCES workflow_discoveries(id),
+      CHECK(source_id<>workflow_id)
+    );
+    CREATE VIEW IF NOT EXISTS active_workflow_discoveries AS
+      SELECT d.rowid cursor,d.* FROM workflow_discoveries d
+      WHERE NOT EXISTS (SELECT 1 FROM workflow_consolidation_members m WHERE m.source_id=d.id)
+        AND NOT EXISTS (SELECT 1 FROM workflow_consolidations c JOIN workflow_consolidation_batches b ON b.id=c.batch_id
+          WHERE c.workflow_id=d.id AND b.status<>'completed');
     CREATE TABLE IF NOT EXISTS workflow_requests (
       request_id TEXT PRIMARY KEY,
       sync_id INTEGER NOT NULL REFERENCES syncs(id),

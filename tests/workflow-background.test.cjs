@@ -40,12 +40,12 @@ test('normal background tick saves process records with summaries and detects a 
  const worker=createAutoIndexer({enabled:()=>true,idle:()=>true,now:Date.now,scan:scanSessions,stamp:()=>new Map(),baseline:()=>new Map(),prepare:async()=>assert.fail('No new indexing is needed'),completed:()=>{},prepareSummaries:warmSummaryCache});
  await worker.tick();await worker.stop();
  const db=getDb(),run=db.prepare('SELECT * FROM background_runs ORDER BY id DESC LIMIT 1').get();assert.equal(run.status,'completed');
- assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model===(c.task==='enrich_workflow'?'openai/gpt-6-astra':'openai/gpt-6-luna')));assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
+ assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model===(['enrich_workflow','reconstruct_task'].includes(c.task)?'openai/gpt-6-astra':'openai/gpt-6-luna')));assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
  const chunks=calls().filter(c=>c.task==='summarize'&&c.stage==='chunk');assert.equal(chunks.length,2);
  assert.ok(chunks.every(c=>c.system.includes('process property alongside observations')));
  assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,2);
  assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,2);
- assert.ok(JSON.parse(run.metrics_json).filter(m=>m.task==='reconstruct_task').every(m=>m.accounting.complete));
+ assert.ok(JSON.parse(run.metrics_json).filter(m=>m.task==='reconstruct_task').every(m=>m.accounting.complete&&m.model===run.final_model));
  assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,1);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
  assert.equal(pendingWorkflows(),false);noSync();
  const count=calls().length;const page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].decision.sameWorkflow,true);assert.equal(page.proposals[0].enrichment.status,'ready');assert.equal(calls().length,count);
