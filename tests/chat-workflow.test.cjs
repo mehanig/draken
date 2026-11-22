@@ -40,7 +40,8 @@ beforeEach(async()=>{
  load=Module._load;Module._load=function(name,...args){if(name.endsWith('/voice/realtime/native.mjs'))return{NativeVoice:Native,nativeStatus:async()=>({readyForProbe:true})};return load.call(this,name,...args);};
 });
 afterEach(async()=>{await live.stopLiveCalls();Module._load=load;service.readHistory=read;service.searchPreparedHistory=search;cache.close();closeDb();for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(root,{recursive:true,force:true});});
-const calls=()=>fs.existsSync(process.env.DRAKEN_TEST_CALL_LOG)?fs.readFileSync(process.env.DRAKEN_TEST_CALL_LOG,'utf8').trim().split('\n').map(JSON.parse):[];
+// Poll only complete JSONL records: a provider fixture may still be appending the last line.
+const calls=()=>fs.existsSync(process.env.DRAKEN_TEST_CALL_LOG)?fs.readFileSync(process.env.DRAKEN_TEST_CALL_LOG,'utf8').split('\n').slice(0,-1).filter(Boolean).map(JSON.parse):[];
 async function chat(request=randomUUID()){return generateReply(syncId,question,request);}
 function unchanged(){assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'Existing extraction failure');assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n,0);assert.equal(fs.existsSync(path.join(process.env.DRAKEN_DATA_DIR,'factory-workspaces')),false);}
 

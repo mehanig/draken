@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.0
+
+### Create workflows from chat and voice
+
+- Ask in the existing sync text chat or native voice call to create and enrich a workflow from historical work, including one task. Reuse evidence planning, verified originals, workflow matching and saved enrichment under the current turn's allowance and cancellation. Ordinary chat gains no separate classifier call.
+- Distinguish single-task workflows from recurring discoveries, and historical facts from requested scope and model guidance. Return the actual saved result, clarification or failure and a Factory link. Creating a workflow does not execute it.
+- Keep native history lookup read-only. Deliver creation results separately, prevent duplicate requests and cancel owned work on Stop, a new turn or call end. Recheck source permissions and original bytes, including uncited context.
+- Add workflow discovery/request records and sync-owned enrichment without replacing old discoveries, histories, caches or failed attempts. Upgrading does not retry failed preparation or execute workflows.
+
+### Background preparation reliability
+
+- Give invalid workflow-comparison output one correction attempt within the existing invocation allowance. Retain rejected responses and exact validation errors. Provider failures, cancellation and changed sources do not trigger correction calls; a second invalid response stops visibly. Summarization, workflow learning and enrichment remain one pipeline.
+- The deployed fix completed a real combined preparation pass covering 14,371 entries with 59 of 120 allowed calls. The original failed comparison discarded its response/error; an exact-input replay succeeded, so its original exception cannot be established retrospectively.
+- Qualification includes 831 automated tests, 76 browser tests, standalone module checks and production package smoke. A real four-call Luna/Astra test created and enriched a workflow from explicitly synthetic task history. Native voice transport is covered by protocol tests; microphone-to-provider workflow creation has not been demonstrated.
+
 ## 0.12.0
 
 ### Factory: execute approved workflows through ordinary tools

@@ -51,11 +51,11 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/Factory reuses saved workflow guidance and concrete inputs alongside historical evidence/);
-  assert.match(notes,/Approved workflows own their checks, review and delivery steps in one Pi session using ordinary Docker tools/);
-  assert.match(notes,/npm package now includes execution scripts/);
-  assert.match(notes,/Configure Docker, an approved image, a qualified Pi SDK and the credentials your workflow needs/);
-  assert.match(notes,/No blanket publication or file-edit bans/);
+  assert.match(notes,/existing text chat or native voice call to create a workflow from historical work/);
+  assert.match(notes,/even one task/);
+  assert.match(notes,/Creating a workflow does not execute it/);
+  assert.match(notes,/correct invalid model output once within the existing allowance/);
+  assert.match(notes,/execution still requires configured Docker, an approved image and a qualified Pi SDK/);
   assert.match(notes,/Existing history and caches stay intact/);
   assert.match(notes,/newly prepared original history between user turns as dated H evidence/);
   assert.match(notes,/Each answer pins one history cutoff/);

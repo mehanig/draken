@@ -4,7 +4,7 @@ See [the Factory plan](factory-plan.md) for the product design. Discover → enr
 
 ## Create from the current sync conversation
 
-The development version after 0.12.0 supports requests in the existing text chat or native voice call, such as “Make a workflow from that parser fix, ending at a review-ready PR.” No separate chat or creation switch is needed. This capability is not in the published 0.12.0 package.
+Version 0.13.0 supports requests in the existing text chat or native voice call, such as “Make a workflow from that parser fix, ending at a review-ready PR.” No separate chat or creation switch is needed. This capability is not available in 0.12.0.
 
 The existing evidence planner recognizes the current user's request and selects permitted originals across sessions. Shared process validation reconstructs the task; current-user changes to scope/endpoints stay separate from historical facts. One task is enough and is labelled **Derived from one task**, not recurring practice. If the task is ambiguous or its method cannot be established, the conversation asks for clarification or reports missing evidence instead of saving a generic template.
 
