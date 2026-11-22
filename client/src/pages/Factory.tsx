@@ -27,16 +27,20 @@ export function Factory() {
   }, []);
   useEffect(() => { void load(); return () => { request.current?.abort(); preparation.current?.abort(); }; }, [load]);
   useEffect(() => {
-    const target = window.location.hash.slice(1);
-    if (!/^workflow-[a-f0-9]{64}$/.test(target) || !data || loading) return;
-    const current = data.proposals.find(proposal => proposal.aliases?.includes(target.slice('workflow-'.length)));
-    const element = document.getElementById(current ? `workflow-${current.id}` : target);
-    if (element) {
-      const details = element.querySelector<HTMLDetailsElement>(':scope > details');
-      if (details) details.open = true;
-      element.scrollIntoView({ block: 'start' });
-    }
-    else if (data.nextCursor !== null) void load(data.nextCursor);
+    const openTarget = () => {
+      const target = window.location.hash.slice(1);
+      if (!/^workflow-[a-f0-9]{64}$/.test(target) || !data || loading) return;
+      const current = data.proposals.find(proposal => proposal.aliases?.includes(target.slice('workflow-'.length)));
+      const element = document.getElementById(current ? `workflow-${current.id}` : target);
+      if (element) {
+        const details = element.querySelector<HTMLDetailsElement>(':scope > details');
+        if (details) details.open = true;
+        element.scrollIntoView({ block: 'start' });
+      }
+      else if (data.nextCursor !== null) void load(data.nextCursor);
+    };
+    openTarget(); window.addEventListener('hashchange', openTarget);
+    return () => window.removeEventListener('hashchange', openTarget);
   }, [data, loading, load]);
   async function prepare(id: string, retry: boolean) {
     const controller = new AbortController(); preparation.current = controller; setPreparing(id); setPreparationError('');

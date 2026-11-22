@@ -36,7 +36,10 @@ test('old workflow links open the consolidated row and show the corrected task c
   await page.goto(`/factory#workflow-${old}`);
   await expect(page.locator('.factory-workflow[open]')).toHaveCount(1);
   await expect(page.getByText('Derived from one task', { exact: true })).toBeVisible();
-  await expect(page.locator('.factory-workflow')).toHaveCount(1);expect(mutations).toEqual([]);
+  await expect(page.locator('.factory-workflow')).toHaveCount(1);
+  await page.locator('.factory-workflow-summary').click();await expect(page.locator('.factory-workflow[open]')).toHaveCount(0);
+  await page.evaluate(() => { window.location.hash = ''; });await page.evaluate(id => { window.location.hash = `workflow-${id}`; }, old);
+  await expect(page.locator('.factory-workflow[open]')).toHaveCount(1);expect(mutations).toEqual([]);
 });
 
 test('workflows start as compact numbered rows; keyboard expansion and pagination never start work', async ({ page }) => {
