@@ -28,6 +28,31 @@ test('Factory is read-only, direct-linkable and available in shared navigation',
   expect(mutations).toEqual([]);
 });
 
+test('workflows start as compact numbered rows; keyboard expansion and pagination never start work', async ({ page }) => {
+  const mutations: string[] = [];
+  page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
+  await page.route('**/api/factory*', route => route.fulfill({ json: new URL(route.request().url()).searchParams.has('before')
+    ? { ...empty, proposals: [{ ...proposal, id: 'older' }] }
+    : { ...empty, proposals: [proposal, { ...proposal, id: 'second' }], nextCursor: 7 } }));
+  await page.goto('/factory');
+  const rows = page.locator('.factory-workflow');
+  await expect(rows).toHaveCount(2);
+  await expect(page.locator('.factory-workflow-number')).toHaveText(['1.', '2.']);
+  await expect(page.locator('.factory-workflow[open]')).toHaveCount(0);
+  await expect(page.getByText('Needs preparation', { exact: true })).toHaveCount(2);
+  const summary = rows.first().locator(':scope > summary');
+  await summary.focus(); await page.keyboard.press('Enter');
+  await expect(rows.first()).toHaveAttribute('open', '');
+  await expect(rows.nth(1)).not.toHaveAttribute('open');
+  await page.getByRole('button', { name: 'Load more' }).click();
+  await expect(page.locator('.factory-workflow-number')).toHaveText(['1.', '2.', '3.']);
+  await expect(rows.first()).toHaveAttribute('open', '');
+  await expect(rows.nth(2)).not.toHaveAttribute('open');
+  await summary.focus(); await page.keyboard.press('Space');
+  await expect(page.locator('.factory-workflow[open]')).toHaveCount(0);
+  expect(mutations).toEqual([]);
+});
+
 test('retired release executor is not polled and cannot hide workflows', async ({ page }) => {
   let oldReads = 0;
   await page.route('**/api/factory/execution', route => { oldReads++; return route.fulfill({ status: 409, json: { error: 'Old source revoked' } }); });
@@ -56,6 +81,8 @@ test('Factory shows qualifications and source labels without executing model tex
   for (const width of [320, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 }); await page.goto('/factory');
     await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
+    await expect(page.getByText('One result is reported, not independently observed.')).toBeHidden();
+    await page.locator('.factory-workflow-summary').click();
     await expect(page.getByText('One result is reported, not independently observed.')).toBeVisible();
     await page.getByText('Evidence', { exact: true }).click();
     await expect(page.getByText('Initiating request missing')).toBeVisible();

@@ -8,6 +8,7 @@ import '../styles/factory.css';
 export function Factory() {
   const workspaces = useFactoryWorkspaces();
   const [data, setData] = useState<FactoryPage | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState(''), [loading, setLoading] = useState(false);
   const request = useRef<AbortController | null>(null), preparation = useRef<AbortController | null>(null);
   const [preparing, setPreparing] = useState<string | null>(null), [preparationError, setPreparationError] = useState('');
@@ -29,7 +30,11 @@ export function Factory() {
     const target = window.location.hash.slice(1);
     if (!/^workflow-[a-f0-9]{64}$/.test(target) || !data || loading) return;
     const element = document.getElementById(target);
-    if (element) element.scrollIntoView({ block: 'start' });
+    if (element) {
+      const details = element.querySelector<HTMLDetailsElement>(':scope > details');
+      if (details) details.open = true;
+      element.scrollIntoView({ block: 'start' });
+    }
     else if (data.nextCursor !== null) void load(data.nextCursor);
   }, [data, loading, load]);
   async function prepare(id: string, retry: boolean) {
@@ -61,12 +66,26 @@ export function Factory() {
           <span className="muted small">{group.location.kind === 'repository' ? 'Git repository' : group.location.kind === 'folder' ? 'Not a Git repository' : 'Location unavailable'}</span>
           <span className="muted small factory-group-count">{group.proposals.length} {group.proposals.length === 1 ? 'proposal' : 'proposals'}</span></div>
           <p className="muted small factory-location-path">{group.location.path}</p></header>
-      {group.proposals.map(proposal => {
+      {group.proposals.map((proposal, index) => {
         const workflow = proposal.task?.workflow || proposal.decision?.assessment.workflow;
         const limitations = proposal.task?.limitations || proposal.decision?.assessment.limitations || [];
         if (!workflow) return null;
         return <article className="factory-card" key={proposal.id} id={`workflow-${proposal.id}`}>
-          <h2>{workflow.purpose}</h2><p className="muted">{workflow.appliesWhen}</p>
+          <details className="factory-workflow" open={expanded.has(proposal.id)} onToggle={event => {
+            const open = event.currentTarget.open;
+            setExpanded(previous => {
+              if (previous.has(proposal.id) === open) return previous;
+              const next = new Set(previous);
+              if (open) next.add(proposal.id); else next.delete(proposal.id);
+              return next;
+            });
+          }}>
+          <summary className="factory-workflow-summary">
+            <span className="factory-workflow-number">{index + 1}.</span>
+            <h3>{workflow.purpose}</h3>
+            <span className="factory-workflow-status muted">{preparing === proposal.id || proposal.enrichment?.status === 'running' ? 'Preparing' : proposal.enrichment?.status === 'ready' ? 'Ready' : proposal.enrichment?.status === 'failed' ? 'Preparation failed' : 'Needs preparation'}</span>
+          </summary>
+          <div className="factory-workflow-body"><p className="muted">{workflow.appliesWhen}</p>
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
           {proposal.task && <p className="muted small">Derived from one task</p>}
           {!!limitations.length && <><h3>Limitations</h3><ul>{limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
@@ -94,6 +113,7 @@ export function Factory() {
             </section>)}
             <p className="muted small">Model: {proposal.model} · Saved {new Date(proposal.createdAt).toLocaleString()}</p>
           </details>
+          </div></details>
         </article>;
       })}</section>)}
       {data.nextCursor !== null && <button type="button" disabled={loading} onClick={() => void load(data.nextCursor!)}>Load more</button>}

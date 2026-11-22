@@ -13,11 +13,12 @@ test('workflow inputs replace the prompt box; refresh only reads saved results',
     return route.fulfill({ status: 202, json: data.runs[0] });
   });
   await page.setViewportSize({ width: 390, height: 900 }); await page.goto('/factory');
+  await page.locator('.factory-workflow-summary').first().click();
   const panel = page.getByRole('region', { name: 'Agent workflow execution', exact: true }); await expect(panel).toHaveCount(1);
   await expect(page.locator('textarea')).toHaveCount(0); await expect(page.getByRole('heading', { name: 'Run workflow', exact: true })).toHaveCount(0); await expect(page.getByText(/Up to 16 execution calls/)).toHaveCount(0); expect(posts).toBe(0);
   await panel.getByLabel('Release version', { exact: true }).fill('0.10.1'); await panel.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(panel.getByText('Release version: 0.10.1', { exact: true })).toBeVisible(); await panel.locator('summary').click(); await expect(panel.getByText('6 model calls · Session one-session')).toBeVisible();
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await page.reload(); await expect(panel.getByText('Release version: 0.10.1', { exact: true })).toBeVisible(); expect(posts).toBe(1);
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await page.reload(); await page.locator('.factory-workflow-summary').first().click(); await expect(panel.getByText('Release version: 0.10.1', { exact: true })).toBeVisible(); expect(posts).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -29,11 +30,11 @@ test('prepare once, then reuse defined inputs for multiple runs without enrichme
     if (route.request().method() === 'GET') return route.fulfill({ json: data });
     runs++; const body = route.request().postDataJSON(); data.runs = [{ id: body.requestId, workflowId: proposal.id, inputs: body.inputs, status: 'completed', stages: [], modelCalls: 2, createdAt: new Date().toISOString() }]; return route.fulfill({ status: 202, json: data.runs[0] });
   });
-  await page.goto('/factory'); await expect(page.getByText('Awaiting enrichment — not ready to run.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
+  await page.goto('/factory'); await page.locator('.factory-workflow-summary').click(); await expect(page.getByText('Awaiting enrichment — not ready to run.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Refresh', exact: true }).click(); expect(preparations).toBe(0);
   await page.getByRole('button', { name: 'Enrich workflow', exact: true }).click(); await expect(page.getByText('Review release checks')).toBeVisible();
   for (const version of ['0.10.1', '0.10.2']) {
-    await page.reload(); await page.getByLabel('Release version', { exact: true }).fill(version); await page.getByRole('button', { name: 'Run', exact: true }).click(); await expect(page.getByText(`Release version: ${version}`, { exact: true })).toBeVisible();
+    await page.reload(); await page.locator('.factory-workflow-summary').click(); await page.getByLabel('Release version', { exact: true }).fill(version); await page.getByRole('button', { name: 'Run', exact: true }).click(); await expect(page.getByText(`Release version: ${version}`, { exact: true })).toBeVisible();
   }
   expect(runs).toBe(2); expect(preparations).toBe(1);
 });
@@ -47,10 +48,10 @@ test('a workflow with no additional inputs runs directly and preserves cancellat
     data.runs = [{ id: body.requestId, workflowId: proposal.id, ref: 'HEAD', status: 'running', detail: '', createdAt: new Date().toISOString(), modelCalls: 0, stages: [], patchBytes: 0 }]; return route.fulfill({ status: 202, json: data.runs[0] });
   });
   await page.route('**/api/factory/workspaces/*/cancel', route => { data.runs[0].status = 'cancelled'; data.runs[0].detail = 'Run cancelled'; return route.fulfill({ status: 204 }); });
-  await page.goto('/factory'); const panel = page.getByRole('region', { name: 'Agent workflow execution', exact: true });
+  await page.goto('/factory'); await page.locator('.factory-workflow-summary').click(); const panel = page.getByRole('region', { name: 'Agent workflow execution', exact: true });
   await expect(panel.getByRole('textbox')).toHaveCount(1); await expect(panel.getByLabel('Commit or branch')).toHaveValue('HEAD');
   await panel.getByRole('button', { name: 'Run', exact: true }).click(); await panel.getByRole('button', { name: 'Cancel run' }).click();
-  await expect(panel.getByText('Run cancelled', { exact: true })).toBeVisible(); await page.reload(); await expect(panel.getByText('Run cancelled', { exact: true })).toBeVisible(); expect(posts).toBe(1);
+  await expect(panel.getByText('Run cancelled', { exact: true })).toBeVisible(); await page.reload(); await page.locator('.factory-workflow-summary').click(); await expect(panel.getByText('Run cancelled', { exact: true })).toBeVisible(); expect(posts).toBe(1);
 });
 
 test('call limit is saved once in execution settings, not repeated under workflows', async ({ page }) => {
