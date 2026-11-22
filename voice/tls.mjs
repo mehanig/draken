@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Creates a private local CA and LAN certificate. Does NOT install trust or open a firewall.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

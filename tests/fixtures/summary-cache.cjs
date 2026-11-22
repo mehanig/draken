@@ -1,5 +1,3 @@
-// Frozen synthetic v1/v2 persisted data. Do not regenerate these keys through
-// current SummaryTree methods: changing historical lookup must fail the test.
 const records = [
   { type: 'session', version: 3, id: 'frozen-cache-proof', cwd: '/synthetic/cache-compatibility', timestamp: '2026-01-01T00:00:00.000Z' },
   { type: 'message', id: 'question', parentId: null, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'user', content: 'Check the export tests.' } },

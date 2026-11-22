@@ -25,9 +25,6 @@ async function start(page: Page) {
   await expect(page).toHaveURL(/\/syncs\/\d+\/chat$/);
   await expect(page.getByRole('textbox', { name: 'Message Draken' })).toBeEnabled({ timeout: 20000 });
   const id = Number(new URL(page.url()).pathname.split('/')[2]);
-  // This shared fixture opts out of background indexing. These tests assert H
-  // citations for the just-created project, so explicitly index its new tail;
-  // opening a real chat now adopts the last completed background receipt.
   expect((await page.request.post(`/api/syncs/${id}/prepare-call`)).ok()).toBe(true);
   await expect.poll(async () => (await (await page.request.get(`/api/syncs/${id}/chat-readiness`)).json()).ready).toBe(true);
   return id;

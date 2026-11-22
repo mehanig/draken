@@ -34,8 +34,6 @@ export class ReplyContinuation {
     // A final transcript PART is not necessarily the end of an answer: V3
     // also emits short backchannels. Neither those nor a lookup promise is the
     // requested explanation.
-    // Be conservative: do not re-prompt a normal factual reply, or use a second
-    // model to judge it. The live prompt defaults to English.
     const plain = text.trim().replace(/[’‘]/g, "'").replace(/[‐‑‒–—]/g, '-');
     if (!plain) { this.schedule(); return; }
     const social = /^(?:(?:thanks|thank you|okay|ok|got it|yes|no|yep|nope|hello|hi|hey|bye|goodbye)(?: draken)?)[.!…\s]*$/i.test(this.question().trim());
@@ -46,9 +44,6 @@ export class ReplyContinuation {
       /^(?:checking|searching|looking it up|okay|ok|sure(?: thing)?|alright|all right|got it|understood|certainly|you bet|will do|on it|one (?:moment|second|sec)|(?:hold|hang) on|mm[- ]?hmm|uh[- ]?huh|hmm|mhm)[.!?…]*$/i.test(plain)
     );
     if (!acknowledgement) { this.cancel(); return; }
-    // An acknowledgement can be in flight before the cue, or its completion
-    // event can be repeated. Neither is permission for another cue or a reason
-    // to discard an explanation still arriving. The fixed deadline stays armed.
     this.acknowledged = true;
     this.schedule();
   }
@@ -64,8 +59,6 @@ export class ReplyContinuation {
   private schedule() {
     if (this.finished || this.sent || !this.ready || !this.input || this.busy) return;
     clearTimeout(this.timer);
-    // Let a direct response start normally. An already completed acknowledgement
-    // needs only a small event-ordering grace, not another user prompt.
     this.timer = setTimeout(() => {
       if (this.finished || this.sent || this.busy) return;
       this.sent = true;

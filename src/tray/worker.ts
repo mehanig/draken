@@ -8,7 +8,6 @@ import { nativeTray, TrayHelper } from './native';
 import { launchServer, openBrowser } from './processes';
 import { assertTrayDesktop } from './launcher';
 
-// This library supplies heartbeat locks and stale-lock recovery across both OSes.
 const lockfile: { lock(file: string, options: { stale: number; update: number; retries: number; onCompromised(error: Error): void }): Promise<() => Promise<void>> } = require('proper-lockfile');
 
 export async function runTrayWorker(helperFactory = nativeTray, checkDesktop = assertTrayDesktop): Promise<void> {
@@ -27,7 +26,7 @@ export async function runTrayWorker(helperFactory = nativeTray, checkDesktop = a
       if (fs.existsSync(file) && fs.lstatSync(file).isSymbolicLink()) return;
       fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW || 0), 0o600);
       fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, message.slice(0, 2000) + '\n');
-    } catch { /* Do not hide primary failure. */ } finally { if (fd !== undefined) fs.closeSync(fd); }
+    } catch {} finally { if (fd !== undefined) fs.closeSync(fd); }
   };
   let view: TrayView = { phase: 'starting', title: 'Draken — Starting tray', detail: 'Checking the server', canOpen: false, canStart: false, canStop: false, owned: false };
   let quit = false;
@@ -42,7 +41,7 @@ export async function runTrayWorker(helperFactory = nativeTray, checkDesktop = a
     quitting = (async () => {
       if (controller && !await controller.close()) { errorLog('Owned server shutdown was not confirmed. No replacement was started.'); return; }
       clearInterval(heartbeat); clearInterval(poll); quit = true;
-      try { publish(); } catch { /* Helper also has a heartbeat timeout. */ }
+      try { publish(); } catch {}
       await helper?.close();
       try { await release?.(); } catch { errorLog('Tray lock release could not be confirmed; stale-lock recovery remains available.'); }
       release = undefined;
@@ -66,8 +65,6 @@ export async function runTrayWorker(helperFactory = nativeTray, checkDesktop = a
     });
     await helper.ready;
     if (!process.connected) throw new Error('Tray launch was cancelled before readiness');
-    // Preserve external-server presentation across address overrides instead of
-    // attempting a competing launch. The server enforces directory exclusion.
     controller = new TrayController({ target: () => recordedServerTarget() || serverTarget(), configured: configuredServerTarget, probe: probeServer,
       launch: () => launchServer(path.join(directory, 'server.log')), open: openBrowser,
       changed: value => { view = value; publish(); } });

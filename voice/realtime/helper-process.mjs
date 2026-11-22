@@ -9,8 +9,6 @@ export class NativeHelperProcess {
   #killTimer;
   constructor(binary, args, { cwd, env, spawnProcess = spawn, stdio = ['pipe', 'pipe', 'pipe'] } = {}) {
     this.child = spawnProcess(binary, args, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio });
-    // Piped diagnostics can contain credentials/transcripts; never log them.
-    // Explicit terminal setup/login commands instead inherit the operator's IO.
     this.child.stderr?.resume();
     this.child.on('error', () => this.close());
     this.child.on('close', () => {
@@ -39,9 +37,9 @@ export class NativeHelperProcess {
   }
   #terminate(signal) {
     if (process.platform !== 'win32' && Number.isInteger(this.child.pid) && this.child.pid > 1) {
-      try { process.kill(-this.child.pid, signal); return; } catch { /* Confirmation remains separate. */ }
+      try { process.kill(-this.child.pid, signal); return; } catch {}
     }
-    try { this.child.kill(signal); } catch { /* An unsuccessful signal is not proof of exit. */ }
+    try { this.child.kill(signal); } catch {}
   }
   close() {
     if (this.#closing) return;

@@ -16,7 +16,6 @@ router.get('/status', route(async (_req, res) => res.json({
 })));
 router.get('/certificate', route((_req, res) => {
   if (!process.env.DRAKEN_TLS_CA) throw new HttpError(404, 'No local certificate download is configured');
-  // Re-encode only the public certificate; never serve a key or an arbitrary source file.
   const certificate = new X509Certificate(fs.readFileSync(process.env.DRAKEN_TLS_CA));
   res.set({ 'Content-Type': 'application/x-x509-ca-cert', 'Content-Disposition': 'attachment; filename="draken-local-root.crt"', 'X-Content-Type-Options': 'nosniff' });
   res.send(certificate.raw);

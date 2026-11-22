@@ -14,7 +14,7 @@ async function end() {
   try {
     const response = await fetch('/end', { method: 'POST', signal: AbortSignal.timeout(5000) });
     result.helperCleanup = response.ok && (await response.json()).helperExited === true;
-  } catch { /* Lab lease is the final guard; do not claim confirmed helper cleanup. */ }
+  } catch {}
   if (!result.helperCleanup) result.success = false;
   result.completed = true; endButton.disabled = true; status.textContent = result.success ? 'Synthetic exchange passed. Account quota and human-device behaviour still need testing.' : 'Test ended; see the private structural report.';
 }
@@ -27,8 +27,6 @@ startButton.onclick = async () => {
     context = new AudioContext(); await context.resume();
     if (finished) throw new Error('Test cancelled before audio setup.');
     const input = context.createMediaStreamDestination();
-    // A real microphone continues sending silence between utterances. Keep
-    // the synthetic source active too, rather than ending its audio graph.
     const silence = context.createConstantSource(); silence.offset.value = 0; silence.connect(input); silence.start();
     peer = new VoicePeer({ onClose: () => { if (!finished) { result.errors.push('Media connection closed.'); void end(); } }, onEvent: event => {
       const type = typeof event.type === 'string' ? event.type : 'unknown';

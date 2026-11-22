@@ -1,5 +1,3 @@
-/* Native menu-bar helper, run by /usr/bin/osascript -l JavaScript.
- * No Apple Events to other apps, shell commands, provider state or network access. */
 ObjC.import('AppKit');
 ObjC.import('Foundation');
 

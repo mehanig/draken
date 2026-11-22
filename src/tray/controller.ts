@@ -42,8 +42,6 @@ export class TrayController {
   }
   async initialize() {
     await this.poll();
-    // A fresh install may launch immediately. A saved but stopped instance
-    // requires an explicit Start click, using this invocation's environment.
     if (this.view.canStart && !this.ops.target().instance) await this.act('start');
   }
   poll(): Promise<void> {
@@ -58,7 +56,7 @@ export class TrayController {
     try { target = this.child && this.target ? this.target : this.ops.target(); }
     catch { this.set('error', 'Cannot read the saved server address. Check draken status.'); return; }
     let live = false;
-    try { await this.ops.probe(target); live = true; } catch { /* Stopped, stale or unavailable; never infer readiness. */ }
+    try { await this.ops.probe(target); live = true; } catch {}
     if (this.busy || this.closing || epoch !== this.epoch) return;
     this.target = target;
     if (live) {
@@ -71,7 +69,7 @@ export class TrayController {
         const configured = this.ops.configured();
         compatible = configured.url === target.url && configured.open === target.open
           || Boolean(this.previousOwned?.instance && this.previousOwned.instance === target.instance && this.previousOwned.url === target.url && this.previousOwned.open === target.open);
-      } catch { /* Invalid launch configuration. */ }
+      } catch {}
       this.set(this.failure ? 'error' : 'stopped', this.failure || (this.foreign ? 'Existing server stopped. Restart it with its original launcher.'
         : compatible ? 'Start uses the environment supplied to draken tray.' : 'Saved server has different settings. Use its original launch configuration.'),
       { canStart: compatible && !this.foreign });
@@ -91,7 +89,7 @@ export class TrayController {
     }
     if (action === 'start') {
       if (!this.view.canStart) return;
-      await this.poll(); // Another launcher may have started while the menu was open.
+      await this.poll();
       if (!this.view.canStart || this.closing) return;
       this.failure = ''; this.busy = true; ++this.epoch; this.set('starting');
       let child: OwnedServer | undefined;

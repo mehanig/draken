@@ -1,5 +1,3 @@
-/* Signature palette and geometry shared with GifGun's visualTheme.css.
-   Keep surfaces square, shadows hard, headings bold, and reading text quiet. */
 :root {
   font-family: "Avenir Next", Futura, "Century Gothic", "Arial Narrow", Arial, sans-serif;
   font-synthesis: none;
@@ -24,7 +22,6 @@
   --concrete-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='4' seed='8' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='table' tableValues='0 .32'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
 }
 
-/* Base and keyboard interaction */
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -55,7 +52,6 @@ p { line-height: 1.7; }
 .small { font-size: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
-/* App frame */
 .header { min-height: 84px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px max(24px, calc((100vw - 1550px) / 2 + 24px)); border-bottom: 2px solid var(--line); background: var(--panel); }
 .brand { display: flex; align-items: center; gap: 14px; }
 .brand img { width: 44px; height: 44px; object-fit: contain; }
@@ -108,7 +104,6 @@ p { line-height: 1.7; }
 .source-cwd { display: block; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; color: var(--muted); font-size: 11px; margin: 5px 0; }
 .session-source .small { font-size: 10px; }
 
-/* Sync heading and overview */
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
 .page-heading > div { min-width: 0; }
 .page-heading > .btn { flex-shrink: 0; }
@@ -116,7 +111,6 @@ p { line-height: 1.7; }
 .page-heading p { font-size: 13px; margin-bottom: 0; }
 .eyebrow { display: inline-block; padding: 6px 8px; border: 1px solid var(--line); background: var(--yellow); font-size: 10px; font-weight: 900; letter-spacing: .1em; }
 
-/* Square controls, hard offset shadows */
 .btn { display: inline-flex; justify-content: center; align-items: center; gap: 9px; min-height: 42px; padding: 11px 16px; border: 2px solid var(--line); font-size: 11px; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; line-height: 1.4; }
 .btn svg, .icon-button svg { flex-shrink: 0; }
 .btn-primary { color: #fff; background: var(--accent); box-shadow: 4px 4px 0 var(--ink); }
@@ -128,7 +122,6 @@ p { line-height: 1.7; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; border: 2px solid var(--line); padding: 7px; background: var(--panel); color: var(--ink); }
 .btn:active:not(:disabled), .icon-button:active:not(:disabled) { transform: translate(1px, 1px); box-shadow: none; }
 
-/* Main surfaces */
 .card { background: var(--panel); border: 2px solid var(--line); padding: 26px; margin-bottom: 28px; box-shadow: 6px 6px 0 var(--surface-muted); }
 .briefing-card, .welcome { box-shadow: 8px 8px 0 var(--accent); }
 .welcome { text-align: center; padding: 40px 30px; }
@@ -143,7 +136,6 @@ p { line-height: 1.7; }
 .citation { display: inline; background: var(--panel); border: 1px solid var(--blue); color: var(--blue); font-size: 12px; font-weight: 800; padding: 2px 5px; vertical-align: baseline; margin: 0 2px; }
 .citation:hover { background: var(--yellow); }
 
-/* Discussion and decisions: normal-case, readable long-form text */
 .discussion { box-shadow: 6px 6px 0 var(--ink); }
 .message { padding: 16px 18px; margin: 16px 0; border: 1px solid var(--rule); border-left: 4px solid var(--accent); background: var(--panel); }
 .message.user { background: var(--paper); border-left-color: var(--blue); }
@@ -156,7 +148,6 @@ p { line-height: 1.7; }
 .notes-grid label { font-size: 12px; font-weight: 800; }
 .notes-grid textarea { margin-top: 9px; font-size: 13px; min-height: 165px; }
 
-/* Feedback retains text labels, not just color */
 .alert { padding: 14px 16px; border: 2px solid var(--line); border-left-width: 6px; font-size: 12px; line-height: 1.7; margin-bottom: 20px; overflow-wrap: anywhere; color: var(--ink); }
 .alert.error { background: var(--danger-surface); border-left-color: var(--red); }
 .alert.warning { background: var(--warning-surface); border-left-color: var(--yellow); }
@@ -165,7 +156,6 @@ summary { cursor: pointer; }
 .spinner { width: 18px; height: 18px; flex-shrink: 0; display: inline-block; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Inspectable summary tree */
 .tree-card progress, .history-progress progress { appearance: none; display: block; width: 100%; height: 14px; border: 2px solid var(--line); border-radius: 0; background: var(--paper); accent-color: var(--accent); }
 .tree-card progress::-webkit-progress-bar, .history-progress progress::-webkit-progress-bar { background: var(--paper); }
 .tree-card progress::-webkit-progress-value, .history-progress progress::-webkit-progress-value { background: var(--accent); }
@@ -185,7 +175,6 @@ summary { cursor: pointer; }
 .node-observation > strong { font-size: 13px; }
 .node-observation .prose { font-size: 13px; margin-top: 10px; }
 
-/* Original evidence stays neutral and legible */
 .role-label { font-size: 10px; color: var(--muted); }
 .evidence-body { border-top: 1px solid var(--rule); padding: 16px; }
 dl { display: grid; grid-template-columns: 75px minmax(0, 1fr); font: 11px ui-monospace, monospace; gap: 8px; line-height: 1.8; }
@@ -194,7 +183,6 @@ dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospace, monospace; color: var(--ink); max-height: 550px; overflow-y: auto; }
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; font-size: 11px; color: var(--muted); }
 
-/* Auth uses the same identity without adding a new login requirement */
 .app-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 15px; color: var(--ink); font-weight: 800; }
 .login-page { min-height: 100vh; display: grid; place-items: center; padding: 28px; }
 .login-card { background: var(--panel); border: 2px solid var(--line); box-shadow: 10px 10px 0 var(--accent); padding: 36px; width: min(100%, 420px); }
@@ -211,7 +199,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .login-error { display: flex; gap: 9px; align-items: center; color: var(--ink); background: var(--danger-surface); border-left: 4px solid var(--red); padding: 12px; font-size: 12px; margin-bottom: 20px; }
 .login-error svg { flex-shrink: 0; }
 
-/* Text chat shares the sync, without mounting the audio/call surface. */
 .conversation-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .text-chat { padding: 24px; }
 .chat-heading { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -246,7 +233,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
   .conversation-actions > .btn { flex: 1; }
 }
 
-/* Voice is a focused call surface, not another settings dashboard. */
 .voice-entry { padding: 20px 24px; }
 .voice-entry-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .voice-entry-main > div:nth-child(2) { flex: 1; min-width: 180px; }
@@ -301,7 +287,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
 .voice-footer { display: flex; justify-content: center; align-items: center; gap: 7px; margin-top: 20px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .voice-footer svg { flex-shrink: 0; }
 
-/* Conversation-first home: compact history, detail pages own the working surfaces. */
 .brand { color: inherit; text-decoration: none; }
 .sync-home, .sync-detail { width: min(100%, 1060px); margin: auto; padding: 40px 30px 72px; min-width: 0; }
 .sync-detail { width: min(100%, 1180px); }
@@ -353,7 +338,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 ui-monospac
   .recap-card .section-heading { flex-wrap: wrap; }
 }
 
-/* Responsive surfaces: keep shadows inside the available gutters */
 @media (max-width: 1100px) {
   .page-heading { align-items: flex-start; flex-direction: column; gap: 20px; }
 }

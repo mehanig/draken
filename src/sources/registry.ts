@@ -17,7 +17,6 @@ export function getSourceRoots(): SourceRoots {
   };
 }
 export function sourceRoots(value: RootInput = getSourceRoots()): SourceRoots {
-  // An explicit legacy/test root grants access only to that pi directory.
   if (typeof value === 'string') return { pi: [path.resolve(value)], codex: [], claude: [] };
   if (!value || AGENTS.some(agent => !Array.isArray(value[agent]) || value[agent].some(root => typeof root !== 'string' || !path.isAbsolute(root)))) throw new Error('Invalid agent source roots');
   return value;

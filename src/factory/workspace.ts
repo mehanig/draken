@@ -79,7 +79,7 @@ export async function workspaceLog(id: string): Promise<{ text: string }> {
   const file = path.join(root(), id, 'work/events.jsonl'); let text = '';
   if (fs.existsSync(file)) for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
     try { const event = JSON.parse(line); if (event.type === 'stage-result') text = (text + `\n${event.name} — exit ${event.code}\n${event.stdout || ''}${event.stderr || ''}`).slice(-64000); }
-    catch { /* Last record may still be being written. */ }
+    catch {}
   }
   const agent = read<{summary?: string; detail?: string}>(path.join(root(), id, 'work/agent/result.json'));
   const enriched = read<{guidance: unknown; requirements: string[]}>(path.join(root(), id, 'work/agent/enrichment.json'));

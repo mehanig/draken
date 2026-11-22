@@ -30,8 +30,6 @@ let active: { controller: AbortController; done: Promise<void>; working: boolean
 export function cancelSummaryPreparation(): Promise<void> {
   const prior = active;
   prior?.controller.abort();
-  // Return the owned promise, not a detached rejecting wrapper. The scheduler
-  // retains its rejection handler even when a synchronous setter only aborts.
   return prior?.done || Promise.resolve();
 }
 
@@ -117,9 +115,6 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
     try {
       check();
       const db = getDb();
-      // Startup recovery is responsible for interrupted ownership. A running row
-      // with no process-local job can also mean failure metadata could not be
-      // committed. Never silently replace that run with a fresh allowance.
       const orphan = db.prepare("SELECT id,invocations,max_invocations FROM background_runs WHERE status='running' LIMIT 1").get() as Run | undefined;
       if (orphan) { run = orphan; throw new Error('Background ownership was not recovered'); }
       const input = processLeaves ? { items: [], context: [], models: defaultModels() } : previewSummaryInput(); assertEvidenceAvailable(input);
@@ -131,7 +126,6 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       check();
       run = db.prepare(`SELECT id,invocations,max_invocations FROM background_runs WHERE input_key=?
         AND (status IN ('cancelled','interrupted') OR (?=1 AND status='completed')) ORDER BY id DESC LIMIT 1`).get(key, Number(summariesReady)) as Run | undefined;
-      // Never resurrect an older interrupted allowance after an explicitly retried attempt.
       const latest = db.prepare('SELECT id FROM background_runs WHERE input_key=? ORDER BY id DESC LIMIT 1').get(key) as { id: number } | undefined;
       if (run && latest?.id !== run.id) run = undefined;
       if (run) {
@@ -144,8 +138,6 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       }
       owner.working = true; onWork?.();
       const tree = SummaryTree.forBackground(input, run.id, controller.signal);
-      // Recheck at the last boundary before *each* provider call, including repairs
-      // and reconciliation after an await. Route-level yielding also drains this owner.
       const call = tree.call.bind(tree);
       tree.call = async (payload, system, final = false) => {
         check();
@@ -161,8 +153,6 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
         check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
       }, controller.signal);
       check();
-      // This receipt describes the captured input, not later arrivals. Verify its
-      // originals and permissions without rebuilding the entire live snapshot.
       tree.verifyFinal();
       if (JSON.stringify(defaultModels()) !== JSON.stringify(input.models)) { controller.abort(); throw new Error('Models changed'); }
       const cacheReceipt = tree.cacheReceipt();
@@ -173,7 +163,6 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       const db = getDb();
       const counters = run && db.prepare('SELECT invocations,max_invocations FROM background_runs WHERE id=?').get(run.id) as Run | undefined;
       const cancelled = controller.signal.aborted;
-      // Exhausted cancellations are also blocked: do not spin a quota 409 every minute.
       const exhausted = Boolean(counters && counters.invocations >= counters.max_invocations);
       const status = cancelled && !exhausted ? 'cancelled' : 'failed', at = new Date().toISOString();
       db.transaction(() => {

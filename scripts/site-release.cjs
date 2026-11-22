@@ -1,4 +1,3 @@
-// Keep published-version website copy behind npm publication, not ahead of it.
 const fs = require('node:fs');
 const path = require('node:path');
 function validateCopy(version, html) {

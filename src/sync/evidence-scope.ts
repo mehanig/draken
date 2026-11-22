@@ -33,9 +33,6 @@ export class EvidenceScope {
     for (const item of initial) {
       const [exact, reduced] = evidenceIdentities(item);
       this.frozen.add(exact);
-      // Deployed bounded BG can omit sequence while using exactly the same
-      // captured bytes/projection and attribution. It supplies less metadata,
-      // not a new dependency. A different supplied sequence is NOT exempt.
       this.frozen.add(reduced);
     }
     this.consent = db.prepare(`SELECT agent FROM agent_sessions s WHERE id=?

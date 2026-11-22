@@ -53,7 +53,7 @@ export function migratePointers(db: Database.Database): void {
             const entry = normalizeEntry(pointer.value);
             if (entry) found.set(entry.entry_id, { record_offset: pointer.record_offset, record_bytes: pointer.record_bytes, record_hash: pointer.record_hash, entry });
           }
-        } catch { found.clear(); } // Retain old text when a source cannot be safely verified.
+        } catch { found.clear(); }
         finally { if (fd !== undefined) fs.closeSync(fd); }
         const byId = new Map(originals.filter(row => row.present).map(row => [row.entry_id, row]));
         const branch: any[] = [], visited = new Set<string>(), edits = new Map<string, any>();

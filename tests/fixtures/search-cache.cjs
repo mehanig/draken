@@ -1,8 +1,3 @@
-// Synthetic historical v1 search inputs, independent of the live passage recipe.
-// Counts below are UTF-16 code units, NOT code points. Keep the bodies, offsets,
-// framing and IEEE-754 little-endian bytes fixed when production indexing changes.
-// Hash literals captured once with node:crypto from these fixed bodies and
-// fingerprint + NUL framing, not from production indexing or passages().
 const fingerprint = 'synthetic-frozen-search-v1';
 const records = [
   { session: 'frozen-multi', title: 'Frozen search', role: 'assistant',
@@ -16,7 +11,6 @@ const chunks = [
   { session: 'frozen-multi', offset: 700, keep: true,
     body: 'Frozen search\nassistant\n\ude00' + 'b'.repeat(699) + '😀' + 'c'.repeat(48),
     hash: 'eecd8d34e11918969865cf1e6a69df15313803b61b92e64f584215869fca7269', bytes: '0000003f' + '00000000'.repeat(383) },
-  // This 50-unit tail is already covered by the preceding 750-unit window.
   { session: 'frozen-multi', offset: 1400, keep: false,
     body: 'Frozen search\nassistant\n😀' + 'c'.repeat(48),
     hash: '2f7f371e173c2401553c4443cf68280c5264db0b85858379ad3506e5e615c96e', bytes: '0000803e' + '00000000'.repeat(383) },

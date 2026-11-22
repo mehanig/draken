@@ -22,23 +22,16 @@ export class HistoryIndex {
   constructor(private db: Database.Database, private source: Database.Database, private model: Embedder, private root: RootInput = getSourceRoots()) {
     vec.load(db);
     db.pragma('foreign_keys = ON'); db.pragma('journal_mode = WAL'); db.pragma('busy_timeout = 5000');
-    // Cap retained journal high-water space after checkpoints, not active work.
     db.pragma('journal_size_limit = 4194304');
     const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get();
     db.transaction(() => {
       initHistoryStorage(db, model.fingerprint);
-      // A newly created cache has a known empty baseline even if its first
-      // preparation is interrupted. Existing caches must not be guessed empty.
       if (fresh) saveSourceCheckpoint(db, new Map());
     })();
   }
-  /** Change only derived delta rows. Revalidate sources on every search/read so an
-   * exclusion, edit, source removal or discard cannot leak through stale vectors. */
   private refresh(addNew = true) {
     const current = new Map<string, SourceRecord>();
     this.source.transaction(() => this.db.transaction(() => {
-      // Age is a preparation policy, not deletion. Keep old vectors and citation
-      // metadata; direct reads still verify permissions and original bytes.
       const inactive = new Set((this.source.prepare(`SELECT s.id FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND COALESCE(${recentSession('s')},0)=0`).all() as { id: string }[]).map(row => row.id));
       const retained = new Set((this.db.prepare('SELECT ref,session_id FROM records').all() as { ref: string; session_id: string | null }[]).filter(row => row.session_id && inactive.has(row.session_id)).map(row => row.ref));
       const existing = new Set((this.db.prepare('SELECT ref FROM records').all() as { ref: string }[]).map(row => row.ref));
@@ -70,8 +63,6 @@ export class HistoryIndex {
    * during this lookup belong to the next one rather than a partial keyword mode. */
   async prepare(scope: Partial<HistoryQuery> = {}, report?: ReportHistory, checkpoint = !scope.session_id && !scope.session_ids && !scope.kind && !scope.sync_id && !scope.before) {
     report?.(historyUpdate('scanning'));
-    // Scoped lookups cannot claim global background coverage. Capture the
-    // candidate metadata before inference; later source changes stay pending.
     const before = scope.before || new Date().toISOString();
     const stamps = checkpoint ? sourceStamps(this.source, before) : undefined;
     const readiness = checkpoint ? historyStamp(this.source, before, this.root) : undefined;
@@ -127,8 +118,6 @@ export class HistoryIndex {
         if (!validEmbedding(vector)) throw new Error('Invalid embedding');
         return Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
       });
-      // Wall time per completed passage reflects parallel throughput. Exclude
-      // the first batch's cold model load and count only committed delta work.
       if (computed) { const ms = (Date.now() - start) / batch.length; meanMs = measured ? meanMs * 0.9 + ms * 0.1 : ms; measured += batch.length; }
       computed += batch.length;
       batch.forEach((group, i) => pending.push({ id: group.id, embedding: embeddings[i] }));
@@ -137,7 +126,6 @@ export class HistoryIndex {
     commit(); notify('indexing'); this.refresh(false);
     finish();
   }
-  /** Resolve only selected prepared records. No corpus scan or index writes. */
   private loadPrepared(ref: string, scope: Partial<HistoryQuery>) {
     if (this.current.has(ref)) return true;
     const cached = this.db.prepare('SELECT json FROM records WHERE ref=?').get(ref) as { json: string } | undefined;
@@ -158,8 +146,6 @@ export class HistoryIndex {
     if (!this.modelPrepared || !this.model.ready()) { await this.model.setup(report, allowDownload); this.modelPrepared = true; }
   }
   private keywords(match: string, condition: string, args: (string | number)[], limit = 80): Chunk[] {
-    // Aliases and repeated reads share passages. Deduplicate *before* the top-k
-    // limit or eighty copies of one passage can erase every alternative hit.
     return this.db.prepare(`WITH hits AS MATERIALIZED (
       SELECT c.id,c.ref,c.offset,c.passage_id,r.at,bm25(words) relevance FROM words
       JOIN chunk_links c ON c.id=words.rowid JOIN passages p ON p.id=c.passage_id JOIN records r ON r.ref=c.ref
@@ -194,8 +180,6 @@ export class HistoryIndex {
     const searches = [query.question, ...(query.topics || []).slice(0, 2)];
     const embeddings: Float32Array[] = [];
     for (const question of searches) embeddings.push(await this.model.embed(cleanText(question, 2000), true));
-    // Prune exclusions/edits again after inference without admitting unembedded
-    // arrivals. All returned candidates have both lexical and semantic coverage.
     if (preparedOnly) this.current.clear();
     else this.refresh(false);
     filter = this.filter(query);
@@ -238,7 +222,6 @@ export class HistoryIndex {
       if (!item || !this.admitted(item, query) || !chunk) throw new Error('Historical reference is outside this lookup scope or is not prepared.');
       add(chunk);
     }
-    // Alternate search lists instead of assigning role, age or keyword bonuses.
     while (results.length < limit && lists.some(list => list.length)) {
       for (const list of lists) {
         const count = results.length;

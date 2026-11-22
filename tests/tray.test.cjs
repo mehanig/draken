@@ -122,8 +122,6 @@ test('native helper loss shuts down an owned server, but quitting while attached
   await isolated();process.env.DRAKEN_TRAY_TEST_ACTION=path.join(root,'action');
   const server=external?launchServer(path.join(root,'external.log')):undefined;
   const original=server?await server.ready:undefined;
-  // An override must not conceal the existing server and start a second listener
-  // against the same database (and run recovery on its active work).
   const childEnv={...process.env};if(external)childEnv.DRAKEN_PORT=String(Number(childEnv.DRAKEN_PORT)===65535?65534:Number(childEnv.DRAKEN_PORT)+1);
   const child=spawn(process.execPath,[path.join(__dirname,'fixtures/fake-tray-worker.cjs')],{env:childEnv,stdio:['ignore','ignore','ignore','ipc'],windowsHide:true});
   const exited=new Promise(resolve=>child.once('exit',resolve));

@@ -5,7 +5,6 @@ export function digest(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-// Stable across sync-local E/C references, but changes when a context edit changes the excerpt.
 const sourceKeys = new WeakMap<Evidence, { event: string; text: string; key: string }>();
 export function sourceKey(item: Evidence): string {
   if (item.unavailable && /^K[a-f0-9]{20}$/.test(item.source_key || '')) return item.source_key!;
@@ -52,7 +51,6 @@ function contentText(content: unknown, version: NormalizationVersion): string {
     if (!block || typeof block !== 'object') continue;
     if (block.type === 'text' && typeof block.text === 'string') blocks.push(block.text);
     if (block.type === 'toolCall') {
-      // Capture intent/paths, not write-file contents or arbitrary tool payloads.
       const args = block.arguments || {};
       const selected: Record<string, unknown> = {};
       for (const key of ['path', 'file_path', 'command', 'pattern', 'query', 'description']) {
@@ -60,7 +58,6 @@ function contentText(content: unknown, version: NormalizationVersion): string {
       }
       blocks.push(`Tool requested: ${String(block.name)} ${JSON.stringify(selected)}`);
     }
-    // Never index thinking, signatures, image/audio data, or system instructions.
   }
   return cleanText(blocks.join('\n'), 6000, version);
 }
@@ -104,7 +101,6 @@ export function normalizeEntry(entry: any, version: NormalizationVersion = 2): N
     isActivity = Boolean(text);
   } else if (type === 'compaction' || type === 'branch_summary') {
     text = cleanText(typeof entry.summary === 'string' ? entry.summary : '', 6000, version);
-    // Summaries are background, never new accomplishments.
   }
   const timestamp = typeof entry.timestamp === 'string' ? entry.timestamp : '';
   const parentId = typeof entry.parentId === 'string' ? entry.parentId : null;
@@ -115,7 +111,6 @@ export function normalizeEntry(entry: any, version: NormalizationVersion = 2): N
     type,
     role,
     text: cleanText(text, 6000, version),
-    // Forks copy entries. Identity across sessions prevents re-briefing inherited history.
     event_key: digest(JSON.stringify([entry.id, parentId, timestamp, type, role, text])),
     is_activity: Number(isActivity),
     target_id: type === 'context_edit' && typeof entry.targetId === 'string' ? entry.targetId : null,

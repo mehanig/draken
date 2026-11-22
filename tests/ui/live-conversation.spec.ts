@@ -80,7 +80,6 @@ test('an ended metadata response survives a later stale initial snapshot respons
   const { state, observed, releaseFull } = await fixture(page, true);
   state.ended_at = new Date().toISOString(); await page.clock.runFor(3100);
   await expect.poll(() => observed.endedReads).toBeGreaterThan(0);
-  // Keep the original full response blocked while the metadata body is consumed.
   await page.waitForTimeout(100); releaseFull();
   await expect(page.getByRole('button', { name: 'Start a new sync', exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Message Draken' })).toHaveCount(0);

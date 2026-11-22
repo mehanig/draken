@@ -1,4 +1,3 @@
-// Opt-in native-provider/UI qualification, synthetic facts and injected audio only.
 const checkOnly = process.argv.includes('--check');
 if (!checkOnly && !process.argv.includes('--allow-provider')) throw Error('Use --check for fixture readiness, or --allow-provider for native ChatGPT voice.');
 process.umask(0o077);
@@ -10,7 +9,7 @@ Object.assign(process.env, { DRAKEN_DATA_DIR: root, DRAKEN_PI_SESSIONS_DIR: path
 delete process.env.DRAKEN_CODEX_BIN; delete process.env.DRAKEN_CODEX_HOME;
 process.env.DRAKEN_PI_BIN = path.join(root, 'fake-pi');
 fs.copyFileSync(path.join(__dirname, 'fixtures/fake-pi.cjs'), process.env.DRAKEN_PI_BIN); fs.chmodSync(process.env.DRAKEN_PI_BIN, 0o700);
-process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/cheap'; // Only the post-call recap uses this synthetic provider.
+process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/cheap';
 require('./fixtures/fake-memory.cjs');
 const schema = require('../dist/db/schema'), live = require('../dist/voice/live');
 let server, browser, page, timer; const errors = [];
@@ -72,7 +71,6 @@ let server, browser, page, timer; const errors = [];
   await expect(status).toHaveText('Draken is speaking', { timeout: 40000 }); const firstAudioMs = Date.now() - firstInputEnd;
   await page.waitForFunction(() => Number(document.querySelector('.dp-canvas')?.dataset.mouth) > 3, null, { timeout: 15000 });
   const mouthMoved = true;
-  // Barge in while the first real provider reply is audible, same connection.
   await page.evaluate(() => window.__speak()); const secondInputEnd = Date.now();
   await expect.poll(() => db.prepare("SELECT COUNT(*) AS n FROM live_messages WHERE role='user'").get().n, { timeout: 30000 }).toBeGreaterThanOrEqual(2);
   await expect.poll(() => db.prepare("SELECT COUNT(*) AS n FROM live_messages WHERE role='assistant' AND status <> 'streaming'").get().n, { timeout: 50000 }).toBeGreaterThanOrEqual(2);

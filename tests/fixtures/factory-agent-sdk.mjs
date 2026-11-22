@@ -1,4 +1,3 @@
-// Deterministic SDK fixture, not a provider or actual SDK compatibility proof.
 import fs from 'node:fs';
 import path from 'node:path';
 export const SettingsManager={inMemory:value=>value};

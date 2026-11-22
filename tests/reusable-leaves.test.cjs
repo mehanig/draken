@@ -22,7 +22,7 @@ beforeEach(() => {
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(temp, 'state'), DRAKEN_PI_SESSIONS_DIR: root, DRAKEN_PI_BIN: fake,
     DRAKEN_PI_SUMMARY_MODEL: LUNA, DRAKEN_PI_FINAL_MODEL: FINAL, DRAKEN_FAKE_CONTROL: control, DRAKEN_TEST_CALL_LOG: log });
   delete process.env.DRAKEN_PI_MAX_INVOCATIONS;
-  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
 });
 afterEach(() => { closeDb(); fs.rmSync(temp, { recursive: true, force: true }); });
 const calls = () => fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
@@ -69,7 +69,6 @@ for (const deployed of [false, true]) test(`expired unreviewed snapshots combine
   const oldKeys = getDb().prepare("SELECT key FROM summary_cache WHERE kind='chunk'").all().map(row => row.key); assert.equal(oldKeys.length, 2);
   if (deployed) getDb().exec('DELETE FROM summary_leaf_inputs');
   expire(); append(data, 3); const third = await start(); assert.equal(third.items.length, 25);
-  // Different E labels and a process/db restart cannot change paid-work identity.
   for (const row of getDb().prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(third.id)) {
     const value = JSON.parse(row.evidence_json); value.ref = `E${10000 + Number(value.ref.slice(1))}`;
     getDb().prepare('UPDATE sync_items SET evidence_json=? WHERE sync_id=? AND event_key=?').run(JSON.stringify(value), third.id, row.event_key);
@@ -164,8 +163,6 @@ test('full background dependencies omitted by citations remain verified, persist
   ], limitations: [] };
   getDb().prepare('UPDATE summary_cache SET output_json=? WHERE key=?').run(JSON.stringify(qualified), old);
   getDb().exec('DELETE FROM summary_leaf_inputs');
-  // Synthetic current snapshot omits old context; the verified receipt must
-  // restore ALL six dependencies, not just the model's single primary citation.
   expire(); const next = await start(); getDb().prepare("UPDATE syncs SET context_json='[]' WHERE id=?").run(next.id);
   const before = calls().length; await generateReply(next.id); assert.equal(primaryCallsSince(before).length, 0);
   const restored = store.getSync(next.id); assert.equal(restored.context.length, 6); assert.ok(restored.context.every(item => !item.unavailable));
@@ -190,8 +187,6 @@ for (const scope of ['E', 'C']) for (const attribution of ['cwd', 'sequence'])
     const sync = store.getSync(original.id), bg = scope === 'C' ? sync.context[0] : sync.items[0];
     const altered = { ...bg, [attribution]: attribution === 'cwd' ? '/new/model/workspace' : (bg.sequence || 0) + 1000 };
     if (attribution === 'cwd') getDb().prepare('UPDATE agent_sessions SET cwd=? WHERE id=?').run(altered.cwd, altered.session_id);
-    // Same canonical identity and physical original, different model input.
-    // The selected frozen E/C is still legitimate; the new BG is strict.
     assert.equal(sourceKey(altered), sourceKey(bg));
     const seed = new SummaryTree(sync, 0, new AbortController().signal);
     const spec = seedLeaf(seed, sync.items.slice(-2), [altered]); seed.leaves.close();
@@ -204,7 +199,6 @@ for (const scope of ['E', 'C']) for (const attribution of ['cwd', 'sequence'])
 test('source edits invalidate only the affected complete batch, never an unchanged other session', async () => {
   const edited = session(7), stable = session(8), first = await start(); await generateReply(first.id);
   const stableKeys = new Set(first.items.filter(item => item.session_id === stable.id).map(sourceKey));
-  // A context edit preserves originals but changes the effective projection.
   fs.appendFileSync(edited.file, JSON.stringify({ type: 'context_edit', id: 'edit', parentId: edited.rows.at(-1).id,
     timestamp: '2026-01-02T00:00:00.000Z', targetId: edited.rows[0].id, replacement: 'CORRECTION: tests were NOT run.' }) + '\n');
   expire(); const next = await start(), before = calls().length; await generateReply(next.id);
@@ -275,8 +269,6 @@ test('removed or excluded originals cannot be smuggled back as receipt dependenc
   assert.equal(primaryCallsSince(before).length, 0);
 });
 
-// The follow-up regressions below seed exact outputs; no inference executable
-// is involved. Even reconciliation uses an in-process synthetic response.
 function seedLeaf(tree, evidence, background = [], batch = true, ordinal) {
   const spec = tree.leafSpec({ session: evidence[0].session_id, workspace: evidence[0].cwd,
     evidence, background, ...(ordinal === undefined ? {} : { chronological_chunk: ordinal }) }, batch);
@@ -319,7 +311,6 @@ test('complete R=[A,BC] wins over larger immediate AB after parent-cache growth'
   seedParent(seed.tree, [a, b], 'AB');
   const second = background(input); forbidProvider(second.tree);
   assert.equal((await second.tree.build())[0].key, root.key);
-  // Deployed caches without a saved root plan must discover the full subtree too.
   getDb().prepare("DELETE FROM summary_leaf_plans WHERE identity LIKE 'parents:%'").run();
   const legacy = background(input); forbidProvider(legacy.tree);
   assert.equal((await legacy.tree.build())[0].key, root.key);
@@ -332,7 +323,7 @@ for (const cached of [false, true]) test(`setImmediate exclusion after plannedBa
   const original = job.tree.plannedBatches.bind(job.tree);
   job.tree.plannedBatches = async (...args) => {
     const specs = await original(...args);
-    for (const spec of specs) job.tree.leafStore().encode(spec.leafInput); // prime successful reads
+    for (const spec of specs) job.tree.leafStore().encode(spec.leafInput);
     await immediate(() => store.setIncluded(data.id, false));
     return specs;
   };
@@ -364,7 +355,6 @@ for (const boundary of ['cached-leaf', 'cached-parent', 'paid-parent', 'returned
   const b = seededNode(seedLeaf(job.tree, input.items.slice(2)));
   const parent = job.tree.reconciliationSpec([a, b], 'Parent', false, false);
   if (boundary === 'cached-parent') seedParent(job.tree, [a, b], 'Parent');
-  // Force a parent boundary here; ordinary small tails no longer need a merge.
   job.tree.compactRoots = nodes => nodes.length === 1;
   const revoke = () => store.setIncluded(data.id, false);
   const original = job.tree.node.bind(job.tree);
@@ -489,9 +479,6 @@ for (const citeReviewed of [false, true]) test(`partial historical overlap fails
   const first = seedLeaf(job.tree, old.items.slice(0, 4)), stable = seedLeaf(job.tree, old.items.slice(4, 8));
   const stale = seedLeaf(job.tree, old.items.slice(8), old.items.slice(0, 1));
   for (const spec of [first, stable, stale]) getDb().prepare("INSERT INTO sync_tree_nodes(sync_id,key,kind,label,status,children_json,source_count) VALUES (?,?,'chunk','Synthetic','done','[]',4)").run(old.id, spec.key);
-  // Match deployed v3 whole-session planning boundaries with legacy islands.
-  // The middle and final slices are exact legacy leaves from separate old
-  // snapshots, whose frozen records stay readable after the edit.
   for (const [index, spec] of [first, stable, stale].entries()) {
     const id = Number(getDb().prepare("INSERT INTO syncs(created_at,context_json) VALUES (?,?)").run(new Date().toISOString(), job.tree.leafStore().frozenContext(spec.leafInput.background)).lastInsertRowid);
     for (const item of spec.leafInput.evidence) {
@@ -589,8 +576,6 @@ test('output-only same-session legacy boundaries survive an edit to a different 
 
 for (const interrupted of [false, true]) test(`generateReply same-snapshot midpoint retry retains deployed provenance (interrupted=${interrupted})`, async () => {
   const data = session(340, 6000);
-  // Highly compressible, byte-bound input exercises the deployed midpoint
-  // split at production budgets, rather than reducing limits for the test.
   fs.writeFileSync(data.file, fs.readFileSync(data.file, 'utf8').replaceAll('x'.repeat(6000), ' '.repeat(5998) + 'x.'));
   const sync = await start(), seed = new SummaryTree(sync, 0, new AbortController().signal);
   const old = await seed.plannedBatches(sync, false, () => false, undefined, true, true);
@@ -648,7 +633,6 @@ test('node display migration tags existing topology with latest known run only o
   assert.equal(db.prepare("SELECT count(*) n FROM sync_tree_nodes WHERE key='root'").get().n, 1);
 });
 
-// Force preparation reuse explicitly; prepared chat must never run these gates.
 async function rebuildBriefing(id) {
   const { briefing } = store.getSync(id);
   getDb().prepare("UPDATE syncs SET briefing='' WHERE id=?").run(id);
@@ -690,7 +674,6 @@ for (const boundary of ['before-final', 'queued-exclusion', 'queued-cancel', 're
     };
     SummaryTree.prototype.call = async function (payload) {
       assert.equal(payload.task, 'final_verdict'); invoked++;
-      // The trap replaces the provider boundary, but retains a synthetic spend.
       getDb().prepare('UPDATE sync_runs SET invocations=invocations+1 WHERE id=?').run(this.runId);
       if (boundary === 'returned-final') await immediate(revoke);
       if (boundary === 'before-repair' && !payload.repair) { setImmediate(revoke); return 'Missing citation.'; }

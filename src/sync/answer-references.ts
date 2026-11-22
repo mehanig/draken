@@ -17,8 +17,6 @@ export function answerReferences(allowed: Set<string>) {
         return label;
       }
       const text = quoted(value.replace('Cite only the supplied H references', 'Cite only the supplied reference_labels'));
-      // Preserve an explicit source-read request in the wire namespace without
-      // turning any reference quoted by an original source into authorization.
       return key === 'user_question' ? text.replace(/\b(?:[EC]\d+|H[a-f0-9]{24})\b/g, ref => labels.get(ref) || ref) : text;
     }
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, encode(item, name)]));
@@ -27,8 +25,6 @@ export function answerReferences(allowed: Set<string>) {
   return {
     labels: [...originals.keys()],
     encode,
-    // Unknown labels are left visible for strict validation, never guessed or
-    // silently dropped. Canonical citations are still checked against allowed.
     decode: (answer: string) => answer.replace(markers, (_full, group: string) => group.split(/[\s,;]+/).map(label => `[${originals.get(label) || label}]`).join(' ')),
   };
 }

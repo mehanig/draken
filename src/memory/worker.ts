@@ -6,8 +6,6 @@ import { EmbeddingPool } from './embedding-pool';
 import { historyUpdate, type ReportHistory } from './types';
 import { sourceRoots } from '../sources/registry';
 
-// A private IPC child, not an HTTP service or tool runner. Native SQLite/vector
-// work and embedding WASM cannot block the dashboard or audio event loop.
 process.umask(0o077);
 const directory = process.argv[2];
 if (!process.send || !directory || !path.isAbsolute(directory) || !process.argv[3]) process.exit(1);
@@ -41,14 +39,10 @@ process.on('message', async (message: any) => {
     else throw new Error('Unknown history operation');
     process.send?.({ id: message.id, value });
   } catch {
-    // Never emit private source text, a model input, filesystem error or rejected
-    // request diagnostics. The parent provides action-specific recovery wording.
     process.send?.({ id: message.id, error: true });
   } finally { busy = false; }
 });
 async function close() {
-  // Let SQLite finish its normal checkpoint on orderly retirement. Abrupt exit
-  // still leaves committed WAL work recoverable; no VACUUM or history pruning.
   try { await model.close(); db.close(); source.close(); } finally { process.exit(0); }
 }
 process.once('SIGTERM', close);

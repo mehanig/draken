@@ -1,4 +1,3 @@
-/** Module-owned data contracts. No application or storage types cross this boundary. */
 interface EvidenceSource {
   ref: string;
   kind: string;

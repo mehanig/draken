@@ -1,5 +1,4 @@
 const vec = require('sqlite-vec');
-// Synthetic v1 search format, for testing the real one-way migration.
 exports.legacyIndex = (db, records, chunks, embeddings, fingerprint) => {
   vec.load(db); db.pragma('foreign_keys=ON');
   db.exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);

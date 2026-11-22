@@ -25,7 +25,7 @@ async function end(page: Page) {
 }
 
 test.afterEach(async ({ page }) => {
-  await fixtures(page); // Assert this is the isolated synthetic server before cleanup.
+  await fixtures(page);
   const status = await (await page.request.get('/api/voice/status')).json();
   if (status.activeCall) await page.request.post(`/api/voice/live/calls/${status.activeCall.id}/end`, { data: {} });
   await page.evaluate(() => (window as any).__disposeNative?.()).catch(() => {});
@@ -114,8 +114,6 @@ test('missing pi originals remain inspectable as unavailable; notes survive and 
     expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
   } finally { fs.renameSync(file+'.hidden',file); }
   await page.reload();
-  // The exact captured file was restored, not replaced or rewritten. Its
-  // verified receipt can be reused without another preparation or capture.
   await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled({timeout:15000});await expect(page.getByRole('alert')).not.toBeVisible();
   expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);expect((await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=${reference}`)).json()).item).toEqual(original.item);
 });

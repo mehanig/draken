@@ -19,9 +19,7 @@ import { historyDelivery, type EvidencePacket } from './history-delivery';
 import { historyProgress, stopHistory } from '../memory/service';
 import { ReplyContinuation } from './continuation';
 
-// Resource limits, not a subscription spending guarantee.
 const CALL_LIMITS = { minutes: 30, turns: 60, leaseSeconds: 90 };
-// Match the continuation completion window, even after Stop cancels its state machine.
 const COMPLETION_TIMEOUT_MS = 45_000;
 const STOP_TEXT = 'Stop speaking. Wait for my next question.';
 const isStopRequest = (text: string) => text.trim() === STOP_TEXT || /^(?:please\s+)?(?:stop(?:\s+(?:speaking|talking|the reply))?|wait(?:\s+(?:a moment|a second|for my next question))?|hold on)[.!?\s]*$/i.test(text);
@@ -33,8 +31,6 @@ type PreparedPacket = EvidencePacket & { workflowCreation?: Extract<EvidenceResu
 interface Turn { initial?: Promise<string>; initialEvidence?: Promise<PreparedPacket>; workflowPending?: boolean; workflowReply?: string; workflowId?: string; selectionRun?: number; user: Message; life: AbortController; continuation: ReplyContinuation; historyBefore: string | null; backgroundReady: Promise<void>; drained: boolean; completed: boolean; release?: () => void; refs: string[]; lookups: Map<string, Promise<PreparedPacket>>; deliveries: Map<EvidencePacket, Promise<string>>; pendingContext: number }
 interface Call { turn?: Turn; id: string; sync: SyncDetail; started: number; touched: number; sequence: number; events: any[]; native?: Native; connecting: boolean; connected: boolean; closed: boolean; released: boolean; release: VoiceLease; closing?: Promise<void>; user?: Message; assistant?: Message; question: string; refs: string[]; typedEcho: string | null; stopEcho: string | null; historyLife: AbortController; contextDelivery: Promise<void>; drains: Set<Promise<void>>; nativeDrains: Set<Promise<void>> }
 const calls = new Map<string, Call>();
-// End can overtake creation on a second HTTP connection. Retain unknown-ID
-// cancellations for the HTTP request window, bounded independently of calls.
 const cancelledReservations = new Map<string, number>();
 const CANCEL_WINDOW_MS = 5 * 60_000;
 function pruneReservations() {
@@ -62,8 +58,6 @@ function sweep() {
   for (const call of calls.values()) {
     if (call.closed) { if (call.released && Date.now() - call.touched > 120_000) calls.delete(call.id); }
     else {
-      // Conversation expiry defers while a turn owns resources, but a connected
-      // idle reservation and transport heartbeat do not extend user activity.
       try { assertConversationActive(call.sync.id); }
       catch (error) { if (error instanceof HttpError && error.status === 410) { endQuietly(call.id, 'Conversation inactivity limit reached. Start a new sync.'); continue; } }
       if (Date.now() - call.started > CALL_LIMITS.minutes * 60000) endQuietly(call.id, 'Call time limit reached');
@@ -86,14 +80,10 @@ function saveMessage(call: Call, message: Message, status = 'streaming') {
 function finishMessage(call: Call, message: Message, status: 'generated' | 'interrupted') {
   if (message.final) return; message.final = true;
   clearTimeout(message.completionTimer);
-  // Local transcript finalization during close is not remote completion. In
-  // that case the reservation retires this lease only after native cleanup.
   if (!call.closed) { message.release?.(); message.release = undefined; }
   if (message.interrupted) status = 'interrupted';
   saveMessage(call, message, status);
   invalidateRecap(call.sync.id);
-  // Store an ordered transcript, NOT guessed question/answer pairs. Interruption
-  // can overlap different streams. Generated words are not playback receipts or agreement.
   if (message.text.trim()) getDb().prepare('INSERT INTO sync_messages(sync_id, role, content, created_at) VALUES (?, ?, ?, ?)').run(call.sync.id, message.role,
     message.role === 'user' ? message.text : `[Live voice ${status}; exact playback not verified; not agreement.]\n${message.text}`, new Date().toISOString());
 }
@@ -103,16 +93,12 @@ function newMessage(call: Call, role: 'user' | 'assistant', requestId: string = 
   const started = Date.now();
   const db = getDb();
   const result = db.transaction(() => {
-    // Only a newly accepted real user message advances conversation activity.
-    // Echoes/retries have already been filtered; failed admission rolls back.
     if (role === 'user') touchConversation(call.sync.id, started);
     return db.prepare('INSERT INTO live_messages(call_id, request_id, role, started_at) VALUES (?, ?, ?, ?)').run(call.id, requestId, role, new Date(started).toISOString());
   })();
   const message: Message = { id: Number(result.lastInsertRowid), role, text: '', final: false, refs: role === 'assistant' ? [...(call.turn?.refs || call.refs)] : [], started };
   if (role === 'assistant') {
     message.turn = call.turn; message.release = call.release.beginTurn();
-    // Transcript delivery cannot wait. Retirement has its own lease so an
-    // immediate final event cannot declare idle while indexing is still exiting.
     void drainBackground(call);
     if (call.turn?.life.signal.aborted) interruptMessage(call, message);
   }
@@ -124,9 +110,6 @@ function releaseTurnIfSettled(turn: Turn) {
 }
 function interruptMessage(call: Call, message: Message) {
   message.interrupted = true;
-  // A Stop append acknowledgement is not remote completion. The message owns
-  // its lease and deadline; neither a new turn nor repeated Stop can retire it
-  // or extend this bounded wait. Final transcript or native cleanup retires it.
   if (!call.closed && !message.completionTimer) {
     message.completionTimer = setTimeout(() => {
       if (!message.final && !call.closed) endQuietly(call.id, 'Interrupted voice answer completion was not confirmed');
@@ -142,12 +125,6 @@ function cancelTurn(call: Call) {
   turn.lookups.clear(); turn.deliveries.clear(); releaseTurnIfSettled(turn);
 }
 function drainBackground(call: Call): Promise<void> {
-  // Cancelling the scheduler can settle prepareHistory before its child exits.
-  // Capture a background-only service owner BEFORE aborting the scheduler, and
-  // await its confirmed retirement too. A foreground request already preempts
-  // background ownership in the service; never stop that foreground owner.
-  // Snapshot only source drains, before registering this one. Never inherit
-  // nativeDrains: those operations may themselves be awaiting this retirement.
   const prior = [...call.drains], release = call.release.beginTurn();
   const timer = setTimeout(() => {
     if (!call.closed) endQuietly(call.id, 'Background cleanup was not confirmed');
@@ -160,15 +137,11 @@ function drainBackground(call: Call): Promise<void> {
     clearTimeout(timer); call.drains.delete(drain); release();
   }, () => {
     clearTimeout(timer);
-    // Cancellation/failure is not confirmed retirement. Keep both the lease
-    // and failed drain through cleanup, even if the native helper has exited.
     if (!call.closed) endQuietly(call.id, 'Background cleanup could not be confirmed');
   });
   return drain;
 }
 function nativeOperation<T>(call: Call, reason: string, dispatch: () => Promise<T>, release = call.release.beginTurn()): Promise<T> {
-  // Each operation owns an independent lease and a fixed deadline, including
-  // its background wait. Stop/new turns cannot retire or renew it.
   const timer = setTimeout(() => {
     if (!call.closed) endQuietly(call.id, `${reason} was not confirmed`);
   }, COMPLETION_TIMEOUT_MS);
@@ -177,13 +150,9 @@ function nativeOperation<T>(call: Call, reason: string, dispatch: () => Promise<
     try {
       await drainBackground(call);
       if (call.closed) throw new Error('Call ended before native dispatch');
-      // One fresh scope + physical-original gate after the asynchronous drain,
-      // for every open, context, typed input, Stop and continuation dispatch.
       assertCallEvidence(call);
       const result = await dispatch(); release(); return result;
     } catch (error) {
-      // Rejection is not confirmation of remote retirement. Keep ownership
-      // through native cleanup, even if Stop already cancelled this turn.
       if (!call.closed) endQuietly(call.id, `${reason} failed`);
       throw error;
     } finally { clearTimeout(timer); }
@@ -207,8 +176,6 @@ function assertCallEvidence(call: Call) {
 function beginTurn(call: Call, user: Message, spoken: boolean) {
   assertConversationActive(call.sync.id);
   assertCallEvidence(call);
-  // Capture once, before any asynchronous drain/lookup. A READY update that
-  // arrives during this reply belongs to the NEXT real user turn only.
   let historyBefore: string | null;
   try { historyBefore = captureConversationHistory(call.sync.id); } catch { historyBefore = null; }
   cancelTurn(call);
@@ -222,12 +189,9 @@ function beginTurn(call: Call, user: Message, spoken: boolean) {
     }
   }, () => user.text) };
   call.turn = turn; call.refs = [];
-  // Native audio cannot wait here. Abort background work immediately and let
-  // every context request await its confirmed owner drain before retrieval.
   turn.backgroundReady = drainBackground(call).then(() => {
     turn.drained = true; releaseTurnIfSettled(turn);
   });
-  // drainBackground owns failure/retirement independently of this turn.
   void turn.backgroundReady.catch(() => {});
   emit(call, { type: 'sources', evidence: [] });
   if (spoken) turn.continuation.inputStarted();
@@ -279,9 +243,6 @@ async function lookup(call: Call, question: string, turn: Turn, recognizeCreatio
 }
 async function deliverContext(call: Call, turn: Turn, packet: EvidencePacket) {
   if (!turn.deliveries.has(packet)) {
-    // Serialize entire transfers, not individual fragments. A new turn waits
-    // for the old in-flight append, then ownership prevents any remaining old
-    // parts/commit/continuation. Repeated delegation reuses the same delivery.
     const delivery = call.contextDelivery.then(async () => {
       if (!ownsTurn(call, turn) || !call.native) throw new Error('Lookup superseded');
       const { contexts, receipt, refs } = historyDelivery(packet, turn.user.id);
@@ -320,14 +281,10 @@ async function turnResponse(call: Call, turn: Turn, respond: () => Promise<strin
   turn.pendingContext++; turn.continuation.lookupStarted();
   let delivered = false;
   try {
-    // A late native delegation can reacquire an otherwise completed turn.
-    // Publish the wait on the turn too: concurrent delegations must not use
-    // its old, already-resolved admission drain while this one is still held.
     if (reacquired) turn.backgroundReady = drainBackground(call);
     const receipt = await respond();
     delivered = true; return receipt;
   } finally {
-    // Failed or superseded multipart delivery is NEVER a ready continuation.
     if (--turn.pendingContext === 0 && delivered && ownsTurn(call, turn)) turn.continuation.contextReady();
     releaseTurnIfSettled(turn);
   }
@@ -346,7 +303,6 @@ async function deliverWorkflowResult(call: Call, turn: Turn, result: WorkflowCre
     if (result.id) await readDiscovery(result.id, turn.life.signal);
     if (!ownsTurn(call, turn)) throw Error('Workflow reply superseded');
     const receipt = result.message + (result.url ? `\n${result.url}` : '');
-    // Keep the actionable link in the existing transcript, even if speech is interrupted.
     getDb().prepare("INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES (?,'assistant',?,?)").run(call.sync.id, receipt, new Date().toISOString());
     invalidateRecap(call.sync.id);
     turn.workflowReply = receipt; turn.workflowId = result.id;
@@ -357,8 +313,6 @@ async function deliverWorkflowResult(call: Call, turn: Turn, result: WorkflowCre
 }
 async function supplyRequestedContext(call: Call, turn: Turn) {
   if (!ownsTurn(call, turn) || !call.native) return;
-  // Only admission of an actual user turn can dispatch creation. Native backend
-  // history refinements never grant write authority or start another attempt.
   turn.initial ||= turnResponse(call, turn, async () => {
     turn.initialEvidence ||= lookup(call, turn.user.text, turn, true);
     const packet = await turn.initialEvidence;
@@ -402,8 +356,6 @@ function nativeEvent(call: Call, event: any) {
       call.stopEcho = null;
     }
     if (role === 'user' && call.typedEcho !== null) {
-      // Typed input is already recorded exactly. Ignore only its matching echo,
-      // not an unrelated spoken interruption arriving on the same connection.
       if ((done && text.trim() === call.question.trim()) || (!done && call.question.trimStart().startsWith((call.typedEcho + text).trimStart()))) {
         call.typedEcho = done ? null : call.typedEcho + text; return;
       }
@@ -422,14 +374,10 @@ function nativeEvent(call: Call, event: any) {
     message.text = done ? cleanText(text, 4000) : message.text + text;
     if (role === 'user') call.question = message.text;
     saveMessage(call, message); if (done) finishMessage(call, message, 'generated');
-    // Speech already received is transcript history even when admission now
-    // fails. Retain it before the fatal gate; never send follow-up context.
     if (startingUser) beginTurn(call, message, true);
     if (role === 'assistant' && !message.interrupted && message.turn && ownsTurn(call, message.turn)) message.turn.continuation.response(message.text, done);
     if (role === 'user' && done && call.turn) {
       const turn = call.turn;
-      // A spoken stop is still retained as real speech, but is not a lookup
-      // question to restart later. The provider receives the original audio.
       if (!message.text.trim() || isStopRequest(message.text)) { cancelTurn(call); return; }
       void supplyRequestedContext(call, turn).catch(() => {
         if (!ownsTurn(call, turn)) return;
@@ -450,8 +398,6 @@ export async function createLiveCall(syncId: number, signal: AbortSignal, reserv
   const sync = requireOpen(syncId);
   verifySyncEvidence(getDb(), syncId, sync);
   if (!sync.tree.complete || !sync.briefing) throw new HttpError(409, 'Prepare the briefing before calling.');
-  // Setup only reads this conversation's durable preparation. New corpus
-  // arrivals cannot revoke it; only an actual user turn may adopt a new cutoff.
   if (!conversationStatus(syncId).history_before) throw new HttpError(409, 'Prepare history before calling. No call was started.');
   if (!(await runtime().nativeStatus(nativeOptions())).readyForProbe) throw new HttpError(503, 'Native voice needs its pinned helper and ChatGPT sign-in on the server.');
   if (signal.aborted || cancelledReservations.has(reservationId)) throw new HttpError(409, 'Call setup cancelled');
@@ -466,12 +412,8 @@ export async function createLiveCall(syncId: number, signal: AbortSignal, reserv
   try { getDb().prepare('INSERT INTO live_calls(id, sync_id, started_at) VALUES (?, ?, ?)').run(call.id, syncId, new Date(now).toISOString()); }
   catch (error) { call.release(); throw error; }
   calls.set(call.id, call);
-  // Reservation is also idle -> setup: preempt an already-running indexer,
-  // without starting preparation or waiting for it on the request path.
   void drainBackground(call);
   if (!sweepTimer) { sweepTimer = setInterval(sweep, 10000); sweepTimer.unref(); }
-  // No corpus preparation, provider session or microphone is started here.
-  // The opening snapshot stays frozen. Each real turn captures prepared history.
   return { id: call.id, startedAt: call.started, limits: { minutes: CALL_LIMITS.minutes, turns: CALL_LIMITS.turns, leaseSeconds: CALL_LIMITS.leaseSeconds } };
 }
 export async function connectLiveCall(id: string, sdp: string, signal: AbortSignal) {
@@ -496,11 +438,7 @@ export async function connectLiveCall(id: string, sdp: string, signal: AbortSign
     if (turn.workflowId) await readDiscovery(turn.workflowId, turn.life.signal);
     const receipt = turn.workflowReply || await requestedContext(call, turn, liveRetrievalQuestion(input, turn.user.text));
     if (backendSignal.aborted || !ownsTurn(call, turn)) throw new Error('Lookup superseded');
-    // Returning a cached receipt also resumes the native request. Recheck after
-    // asynchronous appends (or a reused delivery), not just before appending.
     assertCallEvidence(call);
-    // The full evidence travels through acknowledged context appends, not the
-    // helper's small handoff return. No second model or provider is introduced.
     return receipt;
   } });
   call.native = native; native.subscribe(event => nativeEvent(call, event));
@@ -510,8 +448,6 @@ export async function connectLiveCall(id: string, sdp: string, signal: AbortSign
     const answer = await nativeOperation(call, 'Live voice setup', () => {
       if (signal.aborted) throw new Error('Call setup cancelled');
       return native.open(sdp, { signal, prompt: LIVE_PROMPT,
-        // Native open itself awaits helper setup. Its ready hook is immediately
-        // before realtime/start delivers the initial packet, after those waits.
         onReady: () => {
           if (call.closed || signal.aborted) throw new Error('Call setup cancelled');
           assertCallEvidence(call);
@@ -556,8 +492,6 @@ export async function sendLiveText(id: string, question: string, requestId: stri
 export async function interruptLiveCall(id: string) {
   const call = current(id), stopped = call.release.hold(); cancelTurn(call);
   if (call.assistant && !call.assistant.final) { call.assistant.interrupted = true; saveMessage(call, call.assistant, 'interrupted'); }
-  // Browser cuts playback immediately. This requests a remote stop; it does not
-  // assert that remote generation or quota accounting stopped at the same instant.
   call.stopEcho = '';
   try { await nativeOperation(call, 'Stop delivery', () => call.native?.text(STOP_TEXT) ?? Promise.resolve(), stopped); }
   catch { endQuietly(call.id, 'Stop delivery failed'); throw new HttpError(502, 'The remote stop could not be confirmed. The call was ended.'); }
@@ -577,9 +511,8 @@ export function endLiveCall(id: string, reason = 'Ended by user'): Promise<void>
     return Promise.resolve();
   }
   if (call.closing) return call.closing;
-  call.release.hold(); // Cleanup is not idle until helper exit is confirmed.
+  call.release.hold();
   call.closed = true; call.touched = Date.now();
-  // Capture/cancel even on an idle call, but do not wait before native close.
   void drainBackground(call);
   cancelTurn(call); call.historyLife.abort();
   for (const message of [call.user, call.assistant]) if (message && !message.final) finishMessage(call, message, 'interrupted');
@@ -588,13 +521,9 @@ export function endLiveCall(id: string, reason = 'Ended by user'): Promise<void>
   call.closing = Promise.resolve().then(async () => {
     const result = await call.native?.close();
     if (call.native && !result?.helperExited) throw new HttpError(503, 'Native helper exit could not be confirmed. No new call will start.');
-    // Native close must precede these waits: terminating RPC rejects pending
-    // appends. Background drains must not wait on native appends during turns.
     await Promise.all([...call.drains, ...call.nativeDrains]);
     call.released = true; call.release();
     call.native = undefined;
-    // Closed calls retain only a small event tail for a polling browser. The
-    // full immutable snapshot stays in SQLite, not in retired call objects.
     call.sync.items = []; call.sync.context = []; call.sync.messages = []; call.sync.memory = [];
   }); return call.closing;
 }

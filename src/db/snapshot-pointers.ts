@@ -8,7 +8,6 @@ import { retainedText, thawEvidence } from './retained-text';
 import { entryTable } from './pointer-migration';
 
 type Candidate = { pointer: RecordPointer; versions: Map<NormalizationVersion, NormalizedEntry> };
-/** Migration-only exact matching, never a retrieval fallback or file discovery. */
 class Catalog {
   private sessions = new Map<string, Map<string, Candidate[]>>();
   constructor(private db: Database.Database) {}
@@ -48,8 +47,6 @@ class Catalog {
         if (edit.replacement === item.text) matches.push(pointer);
         else for (const clipVersion of [2, 1] as const) if (cleanText(edit.replacement, 2000, clipVersion) === item.text) matches.push({ ...pointer, clip: { limit: 2000, normalization: clipVersion } });
       }
-      // Equivalent normalization recipes for the same raw edit are not separate
-      // sources. Different matching edits are ambiguous: do not guess history.
       const distinct = new Map(matches.map(pointer => [pointer.edit!.record_hash, pointer]));
       if (distinct.size === 1) return distinct.values().next().value!;
       if (distinct.size > 1) throw new Error('Historical context-edit selection is ambiguous');

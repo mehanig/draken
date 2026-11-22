@@ -2,7 +2,6 @@ import { getDb } from '../db/schema';
 import { getSync } from '../sync/store';
 import { invalidateRecap } from '../sync/recap';
 
-/** Data compatibility only. The removed local speech engine cannot start or run here. */
 export function legacyCallHistory(syncId: number) {
   getSync(syncId);
   return (getDb().prepare('SELECT id, status, started_at, ended_at, end_reason FROM voice_calls WHERE sync_id = ? ORDER BY started_at DESC LIMIT 10').all(syncId) as any[])

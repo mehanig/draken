@@ -84,7 +84,7 @@ export class RecordReader {
     let fd = this.files.get(fileKey);
     if (fd === undefined) {
       if (this.files.size >= 32) { const [old, handle] = this.files.entries().next().value!; fs.closeSync(handle); this.files.delete(old); }
-      for (const root of this.roots[source.agent] || []) { try { fd = openSessionFile(file, root, identity); break; } catch { /* Try only configured roots for this agent. */ } }
+      for (const root of this.roots[source.agent] || []) { try { fd = openSessionFile(file, root, identity); break; } catch {} }
       if (fd === undefined) throw new Error('Session path is outside the configured source roots or unavailable');
       try { verifySourceHeader(fd, source); } catch (error) { fs.closeSync(fd); throw error; }
       this.files.set(fileKey, fd);

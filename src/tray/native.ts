@@ -24,8 +24,6 @@ export function nativeTray(statePath: string, action: (action: TrayAction) => vo
   for (const name of ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'PATH']) {
     if (process.env[name]) env[name] = process.env[name];
   }
-  // Native UI receives no Draken/provider credentials, URLs, transcripts or
-  // inherited preload hooks. Only a private, bounded presentation file.
   env.DRAKEN_TRAY_STATE = statePath;
   env.DRAKEN_TRAY_ASSETS = path.join(root, 'assets');
   const { executable, args } = nativeCommand(process.platform, env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows');
@@ -58,7 +56,6 @@ export function nativeTray(statePath: string, action: (action: TrayAction) => vo
   });
   return { ready, exited, async close() {
     if (finished) return;
-    // Worker publishes quit first. Terminate only this UI helper if its loop is stuck.
     const timer = setTimeout(() => child.kill(), 1500);
     await exited; clearTimeout(timer);
   } };

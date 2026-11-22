@@ -252,7 +252,6 @@ test('history packets are byte-bounded, reference-closed, tail-preserving and ca
 
 test('no setup/status/mode API remains; search inherits auth and rejects old controls rather than silently honoring them', async () => {
   entry('HTTP 403.');
-  // Isolate inference, not the API, automatic indexing or vector/keyword engine.
   service.searchHistory = async query => index.search(service.validateHistoryQuery(query));
   server = createApp().listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
   const origin = `http://127.0.0.1:${server.address().port}/api/memory`;
@@ -291,7 +290,6 @@ test('progress counts unique passages, reuses cached copies across scopes and re
   assert.ok(updates.some(update => update.stage === 'scanning'));
   assert.ok(updates.some(update => update.stage === 'indexing' && update.total === 1 && update.completed === 1));
   assert.equal(updates.at(-1).stage, 'searching');
-  // Same body/title as a frozen attribution must share the original embedding.
   const s = sync(), e = db.prepare("SELECT * FROM agent_entries WHERE session_id='session-a'").get();
   db.prepare('INSERT INTO sync_items VALUES(?,?,?)').run(s, e.event_key, frozen(e));
   const before = protectedRows(), calls = model.calls, later = [];
@@ -313,7 +311,6 @@ test('delta-only indexing does no unchanged writes or inference, resumes pending
   const warm=[];await index.prepare({},value=>warm.push(value));
   assert.equal(model.calls,calls);assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes);
   assert.equal(warm.at(-1).total,0);assert.equal(warm.at(-1).reused,70);
-  // A fresh process can recognize a complete index without loading/downloading a model.
   const coldModel={...model,setup:async()=>{throw Error('Unnecessary setup');}},cold=new HistoryIndex(cache,db,coldModel);await cold.prepare();
   for(let i=0;i<72;i++)entry(`New unique delta ${i}.`);
   let committed=0;model.embedMany=async bodies=>{if(committed)throw Error('Stop at a committed boundary');return Promise.all(bodies.map(text=>model.embed(text,false)));};

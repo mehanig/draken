@@ -31,7 +31,6 @@ async function discover(root: string, warnings: string[]): Promise<string[]> {
     catch { warnings.push(`Cannot read session directory: ${directory}`); return; }
     for (const child of children) {
       const target = path.join(directory, child.name);
-      // Do not walk symlinks into unrelated directories.
       if (child.isDirectory()) await visit(target, depth + 1);
       else if (child.isFile() && child.name.endsWith('.jsonl')) files.push(target);
     }
@@ -46,7 +45,6 @@ async function hashRegion(file: fs.promises.FileHandle, start: number, length: n
   return digest(buffer.subarray(0, bytesRead));
 }
 
-/** Read only complete LF-terminated records. Never mutate a pi session file. */
 async function readRecords(handle: fs.promises.FileHandle, file: string, offset: number, size: number, warnings: string[], signal?: AbortSignal) {
   const records: (RecordPointer & { value: any })[] = [];
   let pending = Buffer.alloc(0);
@@ -94,7 +92,6 @@ function updateProjection(sessionId: string, leaf: string | null, agent: AgentKi
   db.prepare('UPDATE agent_entries SET active=0,effective_length=text_length,effective_id=NULL WHERE session_id=?').run(sessionId);
   const activate = db.prepare('UPDATE agent_entries SET active = 1 WHERE id = ?');
   for (const row of branch) activate.run(row.id);
-  // Context edits are branch-relative. Null replacements omit the target.
   const edit = db.prepare('UPDATE agent_entries SET effective_id=?,effective_length=? WHERE session_id=? AND entry_id=? AND active=1');
   for (const row of branch) {
     if (row.type === 'context_edit' && row.target_id) edit.run(row.id, row.replacement_length, sessionId, row.target_id);
@@ -126,7 +123,6 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     const identity = `${stat.dev}:${stat.ino}`;
     const modified = stat.mtime.toISOString();
     const stamp = JSON.stringify([identity, stat.size, stat.mtimeMs, stat.ctimeMs]);
-    // An unchanged ignored file needs no transcript reads, even for its header.
     if (previous?.activity_stamp === stamp && (!previous.included || !withinActivityWindow(previous.last_message_at, activityDays(db)))) return { id: previous.id, added: 0 };
     const header = identifySource(agent, fileRecords(file.fd, Math.min(stat.size, RECORD_BYTES)));
     if (inside(path.resolve(header.cwd), getDataDir())) return { added: 0 };
@@ -153,8 +149,6 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
       const prefix = await hashRegion(file, 0, Math.min(512, previous.byte_offset));
       reset = boundary !== previous.boundary_hash || prefix !== previous.prefix_hash ||
         (stat.size === previous.byte_offset && modified !== previous.modified_at);
-      // A middle rewrite followed by an append can leave both prefix and old
-      // tail unchanged. Verify old pointers before treating it as append-only.
       if (!reset && modified !== previous.modified_at) reset = !await pointersMatch(file, previous.id);
       if (!reset && previous.scanned_bytes > 0 && stat.size === previous.byte_offset && modified === previous.modified_at) {
         db.prepare('UPDATE agent_sessions SET scanned_bytes=? WHERE id=? AND scanned_bytes!=?').run(stat.size, previous.id, stat.size);
@@ -163,8 +157,6 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     }
     if (previous) db.prepare('UPDATE agent_sessions SET scanned_bytes=0 WHERE id=? AND scanned_bytes!=0').run(previous.id);
     let addedTotal = 0;
-    // Drain bounded chunks to this file's captured EOF, not a moving live tail.
-    // Each committed chunk survives cancellation; partial imports never get a receipt.
     for (;;) {
     signal?.throwIfAborted();
     const warningStart = warnings.length;
@@ -203,7 +195,6 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     const boundary = await hashRegion(file, Math.max(0, result.offset - 256), Math.min(256, result.offset));
     const prefix = await hashRegion(file, 0, Math.min(512, result.offset));
     const committed = db.transaction(() => {
-      // A replacement file may represent a different session; retain its old evidence/history.
       if (previous && previous.id !== header.id) {
         db.prepare('UPDATE agent_sessions SET path = ?, missing = 1 WHERE id = ?').run(`${filePath}#replaced:${previous.id}`, previous.id);
       }
@@ -281,7 +272,6 @@ export function scanSessions(signal?: AbortSignal): Promise<ScanResult> {
             if (result.id) seen.add(result.id);
             added += result.added;
           } catch (error) {
-            // A malformed append is an incomplete import, not a disappeared file.
             const known = db.prepare('SELECT id FROM agent_sessions WHERE path=? AND agent=?').get(file, agent) as { id: string } | undefined;
             if (known) seen.add(known.id);
             warnings.push(`Could not index ${agent} session ${file}: ${error instanceof Error ? error.message : 'unknown error'}`);

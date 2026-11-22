@@ -1,4 +1,3 @@
-// Synthetic state only. No server timer, source scan, models or real accounts.
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const Database = require('better-sqlite3');

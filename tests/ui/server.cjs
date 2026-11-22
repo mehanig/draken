@@ -1,4 +1,3 @@
-// Synthetic-only UI server. Never points at the user's pi store or provider.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -33,12 +32,11 @@ process.env.DRAKEN_CODEX_SESSIONS_DIR = path.join(temp, 'codex-sessions');
 process.env.DRAKEN_CLAUDE_SESSIONS_DIR = path.join(temp, 'claude-projects');
 fs.mkdirSync(process.env.DRAKEN_CODEX_SESSIONS_DIR); fs.mkdirSync(process.env.DRAKEN_CLAUDE_SESSIONS_DIR);
 process.env.DRAKEN_PI_BIN = fake;
-// Exercise the normal local default, not an explicit no-auth override.
 process.env.DRAKEN_HOST = '127.0.0.1';
 for (const key of ['DRAKEN_NO_AUTH', 'DRAKEN_USERNAME', 'DRAKEN_PASSWORD', 'DRAKEN_JWT_SECRET']) delete process.env[key];
 process.env.DRAKEN_PI_MODEL = 'test/strong';
 process.env.DRAKEN_PI_SUMMARY_MODEL = 'test/cheap';
-delete process.env.DRAKEN_VOICE_MODE; // Default must be native, not a test-only mode override.
+delete process.env.DRAKEN_VOICE_MODE;
 process.env.DRAKEN_CODEX_BIN = path.join(__dirname, '../fixtures/fake-codex.cjs');
 process.env.DRAKEN_CODEX_HOME = path.join(temp, 'account');
 fs.mkdirSync(process.env.DRAKEN_CODEX_HOME);
@@ -51,11 +49,8 @@ process.env.DRAKEN_FAKE_CONTROL = control;
 require('../fixtures/fake-memory.cjs').useIndexedHistory();
 const { createApp } = require('../../dist/server');
 const { getDb, closeDb } = require('../../dist/db/schema');
-// Shared foreground UI fixture explicitly opts out to avoid timer-dependent
-// interference. The default-on timer is exercised with a controlled clock in
-// automatic-index.test.cjs; settings UI tests exercise persisted toggles.
 getDb().prepare("UPDATE sync_settings SET value='false' WHERE key='auto_index'").run();
-getDb().prepare("INSERT INTO sync_settings(key,value) VALUES('auto_summary','false')").run(); // Unrelated UI fixtures explicitly opt out of timed provider work.
+getDb().prepare("INSERT INTO sync_settings(key,value) VALUES('auto_summary','false')").run();
 const { stopLiveCalls } = require('../../dist/voice/live');
 const { stopHistory } = require('../../dist/memory/service');
 const { stopBackgroundIndexing } = require('../../dist/sync/background');

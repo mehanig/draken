@@ -44,7 +44,6 @@ test('exact idle deadline is metadata-only until cleanup, never review or transc
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
   assert.equal(store.homeOverview().syncs[0].conversation.ended_at, original.expires_at);
   assert.equal(store.overview().active_sync_id, null);
-  // Notes and explicit review remain separate from whether another turn is allowed.
   store.saveNotes(id, 'Edited after ending', 'Intact');
   assert.equal(persisted(id).decisions, 'Edited after ending');
   assert.throws(() => lifecycle.touchConversation(id), error => error.status === 410 && /new sync/.test(error.message));
@@ -148,7 +147,6 @@ test('update metadata reports recorded availability and scheduler progress, not 
     memory.historyProgress = () => ({ active: true, queued: 0, work: { stage: 'indexing' } }); check('preparing');
     state = { phase: 'error', error: 'PRIVATE /source/path provider details', pending_records: 1 }; check('error');
     assert.doesNotMatch(lifecycle.conversationStatus(id).error, /PRIVATE|source\/path|provider details/);
-    // Pausing/foreground preemption may change phase without clearing the failure.
     state.phase = 'paused'; check('error');
     assert.deepEqual(persisted(id), saved);
     assert.equal(getDb().prepare('SELECT total_changes() n').get().n, changes, 'All metadata polls are read-only');
@@ -201,7 +199,6 @@ test('production background status reports failure, recovery and opt-out without
     strict = true; cutoff = next; resolvePrepare(); await until(() => background.autoIndexSettings().phase === 'waiting');
     assert.equal(lifecycle.conversationStatus(id).update_state, 'new_info');
     assert.deepEqual(persisted(id), saved, 'Background completion and GET do not adopt or touch the clock');
-    // A restart racing an old asynchronous stop retains the new registration.
     const stopping = background.stopBackgroundIndexing(); background.startBackgroundIndexing(); await stopping;
     assert.ok(bridge.backgroundUpdateStatus());
     await background.stopBackgroundIndexing(); assert.equal(bridge.backgroundUpdateStatus(), null);
@@ -264,7 +261,6 @@ test('upgrade seeds user activity only and preserves previously used chat prepar
     assert.equal(migrated.status, 'open'); assert.equal(migrated.briefing, 'Initial briefing');
     const closed = db.prepare('SELECT * FROM syncs WHERE id=2').get();
     assert.equal(closed.conversation_last_user_at, null); assert.equal(closed.status, 'completed'); assert.equal(closed.decisions, 'Explicit review');
-    // Running schema initialization again must not re-seed the clock from output.
     db.prepare("UPDATE syncs SET conversation_ended_at='2026-01-03T00:30:00.000Z' WHERE id=1").run(); initSchema(db);
     assert.equal(db.prepare('SELECT conversation_ended_at FROM syncs WHERE id=1').get().conversation_ended_at, '2026-01-03T00:30:00.000Z');
   } finally { db.close(); }

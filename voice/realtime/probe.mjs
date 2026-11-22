@@ -40,7 +40,6 @@ try {
     active();
     const context = await browser.newContext({ extraHTTPHeaders: { Authorization: `Bearer ${lab.token}` } });
     if (signal.aborted) { await context.close(); active(); }
-    // Do not let page HTTP requests carry the lab credential to any other origin.
     await context.route('**/*', route => new URL(route.request().url()).origin === lab.origin ? route.continue() : route.abort());
     active();
     const page = await context.newPage(); const pageErrors = [];

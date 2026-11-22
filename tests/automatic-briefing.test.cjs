@@ -1,4 +1,3 @@
-// Regression name retained: automatic indexing must never prepare a briefing.
 require('./fixtures/fake-memory.cjs');
 const {test,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{randomUUID}=require('node:crypto');
@@ -20,7 +19,6 @@ const historyTables=['syncs','sync_items','sync_presentations','sync_runs','sync
 function history(){return Object.fromEntries(historyTables.map(table=>[table,getDb().prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));}
 function noSyncs(){for(const table of historyTables)assert.equal(count(table),0,table);assert.deepEqual(calls(),[]);}
 
-// No automatic module is imported: all generation below is explicitly user-owned.
 test('an already indexed available backlog is not a briefing trigger; each scan keeps accumulating entries',async()=>{
  session(70);await scanSessions();let indexed=0,now=Date.now(),scans=0;
  const worker=createAutoIndexer({enabled:()=>true,idle:()=>true,now:()=>now,scan:async()=>{scans++;return scanSessions();},stamp:()=>new Map(),baseline:()=>new Map(),prepare:async()=>{indexed++;},completed:()=>{}});
@@ -33,7 +31,6 @@ for(const ready of [true,false])test(`legacy ${ready?'ready':'cancelled'} automa
  getDb().prepare('UPDATE sync_presentations SET request_id=? WHERE sync_id=?').run(autoRequest,legacy.id);
  if(ready)getDb().prepare("UPDATE syncs SET briefing='Legacy prepared briefing [E1]',compression_complete=1 WHERE id=?").run(legacy.id);
  else getDb().prepare("INSERT INTO sync_runs(sync_id,status,summary_model,final_model,max_invocations,total_entries,started_at,completed_at) VALUES (?,'cancelled','test/cheap','test/strong',10,64,?,?)").run(legacy.id,'2026-01-01','2026-01-01');
- // Reconstruct obsolete durable background ownership from the previous release.
  const save=getDb().prepare('INSERT OR REPLACE INTO sync_settings(key,value) VALUES (?,?)');
  save.run('auto_prepare_conversations','true');save.run('auto_preparing_sync',String(legacy.id));save.run('auto_briefing_failed','Legacy provider failure');
  const before=history();closeDb();assert.equal(autoIndexSettings().enabled,true);assert.deepEqual(history(),before);

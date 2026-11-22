@@ -46,11 +46,9 @@ export function conversationStatuses(ids: number[]): ConversationState[] {
     else if (!enabled) update_state = 'paused';
     else if (background?.phase === 'error' || background?.error) {
       update_state = 'error';
-      // Do not expose worker/provider/source error details through conversation GETs.
       error = 'Live updates could not finish. Check session sources and local model availability. Completed history is retained; automatic indexing will retry.';
     } else if (available && (!value.conversation_before || available > value.conversation_before)) update_state = 'new_info';
     else {
-      // Search/read work and paid summary preparation are not new H-source work.
       const preparing = (progress.active && progress.work?.stage !== 'searching' && progress.work?.stage !== 'reading')
         || progress.queued > 0 || background?.phase === 'scanning' || background?.phase === 'indexing'
         || (background?.pending_records || 0) > 0;
@@ -71,8 +69,6 @@ export function expireConversations(now = Date.now()): void {
     FROM syncs WHERE status='open' AND conversation_ended_at IS NULL
     AND COALESCE(conversation_last_user_at,created_at)<=?`).all(new Date(now - IDLE_MS).toISOString()) as Row[];
   const save = db.prepare('UPDATE syncs SET conversation_ended_at=? WHERE id=? AND conversation_ended_at IS NULL');
-  // Persist the actual end time, not a backdated deadline: an answer holding a
-  // lease may legitimately finish after expires_at without renewing that clock.
   db.transaction(() => { for (const value of rows) if (!inFlight(value.id)) save.run(new Date(now).toISOString(), value.id); })();
 }
 

@@ -1,4 +1,3 @@
-// Application wiring, deliberately outside the isolated evidence module.
 import { prepareProcedureEvidence, type ProcedureRecord, type EvidenceDependencies } from './evidence';
 import { EvidenceReader } from './db/evidence';
 import { EvidenceScope } from './sync/evidence-scope';

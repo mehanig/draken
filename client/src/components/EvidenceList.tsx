@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api';
 
-/** Shared by snapshot citations and the voice source inspector. Never reads the archive. */
 export function SnapshotSource({ syncId, reference }: { syncId: number; reference: string }) {
   const [offset, setOffset] = useState(0), [error, setError] = useState('');
   const [excerpt, setExcerpt] = useState<Awaited<ReturnType<typeof api.evidenceExcerpt>> | null>(null);

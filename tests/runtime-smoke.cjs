@@ -1,5 +1,3 @@
-// Optional network-to-npm qualification. Private HOME, no real accounts or
-// source histories. The only inference endpoint is our synthetic loopback SSE.
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http');
 const assert=require('node:assert/strict'),{execFileSync,spawnSync}=require('node:child_process');
 process.umask(0o077);

@@ -64,7 +64,6 @@ test('malformed raw targets cannot bypass authentication, consume lookup capacit
     assert.equal(calls, 1); assert.equal(blocked, 0);
   } finally { await backend.close(); }
 
-  // The deny-only adapter also remains safe without an answer callback.
   const deny = await createReadOnlyBackend();
   try { assert.equal((await rawRequest(deny.url, 'http://[')).status, 400); }
   finally { await deny.close(); }
@@ -105,7 +104,6 @@ test('lookup limits preserve the default, honor explicit caps through 120 and de
       await response.text(); return response.status;
     };
     try {
-      // Unauthenticated traffic and catalog probes must not spend lookup capacity.
       assert.equal(await request('/responses', 'POST', false), 403);
       assert.equal(await request('/models', 'GET'), 403);
       assert.equal(blocked, 0); assert.equal(calls, 0);

@@ -32,7 +32,7 @@ beforeEach(() => {
   });
   delete process.env.DRAKEN_PI_TIMEOUT_MS;
   delete process.env.DRAKEN_PI_MAX_INVOCATIONS;
-  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
 });
 afterEach(() => { closeDb(); fs.rmSync(temp, { recursive: true, force: true }); });
 const calls = () => fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
@@ -125,7 +125,6 @@ test('cache hits across retries/syncs are source-addressed, not tied to old E re
   for (const row of getDb().prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(second.id)) {
     const encoded = JSON.parse(row.evidence_json);
     assert.ok(encoded.source_pointer); assert.ok(encoded.source_key); assert.equal(Object.hasOwn(encoded, 'text'), false);
-    // Renumber persisted metadata, never serialize the thawed API projection.
     const ref = `E${10000 + Number(encoded.ref.slice(1))}`;
     getDb().prepare('UPDATE sync_items SET evidence_json = ? WHERE sync_id = ? AND event_key = ?')
       .run(JSON.stringify({ ...encoded, ref }), second.id, row.event_key);

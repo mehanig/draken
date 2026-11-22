@@ -38,7 +38,7 @@ export function sourceStamps(db: Database.Database, before?: string): Map<string
   for (const row of db.prepare("SELECT id,status,completed_at,context_json,decisions,carry_forward FROM syncs WHERE status!='discarded' ORDER BY id").iterate() as Iterable<any>) {
     for (const item of JSON.parse(row.context_json)) frozen(item);
     const at = row.status === 'completed' ? row.completed_at : null;
-    if (before && (!at || at > before)) continue; // Same cutoff admission as prepare().
+    if (before && (!at || at > before)) continue;
     for (const kind of ['decisions', 'carry_forward']) if (row[kind].trim()) add([kind, row.id], [row[kind], at, row.status === 'completed']);
   }
   for (const row of db.prepare("SELECT m.id,m.content,m.role,m.created_at FROM sync_messages m JOIN syncs s ON s.id=m.sync_id WHERE s.status!='discarded' ORDER BY m.id").iterate() as Iterable<any>) {
@@ -64,7 +64,7 @@ export function loadSourceCheckpoint(directory: string): Map<string, string> | u
   const db = new Database(file, { readonly: true, fileMustExist: true });
   try {
     db.pragma('query_only = ON'); db.pragma('busy_timeout = 5000');
-    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get()) return new Map(); // Interrupted brand-new initialization.
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get()) return new Map();
     const size = db.prepare('SELECT length(value) AS size FROM meta WHERE key=?').get(KEY) as { size: number } | undefined;
     if (!size) return undefined;
     if (size.size > 33554432) throw new Error('Oversized background checkpoint');

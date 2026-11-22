@@ -29,7 +29,6 @@ export function prepareModelInput(kind: NodeKind, payload: unknown, sources: Set
   }
   return {
     input, allowed: new Set(toSource.keys()),
-    // Validate against allowed first. No fuzzy matching or guessing which source was intended.
     decode(output: NodeSummary | TopicGroups): NodeSummary | TopicGroups {
       const canonical = (ref: string) => {
         const source = toSource.get(ref);

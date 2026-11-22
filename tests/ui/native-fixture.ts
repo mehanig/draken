@@ -1,6 +1,5 @@
 import type { Page } from '@playwright/test';
 
-/** Real local WebRTC audio plus the synthetic server helper. Never contacts OpenAI. */
 export async function nativePeer(page: Page, denied = false) {
   await page.addInitScript(({ denied }) => {
     const w = window as any;
@@ -50,7 +49,6 @@ export async function nativePeer(page: Page, denied = false) {
   }, { denied });
 
   await page.route('**/api/voice/live/calls/*/connect', async route => {
-    // Exercise real server admission, helper lifecycle, initial evidence and stored status.
     const response = await route.fetch();
     if (!response.ok()) { await route.fulfill({ response }); return; }
     try {
@@ -58,7 +56,7 @@ export async function nativePeer(page: Page, denied = false) {
       await route.fulfill({ response, json: { sdp } });
     } catch (error) {
       if (!/Execution context was destroyed|Target.*closed|Test ended/.test(String(error))) throw error;
-      await route.abort().catch(() => {}); // Explicit hang-up/navigation can cancel negotiation.
+      await route.abort().catch(() => {});
     }
   });
   await page.route('**/api/voice/live/calls/*/text', async route => {

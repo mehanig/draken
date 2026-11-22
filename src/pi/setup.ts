@@ -7,7 +7,6 @@ import { getDataDir } from '../data-dir';
 import { npmCli } from '../npm-cli';
 import { executable, isolatedFlags, managedEnvironment, PI_PACKAGE, PI_VERSION, piPaths, piSetupStatus, privateDirectory, selectedPi } from './runtime';
 
-/** Explicit terminal operations only. This module has no HTTP installation/login route. */
 function run(binary: string, args: string[], env: NodeJS.ProcessEnv, cwd: string, timeout = 0): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, { env, cwd, shell: false, stdio: 'inherit' });
@@ -53,8 +52,6 @@ export async function installPi(yes: boolean): Promise<void> {
       privateDirectory(stage, true);
       fs.copyFileSync(path.join(bundle, 'package.json'), path.join(stage, 'package.json')); fs.writeFileSync(path.join(stage, 'package-lock.json'), lock);
       for (const name of ['user.npmrc', 'global.npmrc']) fs.writeFileSync(path.join(stage, name), '', { mode: 0o600 });
-      // npm's dependency tree and integrity hashes come from our shipped lockfile,
-      // not mutable latest tags. No lifecycle scripts or user npm configuration.
       await run(process.execPath, [npm, 'ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org',
         `--userconfig=${path.join(stage, 'user.npmrc')}`, `--globalconfig=${path.join(stage, 'global.npmrc')}`, `--cache=${path.join(paths.home, '.npm')}`], managedEnvironment(), stage, 10 * 60_000);
       const installed = JSON.parse(fs.readFileSync(path.join(stage, 'node_modules', PI_PACKAGE, 'package.json'), 'utf8'));

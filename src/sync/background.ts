@@ -35,9 +35,6 @@ class AutoIndexer {
   private job?: Promise<void>;
   constructor(private ops: Operations) {}
   async tick(): Promise<void> {
-    // Expiry is server lifecycle work, not indexing consent or browser activity.
-    // It also runs while an owned job is in flight; foreground turns are protected
-    // by the conversation module's activity admission checks.
     this.ops.expire?.(this.ops.now());
     if (this.job) return this.job;
     if (!this.ops.enabled()) { this.state.phase = 'off'; return; }
@@ -78,7 +75,6 @@ class AutoIndexer {
       if (signal.aborted || !this.ops.enabled()) return;
       if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
       this.state.phase = 'waiting';
-      // Paid failures retain their durable retry block and completed local work.
       await this.ops.prepareSummaries?.(signal);
       if (!signal.aborted) this.state.phase = 'waiting';
     } catch (error) {

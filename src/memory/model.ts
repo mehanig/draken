@@ -16,8 +16,6 @@ export class LocalEmbedder {
   private async load() {
     if (this.session) return;
     await verifyModelFiles(this.directory);
-    // WASM is deliberately used on the server: no CUDA installer or browser bundle.
-    // The owning pool caps combined CPU use across isolated inference lanes.
     ort.env.wasm.numThreads = this.threads;
     ort.env.wasm.proxy = false;
     ort.env.logLevel = 'error';
@@ -28,7 +26,6 @@ export class LocalEmbedder {
   async embed(text: string, query: boolean): Promise<Float32Array> {
     await this.load();
     const encoded = this.tokenizer!.encode(`${query ? 'query' : 'passage'}: ${text}`, { add_special_tokens: false });
-    // Long code and multilingual passages must contribute beyond their prefix.
     const pooled = new Float32Array(EMBEDDING_DIMENSIONS); let weight = 0;
     for (let start = 0; start < encoded.ids.length; start += 480) {
       const ids = [0, ...encoded.ids.slice(start, start + 480), 2];

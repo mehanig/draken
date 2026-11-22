@@ -1,4 +1,3 @@
-// Host-only Pi SDK session. The CLI owning Docker is also this session's supervisor.
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
 const {selectedPi}=require('../../dist/pi/runtime');
 const {defaultModels}=require('../../dist/sync/models');

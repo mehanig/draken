@@ -3,8 +3,6 @@ import { parentPort, workerData } from 'worker_threads';
 import { LocalEmbedder } from './model';
 import { EMBEDDING_TEXT_LIMIT } from './embedding-contract';
 
-// No database, source-file discovery, download or provider credentials. The
-// owning history process verifies/downloads weights; this lane only reads them.
 if (!parentPort || !path.isAbsolute(workerData?.directory || '')) throw new Error('Invalid embedding lane');
 const model = new LocalEmbedder(workerData.directory, workerData.threads);
 let busy = false;

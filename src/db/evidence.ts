@@ -58,7 +58,7 @@ export class EvidenceReader {
         }
         if (digest(text) !== pointer.text_hash) throw new Error('Frozen projection changed');
         return text;
-      } catch { /* A recorded old path may still resolve after a file move. */ }
+      } catch {}
     }
     throw new Error(UNAVAILABLE_EVIDENCE);
   }
@@ -79,8 +79,6 @@ export class EvidenceReader {
   }
   freeze(item: Evidence): string {
     const previous = pointers.get(item);
-    // Session records are append-only. Encoding an already-read pointer must
-    // not reopen its original; citation/excerpt reads still resolve the bytes.
     if (previous) return encodeEvidence(item, previous);
     const row = this.db.prepare('SELECT e.*,s.agent,s.external_id FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE e.session_id=? AND e.entry_id=?').get(item.session_id, item.entry_id) as any;
     if (!row || row.event_key !== item.event_key || !row.record_hash) throw new Error('Cannot freeze evidence without its verified source record');

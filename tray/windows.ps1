@@ -1,5 +1,3 @@
-# Native notification-area helper. Executed as fixed packaged PowerShell code;
-# never evaluates presentation data or changes execution/application-control policy.
 $ErrorActionPreference = 'Stop'
 [Console]::Out.WriteLine('{"type":"progress","phase":"configuring-output"}')
 [Console]::Out.Flush()

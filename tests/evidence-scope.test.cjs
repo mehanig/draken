@@ -1,4 +1,3 @@
-// Pure public-contract tests: synthetic model outputs, no provider or application imports.
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { prepareEvidence } = require('../dist/evidence');

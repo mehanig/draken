@@ -19,7 +19,6 @@ export function scopeReply(scope: 'unrelated' | 'unclear'): EvidenceResult {
     text: JSON.stringify({ type: 'engineering_scope', scope, message, instruction: 'Give this short scope message, not a substantive answer. No historical citations are needed.' }) };
 }
 
-/** Selection uses the same paid call/accounting path as summarization. */
 export async function selectHistory(found: EvidenceCandidates, query: EvidenceQuery, before: string,
   ask: (payload: unknown, system: string) => Promise<string>, signal: AbortSignal, dependencies: EvidenceDependencies,
   previousQuestions: string[] = [], briefing = '', workflowCreation = false, discussion: EvidenceRequest['discussion'] = []): Promise<EvidenceResult> {
@@ -51,8 +50,6 @@ export async function selectHistory(found: EvidenceCandidates, query: EvidenceQu
     const candidate = candidates[Number(id.slice(1)) - 1];
     const requested = query.question.match(new RegExp(`\\b${candidate.ref}\\s+(?:at\\s+)?offset[ :=]+(\\d{1,7})\\b`, 'i'));
     const offset = requested ? Math.min(1000000, Number(requested[1])) : candidate.offset;
-    // Resolve selected originals again after inference so exclusions or changed
-    // records cannot be replaced with stale text from the candidate request.
     const page = await dependencies.read(candidate.ref, offset, signal, before);
     signal.throwIfAborted();
     if (!page.record.at || page.record.at > before || page.record.session_id !== candidate.session_id ||
@@ -61,8 +58,6 @@ export async function selectHistory(found: EvidenceCandidates, query: EvidenceQu
     }
     selections.push({ ref: candidate.ref, offset: page.offset });
     results.push({ ...page.record, offset: page.offset, score: 1, lead: candidate.lead });
-    // A selected command or response should not lose its neighboring result or
-    // request. These originals were checked by the same read at this cutoff.
     for (const neighbor of page.neighbors) if (neighbor.at && neighbor.at <= before && neighbor.session_id === candidate.session_id) {
       context.push({ ...neighbor, offset: 0, score: 1, qualification: neighbor.qualification + ' Adjacent message excerpt; it may be incomplete.' });
     }

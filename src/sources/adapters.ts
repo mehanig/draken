@@ -94,7 +94,6 @@ export function normalizeSource(source: SourceIdentity, record: PointerRecord, v
   }
   if (!value) return null;
   const entry = normalizeEntry(value, version); if (!entry) return null;
-  // Agent domains prevent identical pi/Claude UUIDs from sharing review coverage.
   entry.event_key = digest(JSON.stringify([source.agent, 1, source.agent === 'codex' ? record.record_hash : entry.event_key, entry.type, entry.role, entry.text]));
   return entry;
 }

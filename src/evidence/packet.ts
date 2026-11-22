@@ -3,7 +3,6 @@ import type { EvidenceCandidates, EvidenceDependencies } from './contracts';
 export const DISCUSSION_HISTORY_BYTES = 32000;
 
 export function historyPacket(found: EvidenceCandidates, cleanText: EvidenceDependencies['cleanText'], maxBytes = 3500, excerptLimit = maxBytes <= 3500 ? 400 : 800) {
-  // Historical labels inside quoted text cannot grant citations in a new answer.
   const quote = (text: string) => cleanText(text, Number.MAX_SAFE_INTEGER)
     .replace(/\[([ECH][a-f0-9]+)\]/gi, '(historical reference $1)');
   const sources = found.results.map(item => {

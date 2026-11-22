@@ -1,4 +1,3 @@
-// Trusted image entry point. Repository commands run only in this container.
 const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:child_process');
 const emit=value=>process.stdout.write(JSON.stringify(value)+'\n');
 function command(argv,cwd,input){return new Promise(resolve=>{

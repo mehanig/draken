@@ -1,5 +1,3 @@
-// Real source files/index reads; model responses are synthetic. These tests
-// check evidence handling, not the quality of an actual model's choices.
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const Database = require('better-sqlite3');

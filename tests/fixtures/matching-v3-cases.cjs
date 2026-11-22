@@ -1,4 +1,3 @@
-// Controlled examples, NOT claims about real session history. Expectations never enter model input.
 function episode({goal,context,entry,result,action,permission,tool='shell',skill='recorded-skill'}) {
   const claim=(description,basis,ref)=>({description,basis,refs:[ref]});
   const stage=(key,action,description,ref)=>({key,action,normalizedAction:action,role:'main',condition:null,claims:[claim(description,'observed',ref)],refs:[ref],tools:[{name:tool,usage:action,refs:[ref]}],skills:[{name:skill,usage:action,refs:[ref]}]});

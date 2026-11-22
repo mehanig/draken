@@ -12,7 +12,7 @@ export interface LeafInput {
   session: string;
   workspace: string;
   chronological_chunk?: number;
-  frozen_text?: true; // Deployed pre-multi-agent v1/v2 transport used the frozen projection verbatim.
+  frozen_text?: true;
   evidence: Evidence[];
   background: Evidence[];
 }
@@ -37,8 +37,6 @@ export class ReusableLeaves {
   constructor(private db: Database.Database, frozenScope: Iterable<Evidence> = [], known: Iterable<Evidence> = frozenScope) {
     this.reader = new EvidenceReader(db, undefined, this.normalization);
     this.scope = new EvidenceScope(db, [...frozenScope].map(item => JSON.parse(this.reader.freeze(item))));
-    // The snapshot already read these append-only records. Reuse those objects
-    // when loading saved batch receipts instead of reading the same files again.
     for (const item of known) this.reads.set(evidenceIdentities(JSON.parse(this.reader.freeze(item)))[0], item);
   }
   /** Cached records are append-only; only current source consent can revoke
@@ -111,8 +109,6 @@ export class ReusableLeaves {
   receipts(model: string): LeafReceipt[] {
     return this.db.prepare('SELECT * FROM summary_leaf_inputs WHERE model=? ORDER BY rowid').all(model) as LeafReceipt[];
   }
-  /** Historical projections are ONLY for exact-key boundary reconstruction.
-   * Admission still goes through encode/read, including every background input. */
   private historical(value: string | Record<string, unknown>): Evidence | undefined {
     const metadata = typeof value === 'string' ? JSON.parse(value) : value;
     const { ref: _ref, ...identity } = metadata;
@@ -194,8 +190,6 @@ export class HistoricalLeafReplay<S extends { key: string }, I extends { items: 
     return [...targets].some(key => {
       const row = caches.get(key);
       if (!row || row.prompt_version !== version || !needsRecovery(key)) return false;
-      // Citation membership only prunes impossible requests. It NEVER proves
-      // primary membership, boundaries, or successful cached coverage.
       try { return (JSON.parse(row.output_json) as NodeSummary).observations.every(item => item.evidence.every(ref => allowed.has(ref))); }
       catch { return false; }
     });
@@ -214,8 +208,6 @@ export class HistoricalLeafReplay<S extends { key: string }, I extends { items: 
     }
     const { legacy, masks } = this.replayed.get(identity)!;
     if (!o.batch || !this.possible(input, targets)) return;
-    // Before a run's own leaves existed, legacy-cache islands could differ.
-    // Explore observed run-time masks and the empty mask, never arbitrary subsets.
     for (const before of [undefined, '', ...times]) {
       if (!this.possible(input, targets)) break;
       const mask = legacy.map(spec => before === '' ? false : o.valid(spec, before));
@@ -229,13 +221,10 @@ export class HistoricalLeafReplay<S extends { key: string }, I extends { items: 
         masks.add(signature);
         (await o.batches(input, keys, false)).forEach(spec => o.discover(spec));
       }
-      // Pre-stable-prefix v3 split oversized wire requests at recursive midpoints.
       if (this.possible(input, targets) && !masks.has(`${signature}:midpoint`)) {
         masks.add(`${signature}:midpoint`);
         (await o.batches(input, keys, true)).forEach(spec => o.discover(spec));
       }
-      // Persist only exhausted attempts, not successes whose receipts could be
-      // evicted. Identity includes actual inputs, recipes, masks and target hashes.
       if (unresolvedBefore.every(o.needsRecovery)) o.db.prepare('INSERT OR IGNORE INTO summary_replay_attempts(identity) VALUES (?)').run(attempt);
     }
   }

@@ -1,4 +1,3 @@
-// Main native controller against local peers/API doubles. No provider or real microphone.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http'), ts = require('typescript');
@@ -80,7 +79,7 @@ test('native controller gates speakers, permits headphones, stops locally, and r
     assert.equal(await f.page.evaluate(() => window.tracks[0].enabled), false);
     await f.page.evaluate(() => window.controller.setVoiceInterruption(true)); assert.equal(await f.page.evaluate(() => window.tracks[0].enabled), true);
     await f.page.evaluate(() => window.controller.interrupt()); assert.equal(await f.page.evaluate(() => window.cue.level()), 0);
-    await f.page.evaluate(() => window.controller.sendText('Next question')); // No new turn.created.
+    await f.page.evaluate(() => window.controller.sendText('Next question'));
     await f.page.waitForFunction(() => window.state.phase === 'speaking' && window.cue.level() > 0.1);
     await f.page.evaluate(() => window.controller.toggleMute()); assert.equal(await f.page.evaluate(() => window.tracks[0].readyState), 'ended');
     await f.page.evaluate(() => window.controller.toggleMute()); assert.equal(await f.page.evaluate(() => window.tracks[1].readyState), 'live');
@@ -136,7 +135,7 @@ test('pending progress survives microphone notices and quiet acknowledgements wi
     await f.page.evaluate(() => { window.channel.send(JSON.stringify({ type: 'turn.created', turn: { role: 'assistant' } })); window.remote.volume.gain.value = 0.15; });
     await f.page.waitForFunction(() => window.state.phase === 'speaking');
     f.emit({ type: 'answer_pending', id: 1, pending: true });
-    await f.page.evaluate(() => { window.remote.volume.gain.value = 0; }); // Deliberately no provider turn.done.
+    await f.page.evaluate(() => { window.remote.volume.gain.value = 0; });
     await f.page.waitForFunction(() => window.state.phase === 'thinking');
     assert.equal(await f.page.evaluate(() => window.state.replyPendingSince), since, 'repeated events do not restart the elapsed timer');
     assert.equal(await f.page.evaluate(() => window.state.answer), 'Let me check that.');

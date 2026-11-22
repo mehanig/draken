@@ -62,7 +62,6 @@ test('client-known reservation IDs cancel before creation and after a lost respo
   await assert.rejects(live.createLiveCall(syncId, signal(), '-'.repeat(36)), /Invalid call/);
   const id = randomUUID(), call = await live.createLiveCall(syncId, signal(), id);
   assert.equal(call.id, id);
-  // The caller need not have consumed the create response to release ownership.
   await live.endLiveCall(id); await live.endLiveCall(id);
   assert.equal((await live.liveStatus()).activeCall, null); assert.equal(activity.callActive, false);
   await assert.rejects(live.createLiveCall(syncId, signal(), id), /already used/);

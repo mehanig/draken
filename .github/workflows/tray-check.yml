@@ -44,5 +44,3 @@ jobs:
       - run: npm run test:tray:native
       - name: Private runtime setup and synthetic loopback protocol
         run: node tests/runtime-smoke.cjs
-      # Startup/update/exit is not proof that a person can see or click the icon.
-      # Manual menu, browser, close-terminal, logout and OS-policy checks remain.

@@ -1,4 +1,3 @@
-// Metadata only: safe to inspect readiness without loading an inference runtime.
 export const MODEL = 'Xenova/multilingual-e5-small';
 export const REVISION = '761b726dd34fb83930e26aab4e9ac3899aa1fa78';
 export const MODEL_ID = `${MODEL}@${REVISION}/q8-mean-normalized-v1`;

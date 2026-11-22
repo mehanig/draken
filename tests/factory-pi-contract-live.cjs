@@ -1,4 +1,3 @@
-// Opt-in actual Pi SDK protocol test. Provider transport and container operations are fixtures; no paid requests.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict'),{pathToFileURL}=require('node:url');
 const {runAgent}=require('../scripts/factory-workspace/agent.cjs'),{sessionPlan}=require('../dist/factory-enrichment');
 async function main(){

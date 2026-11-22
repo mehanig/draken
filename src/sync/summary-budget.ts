@@ -1,7 +1,3 @@
-// Local planning estimates, never provider billing/usage claims. OpenAI publishes
-// 1,050,000 context / 128,000 output for GPT-6 Luna, but the installed pi chat
-// catalog advertises 272,000. Stay below that smaller window, including output
-// and framing headroom; do not modify pi's catalog or assume long-context access.
 export const LUNA_BATCH = {
   version: 'sync-tree-v3-token-batches',
   inputTokens: 96_000,
@@ -27,6 +23,5 @@ export function summaryTokens(text: string): number {
   return tokenizer!.countTokens(text, { disallowedSpecial: new Set<string>() });
 }
 export function promptTokens(prompt: string, system: string): number {
-  // Reserve 20% for tokenizer/framing differences plus fixed session overhead.
   return Math.ceil(summaryTokens(system + '\n' + prompt) * 1.2) + 8192;
 }

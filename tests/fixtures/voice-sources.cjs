@@ -1,8 +1,6 @@
-// Synthetic-only citation-heavy snapshot backed by temporary JSONL originals.
 const path = require('node:path');
 const { frozenEvidence } = require('./source-entry.cjs');
 module.exports = function seedVoiceSources(db, syncId, count = 37) {
-  // Keep originals under the caller's temporary database directory for cleanup.
   const directory = path.join(path.dirname(db.name), 'synthetic-voice-sessions');
   process.env.DRAKEN_PI_SESSIONS_DIR = directory;
   const refs = [];

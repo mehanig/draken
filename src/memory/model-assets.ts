@@ -4,7 +4,6 @@ import { createHash } from 'crypto';
 import { MODEL, REVISION, FILES } from './model-files';
 import { historyUpdate, type ReportHistory } from './types';
 
-// Presence is a cheap readiness hint; inference still verifies the actual bytes.
 export function modelFilesPresent(directory: string): boolean {
   return FILES.every(file => { try { return fs.statSync(path.join(directory, file.name)).size === file.size; } catch { return false; } });
 }

@@ -30,9 +30,6 @@ function validate(text: string) {
   if (source.some(line => !line)) throw new Error('A recap line is empty after privacy filtering.');
   const characters = source.join('\n').length;
   if (characters > 600) throw new Error(`Recap has ${characters} characters; the total limit is 600.`);
-  // Line width is presentation, not meaning. Reflow at existing ASCII spaces
-  // without dropping words, qualifications or splitting a token/code point.
-  // Keep existing point boundaries; too much content still needs one repair.
   const lines: string[] = [];
   for (let line of source) {
     while (line.length > 160) {

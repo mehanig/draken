@@ -38,7 +38,6 @@ test('End releases a server reservation even when the browser has not received t
   } finally {
     release();
     if (reserved) await page.request.post(`/api/voice/live/calls/${reserved}/end`, { data: {} });
-    // Leave the shared synthetic source inventory available to the other tests.
     await expect.poll(async () => (await (await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).busy).toBe(false);
     expect((await page.request.post(`/api/syncs/${sync.id}/discard`)).ok()).toBe(true);
   }

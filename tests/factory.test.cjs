@@ -99,7 +99,6 @@ test('sync enrichment uses the existing final-model allowance and does not pay t
  const run=db.prepare('SELECT invocations,metrics_json FROM sync_runs WHERE id=?').get(chat),metrics=JSON.parse(run.metrics_json);
  assert.equal(run.invocations,1);assert.equal(metrics.length,1);assert.equal(metrics[0].model,models.final);assert.equal(metrics[0].task,'enrich_workflow');assert.equal(metrics[0].status,'completed');
  assert.equal(fs.readFileSync(process.env.DRAKEN_TEST_CALL_LOG,'utf8').trim().split('\n').length,1);
- // An exhausted turn cannot get another allowance just by entering enrichment.
  db.prepare("UPDATE workflow_enrichments SET policy_version='previous-policy'").run();
  await assert.rejects(prepareEnrichment(id,owner,models.final,ask,signal()),/Invocation budget/);
  assert.equal(db.prepare('SELECT invocations FROM sync_runs WHERE id=?').get(chat).invocations,1);

@@ -1,4 +1,3 @@
-// Chronological preparation for an explicitly selected sample, not intent-based search.
 export interface ProcedureRecord {
   ref: string;
   sessionId: string;
@@ -46,7 +45,6 @@ export async function prepareProcedureEvidence(request: ProcedureEvidenceRequest
     }
     const text = dependencies.cleanText(record.text, Number.MAX_SAFE_INTEGER);
     const clipped = text.length > 4000;
-    // Keep the closing qualification as well as the start; never claim complete records.
     records.push({ ...record, role: dependencies.cleanText(record.role, 80),
       text: clipped ? text.slice(0, 3000) + '\n[Middle omitted from this original]\n' + text.slice(-1000) : text, clipped });
   }

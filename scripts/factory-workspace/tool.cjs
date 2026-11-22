@@ -1,4 +1,3 @@
-// Runs only inside the owned container. No host paths, credentials or Docker access.
 const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:child_process');
 const root='/workspace/repo';
 function target(value,create=false,base=root){
