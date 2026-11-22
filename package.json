@@ -33,6 +33,9 @@
   },
   "files": [
     "dist/",
+    "scripts/factory-workspace.cjs",
+    "scripts/factory-workspace/",
+    "docs/factory-enrichment.md",
     "public/",
     "tray/macos.js",
     "tray/windows.ps1",

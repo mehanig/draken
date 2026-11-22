@@ -9,9 +9,9 @@ test('environment cannot grant itself an image, host mount, network permission o
  assert.throws(()=>validate(env,[]),/not approved/);
  for(const field of ['network','mounts','privileged','secrets'])assert.throws(()=>validate({...env,[field]:true},[image]),/Unsupported/);
  assert.throws(()=>validate({...env,checks:[{name:'Bad',argv:['node'],cwd:'./../outside'}]},[image]),/inside/);
- assert.throws(()=>validate({...env,checks:[]},[image]),/checks/);
+ assert.deepEqual(validate({schema:1,image},[image]),{schema:1,image,setup:[],checks:[]});
 });
-test('snapshot includes all committed files, excludes dirty/untracked changes, local Git config and earlier history',async()=>{
+test('snapshot includes all committed files, retains reachable history but excludes dirty/untracked changes and host Git configuration',async()=>{
  const f=fixture();try{
   fs.writeFileSync(path.join(f.dir,'old-secret'),'old historical data');const old=f.commit();f.git('rm','-q','old-secret');
   fs.writeFileSync(path.join(f.dir,'tracked'),'committed');fs.writeFileSync(path.join(f.dir,'hidden-by-archive'),'still part of checkout');fs.writeFileSync(path.join(f.dir,'.gitattributes'),'hidden-by-archive export-ignore\n');fs.writeFileSync(path.join(f.dir,'.env.example'),'not a credential');const commit=f.commit();
@@ -21,7 +21,7 @@ test('snapshot includes all committed files, excludes dirty/untracked changes, l
    execFileSync('git',['init','--bare','-q',unpack]);execFileSync('git',['-C',unpack,'index-pack','--stdin'],{input:result.pack});
    const show=p=>execFileSync('git',['-C',unpack,'show',commit+':'+p],{encoding:'utf8',stdio:['pipe','pipe','pipe']});
    assert.equal(show('tracked'),'committed');assert.equal(show('hidden-by-archive'),'still part of checkout');assert.throws(()=>show('untracked'));
-   assert.throws(()=>execFileSync('git',['-C',unpack,'cat-file','-e',old],{stdio:'pipe'}));assert.equal(fs.readFileSync(path.join(unpack,'config'),'utf8').includes('credential'),false);
+   execFileSync('git',['-C',unpack,'cat-file','-e',old],{stdio:'pipe'});assert.equal(fs.readFileSync(path.join(unpack,'config'),'utf8').includes('credential'),false);
   }finally{fs.rmSync(unpack,{recursive:true,force:true});}
  }finally{f.clean();}
 });
@@ -35,26 +35,27 @@ test('workspace API reads historical results, preserves unknown usage and requir
   assert.equal((await readWorkspaces()).runs[0].status,'completed');await assert.rejects(startWorkspace({requestId:id,ref:'HEAD'}),/workflow/);
   fs.writeFileSync(path.join(dir,'work/result.json'),JSON.stringify({status:'failed',modelCalls:null}));assert.equal((await readWorkspaces()).runs[0].modelCalls,null);
   await assert.rejects(startWorkspace({requestId:'../../escape',ref:'HEAD',propose:false}),/request ID/);assert.throws(()=>cancelWorkspace('../../escape'),/Invalid/);
+  fs.writeFileSync(path.join(dir,'work/result.json'),JSON.stringify({status:'blocked',detail:'Missing workflow credential',modelCalls:2}));fs.writeFileSync(path.join(dir,'work/progress.jsonl'),JSON.stringify({type:'stage-started',name:'Run workflow'})+'\n'+JSON.stringify({type:'stage-result',name:'Run workflow',status:'blocked',code:1})+'\n');const blocked=(await readWorkspaces()).runs[0];assert.equal(blocked.status,'blocked');assert.equal(blocked.stages[0].status,'blocked');assert.equal(blocked.detail,'Missing workflow credential');
   delete process.env.DRAKEN_WORKSPACE_REPO;assert.equal((await readWorkspaces()).available,false);assert.deepEqual((await readWorkspaces()).runs,[]);
  }finally{for(const key of Object.keys(process.env))if(!(key in prior))delete process.env[key];Object.assign(process.env,prior);f.clean();}
 });
-test('missing declaration stops before Docker or inference even with the old proposal flag',()=>{
+test('missing declaration stops before Docker or inference',()=>{
  const f=fixture();try{
   fs.writeFileSync(path.join(f.dir,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));f.commit();
   const output=path.join(f.dir,'output');
-  const result=require('node:child_process').spawnSync(process.execPath,[path.resolve('scripts/factory-workspace.cjs'),f.dir,'HEAD',output],{encoding:'utf8',env:{...process.env,DRAKEN_DOCKER_BIN:'/must-not-run-docker',DRAKEN_DOCKER_HOST:'unix:///unused',DRAKEN_WORKSPACE_ALLOWED_IMAGES:JSON.stringify([image]),DRAKEN_WORKSPACE_PROPOSE:'true',DRAKEN_PI_BIN:'/must-not-run-model'}});
+  const result=require('node:child_process').spawnSync(process.execPath,[path.resolve('scripts/factory-workspace.cjs'),f.dir,'HEAD',output,'/unused-brief.json'],{encoding:'utf8',env:{...process.env,DRAKEN_DOCKER_BIN:'/must-not-run-docker',DRAKEN_DOCKER_HOST:'unix:///unused',DRAKEN_WORKSPACE_ALLOWED_IMAGES:JSON.stringify([image]),DRAKEN_PI_BIN:'/must-not-run-model'}});
   assert.equal(result.status,1);const saved=JSON.parse(fs.readFileSync(path.join(output,'result.json'),'utf8'));
   assert.match(saved.detail,/Missing required file: \.draken\/environment\.json/);assert.equal(saved.modelCalls,0);
   assert.equal(fs.existsSync(path.join(output,'model-request.json')),false);assert.equal(fs.existsSync(path.join(output,'image')),false);
  }finally{f.clean();}
 });
-test('snapshot rejects tracked credential paths, submodules and LFS rather than silently omitting source',async()=>{
+test('snapshot does not ban committed filenames, submodules or LFS declarations',async()=>{
  for(const kind of ['secret','submodule','lfs']){const f=fixture();try{
   fs.writeFileSync(path.join(f.dir,'tracked'),'data');const commit=f.commit();
   if(kind==='secret')fs.writeFileSync(path.join(f.dir,'.env'),'TOKEN=private');
   if(kind==='lfs')fs.writeFileSync(path.join(f.dir,'.gitattributes'),'*.bin filter=lfs\n');
   if(kind==='submodule')f.git('update-index','--add','--cacheinfo','160000,'+commit+',dependency');
   if(kind==='submodule')f.git('commit','-qm','submodule');else f.commit();
-  await assert.rejects(snapshot(f.dir,'HEAD',new AbortController().signal),/credential|Submodules|LFS/);
+  const result=await snapshot(f.dir,'HEAD',new AbortController().signal);assert.equal(result.commit,f.git('rev-parse','HEAD').trim());assert.ok(result.pack.length>0);
  }finally{f.clean();}}
 });

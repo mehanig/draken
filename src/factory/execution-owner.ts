@@ -13,7 +13,7 @@ export function claimFactoryExecution(id: string): () => void {
       if (!fs.existsSync(path.join(dir, 'request.json'))) continue;
       if (fs.existsSync(result)) {
         let status: unknown; try { status = JSON.parse(fs.readFileSync(result, 'utf8')).status; } catch { /* An unreadable result is not completion. */ }
-        if (!['completed', 'failed', 'cancelled'].includes(String(status))) throw new HttpError(409, 'A Factory run needs cleanup or inspection.');
+        if (!['completed', 'blocked', 'failed', 'cancelled'].includes(String(status))) throw new HttpError(409, 'A Factory run needs cleanup or inspection.');
         continue;
       }
       const exit = fs.existsSync(path.join(dir, 'exit.json'));

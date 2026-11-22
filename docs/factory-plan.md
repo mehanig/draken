@@ -42,7 +42,7 @@ Permitted history
 | Discovery | Historical procedure, applicability, source support, qualifications and endpoint | Inventing successful outcomes or execution permission |
 | Enrichment | Reusable steps, inputs, checks, review, repair and completion evidence | Per-action executable bindings or invented credentials |
 | Pi execution session | Inspecting current state, choosing commands, completing all applicable steps, checking outcomes and reporting blockers | Changing its authorized scope or claiming success without evidence |
-| Host | Workspace/process lifecycle, tools, configured credentials, source permissions, accounting, cancellation, records and repository verification | Reimplementing each workflow action as product code |
+| Host | Workspace/process lifecycle, tools, configured credentials, source permissions, accounting, cancellation and records | Reimplementing workflow actions or forcing every workflow through a code-patch/check sequence |
 | Factory UI | Saved workflows, required inputs, execution settings, Run, progress, results and actionable failures | A second workflow planner or per-action execution architecture |
 
 ### One session, ordinary tools
@@ -73,9 +73,9 @@ Provide the authorized repository identity, remote, base/ref and sufficient Git 
 
 - Completion means reaching the selected workflow's endpoint, not merely ending the agent turn, collecting a patch or passing unrelated repository tests.
 - Record actual commands/results and relevant evidence: for example, branch/commit identity, PR URL and state, published package version, deployment result or observed live behavior. These are examples of evidence, not a fixed catalog of supported actions.
-- Enrichment defines task-relevant checks. The session executes them and evaluates their results. General host verification supplements that evidence; it does not need a new action-specific implementation for every endpoint.
-- Preserve original host verification definitions and report their results honestly. Legitimate task edits to tests, scripts, manifests or CI are not inherently forbidden. Distinguish a necessary repository change from weakening a check to fake success; do not use blanket file-category bans as a substitute.
-- Checks required before a delivery step must occur before it. Host checks run after delivery cannot be described as pre-delivery approval. Keep any required ordering within the complete workflow; do not replace delivery with patch-only completion to avoid solving ordering.
+- Enrichment defines task-relevant checks. The session executes them and evaluates their results. Environment checks are suggestions available to the workflow, not a mandatory baseline or post-session verifier. The host preserves the patch/result without imposing another acceptance sequence.
+- Report check results honestly. Legitimate task edits to tests, scripts, manifests or CI are not forbidden. Distinguish necessary changes from weakening a check to fake success; do not use blanket file-category bans.
+- Checks required before a delivery step must occur before it, within the same complete workflow. Do not replace delivery with patch-only completion.
 - Report completed, blocked, failed and cancelled outcomes accurately. Preserve reasons and partial results; do not turn an unmet endpoint into success because baseline checks passed.
 - After an uncertain external action, inspect its state before repeating it. Do not silently rerun failed workflows or duplicate external side effects.
 
@@ -87,20 +87,11 @@ Keep discovery and enrichment modules independent of host services. Integrate th
 
 These responsibilities are general execution support. They are not grounds to invent network restrictions, action catalogs or blanket delivery prohibitions.
 
-## 6. Known implementation gaps — not target restrictions
+## 6. Implementation alignment
 
-At `6e93c1c`, this plan is **not fully implemented**. This documentation correction does not change runtime behavior.
+The generic-workflow cleanup removes the publication prohibition, protected-file classifier, snapshot filename/submodule/LFS bans, checks-only execution mode and mandatory baseline/fresh-verification sequence. It preserves reachable Git history, accepts an explicitly configured remote and Docker environment file, records blocked outcomes, and includes the execution scripts in the package file list. These changes belong to a new PR after 0.11.0; they are not a claim that published 0.11.0 already has them.
 
-| Current issue | Required correction |
-|---|---|
-| `src/factory-enrichment/session.ts` sets `publication: false`; enrichment and agent prompts prohibit publication | Remove blanket prohibitions and preserve the selected, authorized endpoint across contracts, prompts, saved guidance and tests |
-| Broad protected-file checks reject edits to existing tests/scripts/manifests/CI | Audit against legitimate workflow needs; preserve trustworthy verification without excluding whole classes of engineering tasks |
-| Snapshot excludes earlier history and host remotes/configuration | Determine the Git context needed for an authorized branch/push/PR and supply it without importing host secrets |
-| Workflow authentication/tool availability is not demonstrated end to end | Establish the needed general environment/credential configuration; report missing prerequisites specifically, not as unsupported actions |
-| Repository-check success and agent blocker reporting do not fully express workflow outcomes | Preserve the actual endpoint, evidence and blocked/failed/cancelled distinctions; inspect check/delivery ordering |
-| Execution scripts are checkout-only; SDK selection and restart recovery have remaining work | Track these as host-runtime tasks, not reasons for per-action executors |
-
-Ordinary Docker networking and preparation-time saved enrichment are already implemented. Do not rebuild those as new subsystems. Audit the complete active path before choosing the next changes; the table identifies known gaps, not proof that no others exist.
+Ordinary Docker networking and preparation-time saved enrichment remain. SDK selection is still separately qualified and automatic restart reconciliation is unfinished. Workflow tools and credentials must actually be configured, and real endpoint proof must be reported separately from fixture tests. No implementation or test can establish that every possible workflow will succeed; the design must not impose action-specific prohibitions or require new code for ordinary workflow steps.
 
 ## 7. Required implementation review
 

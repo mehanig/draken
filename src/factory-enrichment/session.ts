@@ -6,7 +6,7 @@ export interface SessionPlan {
   workflow: Discovery;
   enrichment: Enrichment;
   task: string;
-  policy: { locationKey: string; maxCalls: number; tools: readonly ['read', 'write', 'edit', 'bash']; publication: false };
+  policy: { locationKey: string; maxCalls: number; tools: readonly ['read', 'write', 'edit', 'bash'] };
 }
 /** Validate only declared workflow inputs; the execution objective always comes from the workflow. */
 export function workflowRequest(enrichment: Enrichment, values: unknown): { inputs: Record<string, string>; task: string } {
@@ -29,5 +29,5 @@ export function sessionPlan(workflow: Discovery, task: string, locationKey: stri
   if (typeof task !== 'string' || !task.trim() || task.length > 4000 || workflow.locationKey !== locationKey) throw Error('Invalid workflow session or repository scope');
   if (!enrichment || JSON.stringify(enrich(workflow, enrichment.guidance)) !== JSON.stringify(enrichment)) throw Error('Current saved workflow enrichment required');
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 64) throw Error('Invalid agent invocation allowance');
-  return structuredClone({ format: 'factory-agent-session-v2', workflow, enrichment, task, policy: { locationKey, maxCalls, tools: ['read', 'write', 'edit', 'bash'], publication: false } });
+  return structuredClone({ format: 'factory-agent-session-v2', workflow, enrichment, task, policy: { locationKey, maxCalls, tools: ['read', 'write', 'edit', 'bash'] } });
 }

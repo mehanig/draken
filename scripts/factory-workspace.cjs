@@ -26,46 +26,39 @@ async function snapshot(repo,ref,signal){
  const commit=(await git(['rev-parse','--verify',ref+'^{commit}'])).toString().trim();if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit))throw Error('Invalid resolved commit');
  const objectFormat=(await git(['rev-parse','--show-object-format'])).toString().trim();if(!['sha1','sha256'].includes(objectFormat))throw Error('Unsupported Git object format');
  const entries=(await git(['ls-tree','-rz','--full-tree',commit])).toString().split('\0').filter(Boolean).map(line=>{const tab=line.indexOf('\t');return {mode:line.slice(0,6),file:line.slice(tab+1)};});
- if(entries.some(e=>e.mode==='160000'))throw Error('Submodules require an explicit snapshot policy; refusing an incomplete checkout');
- if(entries.some(e=>/(^|\/)(?:\.env(?:\.(?!example$|sample$|template$)[^/]+)?|\.npmrc|id_rsa|id_ed25519|credentials(?:\.json)?|[^/]+\.(?:pem|key))$/.test(e.file)))throw Error('Potential credential file is tracked; review it before granting workspace access');
  const files={};for(const entry of entries){
-  if(entry.file.endsWith('.gitattributes')){const text=(await git(['show',commit+':'+entry.file])).toString();if(/filter\s*=\s*lfs/.test(text))throw Error('Git LFS requires an explicit snapshot policy; refusing pointer-only source');}
   if(entry.file==='.draken/environment.json'){
    if(entry.mode!=='100644'&&entry.mode!=='100755')throw Error('Environment inputs must be regular committed files');
    const content=(await git(['show',commit+':'+entry.file])).toString();if(content.length>80000)throw Error('Environment input exceeds 80 KB');files[entry.file]=content;
   }
  }
  if(JSON.stringify(files).length>200000)throw Error('Environment context exceeds 200 KB');
- const objects=await git(['rev-list','--objects','--no-object-names',commit+'^{tree}']);
- const pack=await git(['pack-objects','--stdout','--threads=1'],Buffer.concat([Buffer.from(commit+'\n'),objects]));
+ const pack=await git(['pack-objects','--stdout','--revs','--threads=1'],Buffer.from(commit+'\n'));
+ const shallowFile=path.resolve(repo,(await git(['rev-parse','--git-path','shallow'])).toString().trim());
+ const shallow=fs.existsSync(shallowFile)?fs.readFileSync(shallowFile,'utf8'):'';
  if(workflowLocation(repo).key!==location.key)throw Error('Repository changed while exporting its snapshot');
- return {commit,objectFormat,files,pack,fileCount:entries.length,locationKey:location.key,paths:entries.map(entry=>entry.file)};
+ return {commit,objectFormat,files,pack,fileCount:entries.length,locationKey:location.key,shallow};
 }
 async function main(){
  process.umask(0o077);
  const [repoArg,ref,outputArg,briefFile]=process.argv.slice(2),repo=path.resolve(repoArg||'.'),output=path.resolve(outputArg||'.');
  const binary=process.env.DRAKEN_DOCKER_BIN,host=process.env.DRAKEN_DOCKER_HOST;
  const approved=JSON.parse(process.env.DRAKEN_WORKSPACE_ALLOWED_IMAGES||'[]');
- if(!repoArg||!ref||!outputArg||!binary||!host||!Array.isArray(approved)||!approved.length||approved.length>16||approved.some(image=>!pinned(image)))throw Error('Usage: factory-workspace.cjs REPOSITORY COMMIT NEW_OUTPUT_DIRECTORY; configure Docker and DRAKEN_WORKSPACE_ALLOWED_IMAGES');
+ if(!repoArg||!ref||!outputArg||!briefFile||!binary||!host||!Array.isArray(approved)||!approved.length||approved.length>16||approved.some(image=>!pinned(image)))throw Error('Usage: factory-workspace.cjs REPOSITORY COMMIT NEW_OUTPUT_DIRECTORY BRIEF_FILE; configure Docker and DRAKEN_WORKSPACE_ALLOWED_IMAGES');
  fs.mkdirSync(output,{mode:0o700});const controller=new AbortController();const abort=()=>controller.abort();process.once('SIGTERM',abort);process.once('SIGINT',abort);const deadline=setTimeout(abort,900000);
  const save=(name,value)=>{const temporary=path.join(output,'.'+crypto.randomUUID());const fd=fs.openSync(temporary,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}try{fs.linkSync(temporary,path.join(output,name));const directory=fs.openSync(output,'r');try{fs.fsyncSync(directory);}finally{fs.closeSync(directory);}}finally{fs.unlinkSync(temporary);}};
  const record=value=>{const fd=fs.openSync(path.join(output,'events.jsonl'),'a',0o600);try{fs.writeFileSync(fd,JSON.stringify(value)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}const {stdout,stderr,...progress}=value;const status=fs.openSync(path.join(output,'progress.jsonl'),'a',0o600);try{fs.writeFileSync(status,JSON.stringify(progress)+'\n');fs.fsyncSync(status);}finally{fs.closeSync(status);}if(value.type==='stage-started'||value.type==='stage-result')console.log(value.type,value.name,value.code??'');};
  const docker=(args,options={})=>processCall(binary,['--host',host,...args],{...options,env:{PATH:process.env.PATH,HOME:process.env.HOME,XDG_RUNTIME_DIR:process.env.XDG_RUNTIME_DIR}});
  const prefix='draken-workspace-'+crypto.randomUUID(),container=prefix+'-worker',volume=prefix+'-files';
- save('resources.json',{prefix,container,volume,exporter:prefix+'-export',verifier:prefix+'-verify',verificationVolume:prefix+'-verification-files'});
- const resources=[];let outcome,modelCalls=0,source,image,environment,authorization,checkoutComplete=false,retainVolume=false,changedFiles=[];
+ save('resources.json',{prefix,container,volume,exporter:prefix+'-export'});
+ const resources=[];let outcome,modelCalls=0,source,image,environment,authorization,checkoutComplete=false,retainVolume=false;
  const accounting=()=>{const file=path.join(output,'agent/status.json');if(!fs.existsSync(file))return {};try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return {modelCalls:null,accountingComplete:false};}};
  const receive=event=>{record(event);if(event.type==='stage-result'&&event.name==='Check out repository'&&event.commit===source.commit&&event.code===0)checkoutComplete=true;};
- async function runWorker(input,allowFailure=false){
-  let result;try{await docker(['exec','-i',container,'node','/factory/worker.cjs'],{signal:controller.signal,timeout:900000,limit:64_000_000,input:JSON.stringify(input),onLine:line=>{const event=JSON.parse(line);receive(event);if(event.type==='result')result=event;}});}
-  catch(error){if(!allowFailure||error.exitCode!==1||result?.status!=='failed')throw error;}
-  if(!result)throw Error('Workspace command outcome is unconfirmed');return result;
- }
  try{
-  source=await snapshot(repo,ref,controller.signal);save('source.json',{repo,locationKey:source.locationKey,commit:source.commit,objectFormat:source.objectFormat,fileCount:source.fileCount,packSHA256:crypto.createHash('sha256').update(source.pack).digest('hex'),uncommittedIncluded:false,historyIncluded:false});fs.writeFileSync(path.join(output,'source.pack'),source.pack,{mode:0o600,flag:'wx'});
+  source=await snapshot(repo,ref,controller.signal);save('source.json',{repo,ref,locationKey:source.locationKey,commit:source.commit,objectFormat:source.objectFormat,fileCount:source.fileCount,packSHA256:crypto.createHash('sha256').update(source.pack).digest('hex'),uncommittedIncluded:false,historyIncluded:true});fs.writeFileSync(path.join(output,'source.pack'),source.pack,{mode:0o600,flag:'wx'});
   if(!Object.hasOwn(source.files,'.draken/environment.json'))throw Error('Missing required file: .draken/environment.json. Add and commit it to the selected branch or commit before running repository checks.');
   environment=validate(JSON.parse(source.files['.draken/environment.json']),approved);
-  if(briefFile){authorization=loadBrief(path.resolve(briefFile),repo,source.commit);sdkConfiguration();await authorization.authorize(controller.signal);save('workflow.json',authorization.brief);}
+  authorization=loadBrief(path.resolve(briefFile),repo,source.commit);sdkConfiguration();await authorization.authorize(controller.signal);save('workflow.json',authorization.brief);
   const info=JSON.parse((await docker(['image','inspect',environment.image],{signal:controller.signal})).toString())[0];assertDockerHost(JSON.parse((await docker(['info','--format','{{json .}}'],{signal:controller.signal})).toString()),host,info.Id);
   save('environment.json',environment);
   const tool=fs.readFileSync(path.join(__dirname,'factory-workspace/tool.cjs')),worker=fs.readFileSync(path.join(__dirname,'factory-workspace/worker.cjs'));
@@ -76,26 +69,18 @@ async function main(){
   if(!/^sha256:[a-f0-9]{64}$/.test(image))throw Error('Build did not return a pinned image ID');
   save('image.json',{id:image,base:environment.image,recipe:key});
   resources.push(['volume',volume]);await docker(['volume','create','--label','draken.factory.run='+prefix,volume]);
-  resources.push(['container',container]);await docker(['create','-i',...dockerIsolation(container,'bridge',prefix),'--mount',`type=volume,src=${volume},dst=/workspace`,image,...(authorization?['node','-e','setInterval(()=>{},1000)']:[])]);
-  save('container.json',JSON.parse((await docker(['inspect',container])).toString())[0]);
-  if(authorization){
+  const taskEnv=process.env.DRAKEN_WORKSPACE_ENV_FILE?['--env-file',path.resolve(process.env.DRAKEN_WORKSPACE_ENV_FILE)]:[];
+  resources.push(['container',container]);await docker(['create','-i',...dockerIsolation(container,'bridge',prefix),...taskEnv,'--mount',`type=volume,src=${volume},dst=/workspace`,image,'node','-e','setInterval(()=>{},1000)']);
+  const inspection=JSON.parse((await docker(['inspect',container])).toString())[0];delete inspection.Config.Env;save('container.json',inspection);
    await docker(['start',container]);
-   const input={commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),environment};
-   await runWorker({...input,mode:'prepare'});
-   const baseline=await runWorker({...input,mode:'checks',label:'Baseline'},true);save('baseline.json',baseline);
+   const input={commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),shallow:source.shallow,remote:process.env.DRAKEN_WORKSPACE_REMOTE||'',environment};
+   await docker(['exec','-i',container,'node','/factory/worker.cjs'],{signal:controller.signal,timeout:900000,limit:64_000_000,input:JSON.stringify(input),onLine:line=>receive(JSON.parse(line))});
    record({type:'stage-started',name:'Run workflow',phase:'agent'});
-   const agent=await runAgent({directory:path.join(output,'agent'),sessionDirectory:authorization.sessionDirectory,brief:authorization.brief,environment,baseline,signal:controller.signal,record,maxCalls:authorization.brief.policy.maxCalls,authorize:()=>authorization.authorize(controller.signal),invoke:async(request,signal)=>{
+   const agent=await runAgent({directory:path.join(output,'agent'),sessionDirectory:authorization.sessionDirectory,brief:authorization.brief,ref,environment,signal:controller.signal,record,maxCalls:authorization.brief.policy.maxCalls,authorize:()=>authorization.authorize(controller.signal),invoke:async(request,signal)=>{
     const raw=await docker(['exec','-i',container,'node','/factory/tool.cjs'],{signal,timeout:245000,limit:3_000_000,input:JSON.stringify(request)});const response=JSON.parse(raw.toString());if(!response.ok)throw Error(response.error);return response.value;
    }});
-   modelCalls=agent.modelCalls;record({type:'stage-result',name:'Run workflow',phase:'agent',code:0});
-   outcome={status:'completed',detail:'Agent finished; verification pending',commit:source.commit,image,modelCalls,sessionId:agent.sessionId,summary:agent.summary,output};
-  }else{
-  await docker(['start','--attach','--interactive',container],{signal:controller.signal,timeout:900000,limit:64_000_000,input:JSON.stringify({commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),environment}),onLine:line=>{
-   const event=JSON.parse(line);record(event);if(event.type==='stage-result'&&event.name==='Check out repository'&&event.commit===source.commit&&event.code===0)checkoutComplete=true;if(event.type==='result')outcome=event;
-  }});
-  const state=JSON.parse((await docker(['inspect','--format','{{json .State}}',container])).toString());if(state.OOMKilled||!outcome||!['completed','failed'].includes(outcome.status)||(state.ExitCode!==0&&!(state.ExitCode===1&&outcome.status==='failed')))throw Error('Workspace exited without a confirmed result');
-  outcome={...outcome,commit:source.commit,image,modelCalls,output};
-  }
+   modelCalls=agent.modelCalls;record({type:'stage-result',name:'Run workflow',phase:'agent',status:agent.status,code:agent.status==='completed'?0:1});
+   outcome={status:agent.status,detail:agent.summary,commit:source.commit,image,modelCalls,sessionId:agent.sessionId,summary:agent.summary,output};
  }catch(error){outcome={status:controller.signal.aborted?'cancelled':'failed',detail:error.message,modelCalls,output,...accounting()};save('failure.json',outcome);}
  finally{
   if(checkoutComplete){
@@ -106,25 +91,11 @@ async function main(){
     await docker(['create','-i',...dockerIsolation(exporter,'none',prefix),'--mount',`type=volume,src=${volume},dst=/workspace,readonly`,image]);
     save('export-container.json',JSON.parse((await docker(['inspect',exporter])).toString())[0]);
     let collected=false;
-    await docker(['start','--attach','--interactive',exporter],{timeout:60000,limit:8_000_000,input:JSON.stringify({commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),exportOnly:true}),onLine:line=>{
-     const event=JSON.parse(line);if(event.type==='patch'&&event.base===source.commit){const fd=fs.openSync(path.join(output,'changes.patch'),'wx',0o600);try{fs.writeFileSync(fd,event.patch);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}changedFiles=event.files||[];record({type:'patch-saved',base:event.base,bytes:Buffer.byteLength(event.patch)});collected=true;}
+    await docker(['start','--attach','--interactive',exporter],{timeout:60000,limit:8_000_000,input:JSON.stringify({commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),shallow:source.shallow,exportOnly:true}),onLine:line=>{
+     const event=JSON.parse(line);if(event.type==='patch'&&event.base===source.commit){const fd=fs.openSync(path.join(output,'changes.patch'),'wx',0o600);try{fs.writeFileSync(fd,event.patch);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}record({type:'patch-saved',base:event.base,bytes:Buffer.byteLength(event.patch)});collected=true;}
     }});
     const state=JSON.parse((await docker(['inspect','--format','{{json .State}}',exporter])).toString());if(state.ExitCode!==0||!collected)throw Error('Patch collection failed');
    }catch(error){retainVolume=true;outcome={...outcome,status:'interrupted',detail:'Patch collection failed; workspace retained for inspection',retainedVolume:volume,patchError:error.message};}
-  }
-  if(authorization&&outcome.status==='completed'){
-   try{
-    await authorization.authorize(controller.signal);
-    const checkEntries=new Set([...environment.setup,...environment.checks].flatMap(step=>step.argv.map(arg=>path.posix.normalize(path.posix.join(step.cwd||'.',arg)))));
-    const protectedFile=({status,file})=>checkEntries.has(file)||/^(?:\.draken|\.github)\//.test(file)||/(^|\/)(?:package(?:-lock)?\.json|(?:tsconfig|knip)[^/]*\.jsonc?)$/.test(file)||(status!=='A'&&(/(^|\/)(?:tests?(?:\/|\.)|[^/]+\.(?:test|spec)\.)/.test(file)||file.startsWith('scripts/')));
-    if(changedFiles.some(protectedFile))throw Error('Candidate changes protected check, dependency or policy files; explicit review required');
-    const verify=prefix+'-verify',verificationVolume=prefix+'-verification-files';resources.push(['volume',verificationVolume]);await docker(['volume','create','--label','draken.factory.run='+prefix,verificationVolume]);
-    resources.push(['container',verify]);await docker(['create','-i',...dockerIsolation(verify,'bridge',prefix),'--mount',`type=volume,src=${verificationVolume},dst=/workspace`,image]);
-    save('verification-container.json',JSON.parse((await docker(['inspect',verify])).toString())[0]);let verified;
-    await docker(['start','--attach','--interactive',verify],{signal:controller.signal,timeout:900000,limit:64_000_000,input:JSON.stringify({commit:source.commit,objectFormat:source.objectFormat,pack:source.pack.toString('base64'),environment,candidatePatch:fs.readFileSync(path.join(output,'changes.patch'),'utf8'),label:'Verification'}),onLine:line=>{const event=JSON.parse(line);record(event);if(event.type==='result')verified=event;}});
-    const state=JSON.parse((await docker(['inspect','--format','{{json .State}}',verify])).toString());if(state.ExitCode!==0||state.OOMKilled||verified?.status!=='completed')throw Error('Candidate verification failed');
-    await authorization.authorize(controller.signal);save('verification.json',{...verified,scope:'frozen-repository-checks',taskAcceptance:'not inferred from repository checks',checkDefinitionSHA256:fingerprint(environment.checks),patchSHA256:crypto.createHash('sha256').update(fs.readFileSync(path.join(output,'changes.patch'))).digest('hex')});outcome.detail='Workflow checks passed in a fresh workspace; patch retained for review';
-   }catch(error){outcome={...outcome,status:controller.signal.aborted?'cancelled':'failed',detail:error.message};}
   }
   outcome={...outcome,...accounting()};
   if(outcome.status==='completed'&&outcome.accountingComplete===false)outcome={...outcome,status:'failed',detail:'Agent usage is unconfirmed'};
