@@ -48,4 +48,6 @@ export function initProcessSchema(db: Database.Database): void {
   `);
   const columns = new Set((db.prepare('PRAGMA table_info(work_episodes)').all() as { name: string }[]).map(c => c.name));
   if (!columns.has('learning_status')) db.exec("ALTER TABLE work_episodes ADD COLUMN learning_status TEXT NOT NULL DEFAULT 'pending' CHECK(learning_status IN ('pending','completed'))");
+  const enrichmentColumns = new Set((db.prepare('PRAGMA table_info(workflow_enrichments)').all() as { name: string }[]).map(c => c.name));
+  if (!enrichmentColumns.has('run_table')) db.exec("ALTER TABLE workflow_enrichments ADD COLUMN run_table TEXT NOT NULL DEFAULT 'background_runs' CHECK(run_table IN ('background_runs','sync_runs'))");
 }
