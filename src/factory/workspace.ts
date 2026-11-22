@@ -45,9 +45,9 @@ function view(request: Request): WorkspaceRun {
   const stages: WorkspaceRun['stages'] = []; const progress = path.join(work, 'progress.jsonl');
   const file = fs.existsSync(progress) ? progress : path.join(work, 'events.jsonl');
   if (fs.existsSync(file)) for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
-    let event: { type: string; name: string; code?: number }; try { event = JSON.parse(line); } catch { continue; }
+    let event: { type: string; name: string; code?: number; status?: string }; try { event = JSON.parse(line); } catch { continue; }
     if (event.type === 'stage-started') stages.push({ name: event.name, status: 'running' });
-    if (event.type === 'stage-result') { const stage = [...stages].reverse().find(s => s.name === event.name); if (stage) stage.status = event.code === 0 ? 'passed' : 'failed'; }
+    if (event.type === 'stage-result') { const stage = [...stages].reverse().find(s => s.name === event.name); if (stage) stage.status = event.status === 'blocked' ? 'blocked' : event.code === 0 ? 'passed' : 'failed'; }
   }
   const status = result?.status || (jobs.has(request.id) ? 'running' : exit && !stages.length && !fs.existsSync(path.join(work, 'resources.json')) ? exit.cancelled ? 'cancelled' : 'failed' : 'interrupted');
   if (status !== 'running') for (const stage of stages) if (stage.status === 'running') stage.status = 'unverified';

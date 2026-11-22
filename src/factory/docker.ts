@@ -5,7 +5,7 @@ export function dockerIsolation(name: string, network: string, run: string): str
     '--memory-swap=4096m', '--cpus=2',
     '--log-driver=json-file', '--log-opt', 'max-size=8m', '--log-opt', 'max-file=1', '--ulimit', 'nofile=1024:1024',
     '--network', network, '--ipc=private', '--init', '--tmpfs', '/tmp:rw,exec,nosuid,nodev,size=1024m',
-    '--env', 'HOME=/tmp/home', '--env', 'DRAKEN_DATA_DIR=/tmp/data', '--env', 'DRAKEN_PI_SESSIONS_DIR=/tmp/no-sessions'];
+    '--env', 'HOME=/tmp/home'];
 }
 export function assertDockerHost(info: { SecurityOptions?: string[]; MemoryLimit?: boolean; PidsLimit?: boolean; CpuCfsQuota?: boolean }, host: string, image: string): void {
   if (!/^sha256:[a-f0-9]{64}$/.test(image) || !host.startsWith('unix:///')) throw Error('A pinned image ID and local Docker socket are required');

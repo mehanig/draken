@@ -1,76 +1,50 @@
-# Factory: current implementation and operating guide
+# Factory: saved workflows, one execution session
 
-**Design authority: [Factory plan](factory-plan.md).** This guide describes the current code, not the desired limits of the product. The current publication prohibition, broad protected-file checks and incomplete Git/credential setup are implementation gaps to correct—not requirements to preserve. Updating the plan has not yet removed them from runtime code. Workflow actions such as PR creation and publication belong to the agent's complete workflow, not separate Factory executors.
+See [the Factory plan](factory-plan.md) for the product design. Discover → enrich during preparation → save → display → run the selected workflow. Opening Factory starts no model calls. Run uses saved guidance, concrete workflow-defined inputs and the selected repository ref; it does not regenerate enrichment.
 
-PR #54 is merged. Execution remains a checkout-only prototype: its runtime scripts are not shipped in the 0.11.0 npm package. Opening or refreshing Factory starts no inference or execution.
+## Execution
 
-## Intended lifecycle
+The host creates a Docker workspace from the selected committed revision and its reachable Git history. Dirty/untracked host files, host Git configuration, hooks and credentials are not copied. Committed filenames are not filtered. Submodules and LFS declarations are not rejected: the workflow can initialize/fetch their content using ordinary Git tools, its configured remote and credentials.
 
-**Discover → enrich during preparation → save the enriched workflow → display it in Factory → Run tasks using the saved enrichment.**
+The committed `.draken/environment.json` chooses an approved pinned image, optional setup commands and optional suggested checks. Setup runs before the agent. **Checks, review, repair and delivery belong to the workflow**, not a fixed host-side baseline/patch-verification sequence. The agent receives the suggested checks and decides how they apply. Required checks must precede dependent delivery actions.
 
-Discovery records historical observations. Enrichment adds reusable preparation, execution, checks, self-review, recovery, completion criteria and risks. It defines the concrete inputs the workflow needs, if any, and is not tied to a particular checkout or execution session. Factory renders those saved input definitions, not a generic task/prompt box. The server derives the execution objective from the selected workflow and validates only its declared input values. The later coding session adapts its task plan after inspecting the repository; it does **not** regenerate workflow enrichment.
+One host-side Pi session executes the complete user-approved workflow. Its read/write/edit/bash tools run inside the container, with no host fallback. Any repository file may be edited, including tests, manifests, scripts and CI. Ordinary Git, HTTP, npm and other installed clients can push, create PRs, publish or deploy when those actions belong to the selected workflow. No action catalog or special PR/release executor exists.
 
-- Normal background preparation enriches new verified discoveries before that preparation job completes. It uses the existing preparation owner, consent/cancellation checks and remaining invocation allowance.
-- Enrichment uses the final summarization model (`defaultModels().final`, currently `openai/gpt-6-astra`), through normal `modelCall` accounting. It is one call, with no repair loop or silent retry.
-- `workflow_enrichments` stores each attempt, raw output, validated output, model and accounting-owner ID. The saved result is tied to the discovery revision, host-policy version and enrichment-prompt revision. Historical observations remain unchanged; model guidance and mandatory host requirements are separate.
-- Factory shows the saved execution guidance, review checks, completion criteria, risks and host requirements. Older discoveries without enrichment are marked **Awaiting enrichment — not ready to run**, with an explicit **Enrich workflow** action. Failed attempts offer an explicit retry. These actions use the same preparation owner; they do not clear or retry an unrelated background-learning error.
-- A completed enrichment is reused across task submissions, restarts and model-selection changes. Changed source revisions or relevant host policy require a current enrichment. Bump `ENRICHMENT_POLICY_VERSION` when host permissions or required checks change. A changed enrichment prompt also invalidates reuse. Corrupt or incompatible saved output is not execution-ready.
-- Source permissions and uncited dependencies are checked before and after model work and before display or execution. Revocation withholds the workflow and its enrichment. GET/refresh never creates, updates or retries enrichment.
+The container uses normal Docker bridge networking, without application domain, destination or HTTP-method filters. Rootless Docker, non-root/read-only container roots, dropped capabilities and CPU/memory/PID limits remain. The repository volume and temporary directory are writable; host files and the Docker socket are not mounted. Containers share the host kernel and volumes have no disk quota. Network access can transmit repository data and reach services available through Docker.
 
-## Run lifecycle
+## Host configuration
 
-1. Select a prepared workflow, fill only its defined inputs (for example, a release version), choose the committed ref and click **Run**. A workflow with no additional inputs has no prompt box. The API checks current sources and loads the saved enrichment. Missing/stale enrichment fails before creating a workspace; Run never prepares it implicitly.
-2. The host snapshots that exact commit and requires committed `.draken/environment.json` with a host-approved pinned image, setup and frozen checks. Dirty/untracked host files, earlier Git history, remotes/configuration and credentials are excluded. Submodules/LFS are rejected rather than silently omitted.
-3. Setup and baseline checks run in an isolated persistent workspace. One host-side Pi session receives the task, saved enriched workflow, environment and baseline. All enabled read/write/edit/bash tools operate inside the container; there is no host fallback. The first prompt is execution, not enrichment.
-4. The session inspects, plans the particular task, implements, tests, self-reviews, repairs and reports completion or blockers. Same-session self-review is **not independent review**. The run allowance is configured once under **Execution settings** on Factory (1–64 provider calls; initial default 16), rather than repeated under each workflow. A change applies to new runs; each run freezes its allowance and repeated request IDs cannot change it. The separately saved enrichment does not consume that allowance. Automatic retries, compaction and cache warming are disabled.
-5. The host stops actual task processes, collects the patch using a read-only mount and pristine Git metadata, applies it to a fresh volume and runs the original setup/checks. The receipt records patch/check-definition hashes and scope `frozen-repository-checks`. Passing those checks does **not** infer arbitrary task acceptance.
+- `DRAKEN_WORKSPACE_REPO`: the Git repository available for runs.
+- `DRAKEN_DOCKER_BIN`, `DRAKEN_DOCKER_HOST`: Docker CLI and local rootless socket.
+- `DRAKEN_WORKSPACE_ALLOWED_IMAGES`: JSON array of approved digest-pinned images.
+- `DRAKEN_FACTORY_PI_SDK`: qualified Pi SDK 1.4.0 `dist/index.js`.
+- `DRAKEN_WORKSPACE_REMOTE`: optional remote URL to configure as `origin` inside the workspace. Use a credential-free URL. Host Git configuration is not copied.
+- `DRAKEN_WORKSPACE_ENV_FILE`: optional private Docker-format environment file, explicitly supplied to the task container. Use it for workflow credentials and configuration, such as `GH_TOKEN`, registry settings or Git identity. Bash inherits the container environment. The host's ambient environment and Pi provider credentials are not automatically forwarded. Container inspection receipts omit environment values. Tools can use these credentials, so supply only credentials appropriate to the approved work; do not print them in command output.
+- Model selection uses the normal final model: `DRAKEN_PI_FINAL_MODEL`, then `DRAKEN_PI_MODEL`, then `openai/gpt-6-astra`.
 
-**Current implementation limitations:** prompts/contracts prohibit publication, push and PR creation; candidate validation rejects changes to existing tests, scripts, CI, manifests/locks and environment policy, while allowing new regression tests. These restrictions can prevent legitimate workflow endpoints and conflict with the current plan. They remain in the code pending correction. A missing credential or permission must still produce a specific blocker, not an invented grant. The agreed one-session design separately excludes subagents and parallel agents.
+The environment file remains required on the selected commit. Missing tools or credentials are specific prerequisites to report, not unsupported Factory action types. No automatic image inference or credential discovery occurs. The execution scripts are included in the package file list; execution still requires the above configuration and an installed qualified SDK.
 
-## Required environment and host configuration
+## Results and ownership
 
-Commit `.draken/environment.json` on the selected ref. It supplies image, setup and frozen checks—not the workflow or enrichment. No image/environment is inferred from manifests or CI. Missing declarations fail before Docker or execution-model work:
+The agent records checks and external outcome evidence in its session and reports `completed` or `blocked`. A missing PR, publication or other required endpoint is not completion merely because local tests pass. Same-session review is self-review, not independent review. A blocked result remains blocked in the run and stage display.
 
-> Missing required file: .draken/environment.json. Add and commit it to the selected branch or commit before running repository checks.
+After execution/cancellation, the supervisor stops the task container and collects a binary patch using fresh Git metadata and a read-only mount. This preserves committed and uncommitted task edits relative to the starting commit; it is a receipt, not a second acceptance stage. There is no protected-filename rejection or automatic post-session verifier. External actions already performed are not undone by cancellation, and unknown outcomes must be inspected before retrying them.
 
-Host-selected configuration:
+Source consent/revocation is checked before model/tool work and before serving saved source-derived content. Requests are durable and idempotent. One execution owner prevents overlapping runs and blocks starts when cleanup is uncertain; legacy receipts remain retained. Cancellation stops actual container processes. Failed collection retains the volume for inspection.
 
-- `DRAKEN_WORKSPACE_REPO`: permitted Git repository.
-- `DRAKEN_DOCKER_BIN` and `DRAKEN_DOCKER_HOST`: absolute Docker CLI and local rootless Unix socket.
-- `DRAKEN_WORKSPACE_ALLOWED_IMAGES`: JSON array of approved pinned image references.
-- `DRAKEN_FACTORY_PI_SDK`: qualified **Pi SDK 1.4.0** `dist/index.js` path.
-- Normal final-model configuration/credentials: `DRAKEN_PI_FINAL_MODEL`, then `DRAKEN_PI_MODEL`, then `openai/gpt-6-astra`. No Factory-specific model override.
+Provider requests are reserved durably and reconciled with usage; unknown usage is not zero. Automatic retries, compaction and cache warming are disabled. Execution settings set the call allowance once (1–64, initially 16), frozen per run. The existing 15-minute overall deadline, four-minute command maximum, output/file limits and resource limits remain. Preparation has separate accounting; no background learning error is cleared implicitly.
 
-The SDK remains separately qualified from the managed CLI. A different SDK is rejected, not silently substituted. Never forward provider credentials to the container.
+## Preparation and compatibility
 
-The browser invokes `scripts/factory-workspace.cjs REPOSITORY REF NEW_PRIVATE_OUTPUT_DIRECTORY BRIEF_FILE`. The source-authorized `factory-agent-session-v2` brief contains the exact saved `factory-workflow-enrichment-v4` result. The host checks that the current API still exposes that same enrichment before provider/tool work. Private operator briefs must also contain a valid prepared enrichment. Omitting the brief is a checks-only diagnostic, not a second Factory Run mode. Manual CLI invocations are outside the server's execution lock.
+Saved enrichment belongs to the discovery revision, host-policy version and prompt revision. Host policy v4 removes the old publication/file bans and fixed checking sequence. Prior enrichment must be explicitly prepared under the current policy; old rows and failed paid attempts remain intact. Run never silently refreshes enrichment or reruns an earlier execution.
 
-## Ownership, isolation, accounting and learning
+Normal preparation and explicit enrichment use the existing owner, source checks and accounted model callback. Discovery observations and model-added guidance remain separate. Real execution sessions can enter normal history ingestion only under ordinary source consent; agent claims are not automatically verified outcomes.
 
-One server-side execution owner rejects overlapping runs and uncertain cleanup, including old release receipts. Workflow preparation uses the existing summary-preparation owner, not a second scheduler. Explicit preparation requests have durable request IDs; repeating an attempted request cannot make another provider call. Failed raw output and accounting remain retained.
+## Implementation and tests
 
-The host owns Pi, credentials, sources, accounting and Docker control. An explicit empty resource loader disables executable project extensions, MCP/codemode, skills and templates. Repository instructions may be read as data. Workers are non-root with read-only roots, dropped capabilities, seccomp, no host checkout/socket mounts, and CPU/memory/PID limits. Engineering workers use 2 CPUs, 4 GiB RAM, 512 PIDs and 1 GiB temporary storage. Workers and fresh verification containers use ordinary Docker bridge networking. There is no application network filter, broker, proxy, custom client, domain allowlist or HTTP-method restriction. Network reachability follows the Docker/host configuration; Draken does not block LAN/private destinations or strip request headers. Provider credentials remain on the host and are not supplied to the worker. Rootless containers share the host kernel and have no volume disk quota; host Pi/adapters remain trusted code.
+- `src/factory-enrichment/`: portable contracts, saved guidance validation and task binding.
+- `src/factory/`: discovery/enrichment persistence, source checks, run settings and ownership.
+- `scripts/factory-workspace.cjs`: snapshot, setup, one agent session, patch collection and cleanup.
+- `scripts/factory-workspace/agent.cjs`: Pi tools, session and accounting; `tool.cjs`: container operations; `worker.cjs`: checkout/setup and patch collection.
 
-Execution requests are durably reserved through `session.agent.streamFunction`, reconciled with returned usage, and stopped on unknown accounting. Explicit unknown usage is never displayed as zero. A settled assistant alone does not establish completion. Runs have a 15-minute deadline; bash has a 240-second maximum, process-group cancellation and 1 MB output limit, returning the final 40,000 characters. File tools support regular text files up to 1 MB and reject traversal/outside symlinks. Cancellation stops the actual task container before patch collection. Failed collection retains the volume; uncertain cleanup blocks starts.
-
-Private `factory-workspaces/<run>/` receipts retain request/exit files, baseline/events, the reused enrichment, session/accounting/result, patch, verification and cleanup. Legacy `factory-runs/` receipts remain retained without an execution API/UI. Discovery-authorized sessions are saved under the normal Pi source root in `draken-factory/` with the actual repository identity. Normal consent, activity windows, exclusions and verified preparation control ingestion. Host verification is separate; no automatic success labels are inserted into learning.
-
-## Network access
-
-Use normal commands: `npm`, `curl`, `git`, Node `fetch`, or another installed client. No special network interface is required. The broker and custom network helper have been deleted, and npm uses its ordinary configuration. Outbound access can transmit repository data and reach services available to the container; container filesystem isolation is not network isolation. Network access does not itself authorize publication or deployment.
-
-Host policy is now `factory-host-policy-v3`. Older enrichments referring to the removed broker require preparation under the current policy. Failed runs and their receipts remain unchanged; deployment does not rerun them.
-
-## Code and validation
-
-- `src/factory-enrichment/`: independent reusable enrichment and execution contracts; no application/package/Node imports. Copied-module compile/run and dependency checks remain in CI.
-- `src/factory/discovery.ts`, `enrichment.ts`: verified source identity, persisted preparation attempts and current saved-enrichment reads.
-- `src/sync/summary-preparation.ts`: existing accounting/cancellation owner for automatic and explicit workflow preparation.
-- `src/factory/workspace.ts`, `execution-owner.ts`: source-sensitive Run/read/log operations and execution ownership.
-- `scripts/factory-workspace/`: execution-only Pi adapter, source/enrichment authorization, container tools and worker.
-
-Tests cover automatic preparation using the final model and shared allowance, explicit retries/idempotency without resetting learning errors, raw failure retention, source revocation, missing/stale enrichment, unchanged reuse across tasks, page reads with no model calls, UI preparation/display/reuse and one execution prompt. Typechecks and Knip check for unused imports/exports/files; the old per-run enrichment prompt and tool-switching path have been removed.
-
-Opt-in real-Docker tests use deterministic responses to prove lifecycle, ordinary networking, file/tool isolation, protected-check rejection, fresh verification, cancellation and patch recovery. The actual SDK 1.4.0 contract test uses simulated transport/container operations to prove one execution prompt, saved-enrichment reuse, tool continuations and reconciled usage. These are not model-quality proofs. Real container checks exercise ordinary npm lookup/install/audit, curl against GitHub and the deployment website, and git ls-remote. An owned test server on the container's private interface verifies that ordinary HTTP write methods and caller-supplied headers work without an application filter. Broker-only tests were removed with the broker.
-
-Earlier paid Luna parser-repair and fixed-release receipts remain historical, not evidence for the current lifecycle or Astra task quality. The earlier six-call/$0.00073426 accounting correction remains retained. End-to-end endpoint verification, usable Git/credential setup for agent-executed delivery, automatic restart reconciliation, outcome-learning joins, SDK consolidation and packaged distribution remain unfinished. Delivery is not a request to implement a separate host-side executor for each action.
+The former checks-only CLI, baseline/fresh-verification runner, filename classifier and snapshot file-type bans have been removed. Tests cover ordinary networking, configured environment propagation without ambient host secrets, Git history/remote setup, edits to formerly forbidden files, blocked outcomes, source checks, accounting, cancellation and patch retention. Actual SDK protocol tests use simulated responses; Docker fixtures establish runtime mechanics, not real model task quality. Claim an external endpoint only when a real run supplies its evidence.

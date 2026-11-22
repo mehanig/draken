@@ -24,13 +24,16 @@ export async function createAgentSession(options){
   if(active.join(',')!=='read,write,edit,bash'||!text.includes('factory-workflow-enrichment-v4'))throw Error('Execution did not receive saved enrichment');
   for(let i=0;i<2;i++){
    await session.agent.streamFunction({},{});
-   if(text.includes('"task":"fixture-weaken-check"'))await options.customTools.find(t=>t.name==='write').execute('weaken',{path:'verify.cjs',content:'process.exit(0);'},controller.signal);
+   if(i===0&&text.includes('"task":"fixture-edit-files"')){
+    for(const file of ['verify.cjs','package.json','tests/existing.cjs','scripts/existing.cjs','.github/workflows/existing.yml'])await options.customTools.find(t=>t.name==='write').execute('edit',{path:file,content:'changed by workflow\n'},controller.signal);
+    const result=await options.customTools.find(t=>t.name==='bash').execute('check',{command:'test "$WORKFLOW_TEST_TOKEN" = configured-for-worker && test "$(git rev-list --count HEAD)" = 2 && test "$(git remote get-url origin)" = https://github.com/mehanig/draken.git && git add . && git commit -qm "Workflow edits"'},controller.signal);if(result.isError)throw Error('Ordinary configured tools failed');
+   }
    if(text.includes('"task":"fixture-cancel"')){
     await options.customTools.find(t=>t.name==='write').execute('write',{path:'cancelled.txt',content:'retained before cancellation\n'},controller.signal);
     for(const listener of listeners)listener({type:'tool_execution_start',toolName:'bash',toolCallId:'long-command'});
     await options.customTools.find(t=>t.name==='bash').execute('long-command',{command:'sleep 240'},controller.signal);
    }
-   answer=JSON.stringify({status:'completed',summary:'Fixture finished'});
+   answer=JSON.stringify(text.includes('"task":"fixture-blocked"')?{status:'blocked',summary:'Missing workflow credential'}:{status:'completed',summary:'Fixture finished'});
   const message={role:'assistant',stopReason:'stop',usage:{input:10,output:2,cacheRead:0,cacheWrite:0,cost:{total:0.001}}};session.messages.push(message);
   for(const listener of listeners)listener({type:'message_end',message});
   }

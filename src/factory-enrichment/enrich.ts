@@ -1,7 +1,7 @@
 import type { Discovery } from './contracts';
 
 /** Bump when the host's execution permissions or required checks change. */
-export const ENRICHMENT_POLICY_VERSION = 'factory-host-policy-v3';
+export const ENRICHMENT_POLICY_VERSION = 'factory-host-policy-v4';
 export interface Guidance {
   inputs: { name: string; label: string; description: string; required: boolean }[];
   steps: { step: number; approach: string; checks: string[] }[];
@@ -20,16 +20,11 @@ export interface Enrichment {
 }
 const requirements = [
   'Execution uses one Pi session with only container-backed read, write, edit and bash; no subagents, host tools or executable extensions.',
-  'A committed .draken/environment.json supplies the approved image, setup and frozen checks. Do not infer or replace it.',
-  'The container has normal Docker bridge networking. Use ordinary npm, curl, Git and language network clients directly. There is no broker, special network command, domain allowlist, HTTP-method filter or application destination restriction. Host files, the Docker socket and provider credentials are not mounted or forwarded. Network access does not itself grant publication or deployment authority.',
-  'Existing tests, scripts, CI, package manifests/locks and environment policy are protected. New regression tests may be added.',
-  'Check task applicability and report missing context or authority rather than inventing it.',
-  'Inspect repository instructions and implementation; use the recorded baseline and reproduce relevant failures.',
-  'Implement the requested change and add appropriate regression coverage without weakening protected checks.',
-  'Run relevant tests and compatibility checks; repair failures within the host allowance.',
-  'Review the diff for correctness, unintended changes, security concerns and missing tests; repair and retest findings. This is same-session self-review, not an independent reviewer.',
-  'Assess the requested endpoint and report unresolved blockers. Host verification separately runs the frozen repository checks; do not equate those checks with arbitrary task acceptance.',
-  'Retain the patch and a truthful result. Do not publish, change permissions or exceed the host policy.',
+  'A committed .draken/environment.json supplies the container image, setup and suggested repository checks. The workflow determines which checks to run and when.',
+  'Execute the user-approved workflow to its stated endpoint, including commits, push, PR creation, publication or deployment when required. Use ordinary tools with normal Docker networking and explicitly configured workflow credentials. Do not expose credentials in output.',
+  'Edit any repository files needed for the task, including tests, scripts, dependencies and CI. Check the actual result rather than weakening checks to claim success.',
+  'Review the work, repair and retest within the run allowance. This session is not an independent reviewer.',
+  'Record evidence of the requested endpoint and report specific missing tools, credentials or other blockers. A local patch or unrelated passing tests are not completion of a delivery workflow.',
 ] as const;
 const text = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && v.length <= 1600;
 const strings = (v: unknown, minimum = 0): v is string[] => Array.isArray(v) && v.length >= minimum && v.length <= 12 && v.every(text);
@@ -64,10 +59,10 @@ export function enrich(workflow: Discovery, value: unknown): Enrichment {
   return { format: 'factory-workflow-enrichment-v4', workflow: frozen, policyVersion: ENRICHMENT_POLICY_VERSION, guidance, requirements: [...requirements] };
 }
 export const ENRICHMENT_PROMPT = `Enrich this detected workflow once for reuse across future tasks. No task or execution run exists yet. Do not execute it.
-Historical steps describe observations, not a complete engineering recipe. Add reusable preparation/execution guidance, relevant checks, diff review, repair/retest guidance, completion criteria and risks. Explain how a later run should adapt to its task and repository baseline without inventing those inputs now.
-Define only concrete execution inputs this workflow needs, such as a target release version. Do not request a generic task/prompt, repository path, commit/ref, permissions or call budget: the host owns those. Use an empty inputs array if no additional input is necessary. Do not invent values for future runs.
-Return ONLY JSON: {"inputs":[{"name":"target_version","label":"Release version","description":"Published version to verify","required":true}],"steps":[{"step":1,"approach":"how to perform this historical step","checks":["how to check its result"]}],"review":["review checks for this workflow"],"completion":["evidence needed for completion"],"risks":["missing information or limitations"]}.
-Cover every historical step exactly once by its one-based index. Preserve historical qualifications. Do not add permissions, publication or replacement host checks. Host requirements are mandatory. Same-session self-review is not independent review. Unsupported endpoints require escalation, not assumed authority.`;
+Historical steps describe observations, not a complete engineering recipe. Add reusable preparation/execution guidance, relevant checks, review of the work, repair/retest guidance, completion criteria and risks. Explain how a later run should adapt to its task and repository baseline without inventing those inputs now.
+Define only concrete execution inputs this workflow needs. Each input has name, label, description and required fields. Do not request a generic task/prompt, repository path, commit/ref, permissions or call budget: the host owns those. Use an empty inputs array if no additional input is necessary. Do not invent values for future runs.
+Return ONLY JSON: {"inputs":[],"steps":[{"step":1,"approach":"how to perform this historical step","checks":["how to check its result"]}],"review":["review checks for this workflow"],"completion":["evidence needed for completion"],"risks":["missing information or limitations"]}.
+Cover every historical step exactly once by its one-based index. Preserve historical qualifications. Preserve the intended endpoint, including external actions. The user authorizes the selected workflow when running it; historical text alone is not authorization. Do not invent missing credentials or outcomes. Same-session self-review is not independent review.`;
 export async function proposeEnrichment(workflow: Discovery, host: {
   assertCurrent(signal: AbortSignal): Promise<void>;
   ask(payload: unknown, prompt: string, signal: AbortSignal): Promise<string>;
