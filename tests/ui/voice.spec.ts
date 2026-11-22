@@ -262,7 +262,6 @@ test('scene captions replace the banner; transcript stays collapsed and waiting 
   const events: any[] = []; let lookup = false;
   const emit = (event: any) => events.push({ ...event, sequence: events.length + 1 });
   await nativePeer(page, true); await page.clock.install();
-  // Controlled events and metadata in this isolated fixture; no provider question.
   await page.route('**/api/voice/live/calls/*/events?*', route => {
     const after = Number(new URL(route.request().url()).searchParams.get('after') || 0);
     return route.fulfill({ json: { active: true, events: events.filter(event => event.sequence > after) } });
@@ -285,7 +284,7 @@ test('scene captions replace the banner; transcript stays collapsed and waiting 
   emit({ type: 'message', id: 102, role: 'assistant', text: 'Let me check that.', evidence: [], final: true });
   await page.evaluate(() => { const w = window as any; w.__speakNative(); clearTimeout(w.__remote.timer); });
   await expect(captions).toHaveText('DrakenLet me check that.');
-  await page.evaluate(() => { (window as any).__remote.volume.gain.value = 0; }); // No turn.done.
+  await page.evaluate(() => { (window as any).__remote.volume.gain.value = 0; });
   await expect(captions).toHaveText('[Thinking...]');
   await page.clock.fastForward(5000); await expect(captions).toHaveText('[Hmmm...]');
   await page.clock.fastForward(5000); await expect(captions).toHaveText('[Hmmmmmm...]');
@@ -305,7 +304,7 @@ test('scene captions replace the banner; transcript stays collapsed and waiting 
   expect(await captions.evaluate(element => getComputedStyle(element).animationName)).toBe('none');
   emit({ type: 'answer_pending', id: 101, pending: false, error: 'A completed voice answer was not confirmed.' });
   await expect(captions).toHaveText('[Reply unavailable]');
-  await expect(dialog(page).getByRole('alert')).toBeVisible(); // Never hidden in the disclosure.
+  await expect(dialog(page).getByRole('alert')).toBeVisible();
   emit({ type: 'message', id: 103, role: 'user', text: 'A new question.', evidence: [], final: true });
   emit({ type: 'answer_pending', id: 103, pending: true });
   await expect(captions).toHaveText('[Thinking...]');
@@ -351,7 +350,6 @@ test('failed native setup stops capture instead of trying another voice engine',
   await nativePeer(page);
   await page.route('**/api/voice/live/calls/*/connect', route => route.fulfill({ status: 503, json: { error: 'Synthetic native setup failure' } }));
   await page.goto(`/syncs/${syncId}`);
-  // Bound cleanup from the injected failure, not from unrelated history/ICE setup.
   const rejected = page.waitForResponse(response => response.url().includes('/api/voice/live/calls/') && response.url().endsWith('/connect'), { timeout: 15000 });
   await page.getByRole('button', { name: 'Call Draken', exact: true }).click();
   expect((await rejected).status()).toBe(503);

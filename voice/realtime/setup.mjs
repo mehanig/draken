@@ -5,7 +5,6 @@ import { npmCli } from '../../dist/npm-cli.js';
 import { NativeHelperProcess } from './helper-process.mjs';
 import { CODEX_VERSION, realtimeRoot, defaultBinary, defaultHome, helperEnvironment, nativeStatus, stopNativeChecks } from './native.mjs';
 
-/** One terminal workflow owns both preflight and explicit install/login children. */
 export async function voiceSetup(action) {
   if (!['setup', 'login', 'status'].includes(action)) throw new Error('Usage: draken voice setup | login | status');
   process.umask(0o077);
@@ -56,7 +55,6 @@ export async function voiceSetup(action) {
       if (!status.installed) throw new Error('Run npm run voice:realtime:setup first.');
       fs.mkdirSync(defaultHome, { recursive: true, mode: 0o700 });
       if (fs.existsSync(path.join(defaultHome, 'config.toml'))) throw new Error('The dedicated voice account directory must not contain a custom config.toml.');
-      // Explicit native ChatGPT sign-in, not API-key login or pi token conversion.
       await run(defaultBinary, ['-c', 'cli_auth_credentials_store="file"', '-c', 'forced_login_method="chatgpt"', 'login', '--device-auth'], helperEnvironment(defaultHome));
     }
     active();
@@ -76,7 +74,6 @@ export async function voiceSetup(action) {
     if (results.some(result => result.status === 'rejected')) {
       process.exitCode = 1;
       console.error('Native voice cleanup could not be confirmed. Keeping this terminal host alive; no further operation will start.');
-      // Keep signal handlers and the host alive rather than abandon owned children.
       await new Promise(() => {});
     }
     clearInterval(hold);

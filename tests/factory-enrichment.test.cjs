@@ -46,7 +46,6 @@ for(const endpoint of [
  const g=fixtureEnrichment(source).guidance;
  g.steps=source.method.map((approach,i)=>({step:i+1,approach,checks:[`Record the actual result of step ${i+1}`]}));
  g.completion=endpoint.completion;
- // Exercise the persisted JSON contract, not just the in-memory return value.
  const saved=JSON.parse(JSON.stringify(enrich(source,g))),before=structuredClone(saved);
  const request=workflowRequest(saved,{});
  const plan=JSON.parse(JSON.stringify(sessionPlan(source,request.task,'repo',saved)));

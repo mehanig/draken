@@ -1,4 +1,3 @@
-// Synthetic projects and records; never reads a developer's real history.
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const Database = require('better-sqlite3');

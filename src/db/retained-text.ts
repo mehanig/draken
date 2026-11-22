@@ -2,7 +2,6 @@ import type Database from 'better-sqlite3';
 import type { Evidence } from '../types';
 import { digest } from '../sync/normalize';
 
-/** Immutable canonical text shared by frozen evidence and unresolvable legacy imports. */
 export function retainText(db: Database.Database, text: string): string {
   const key = digest(text);
   db.prepare('INSERT OR IGNORE INTO retained_text(key,text) VALUES(?,?)').run(key, text);
@@ -20,7 +19,6 @@ export function freezeEvidence(db: Database.Database, item: Evidence): string {
 }
 export function thawEvidence(db: Database.Database, value: string | Record<string, any>): Evidence {
   const item = typeof value === 'string' ? JSON.parse(value) : value;
-  // Imported older snapshots and test fixtures remain readable, never silently rewritten on read.
   if (typeof item.text === 'string') return item as Evidence;
   const { text_ref, ...metadata } = item;
   if (typeof text_ref !== 'string') throw new Error('Frozen evidence has no content reference');

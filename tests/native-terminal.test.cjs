@@ -30,8 +30,6 @@ async function cancelExecutable(args, signal, mode = 'preflight') {
   const binary = path.join(home, '.draken', 'realtime', 'runtime', 'node_modules', '.bin', 'codex');
   const ready = path.join(account, 'ready.pid'), calls = path.join(account, 'calls.jsonl');
   fs.mkdirSync(account, { recursive: true }); fs.mkdirSync(path.dirname(binary), { recursive: true });
-  // No real credentials, provider, npm installation, or network. The helper is
-  // found through the production default path, not DRAKEN_CODEX_BIN overrides.
   fs.writeFileSync(binary, `#!${process.execPath}
 const fs = require('node:fs'), path = require('node:path');
 // Qualification supplies its own CODEX_HOME; markers belong to this fixture.
@@ -80,7 +78,6 @@ if (${JSON.stringify(mode)} === 'login-command' && args[0] === '--version') {
     }
     assert.equal(fs.existsSync(path.join(home, '.draken', 'realtime', 'reports')), false);
   } finally {
-    // Failure cleanup is independent of the assertion under test.
     if (!pid && fs.existsSync(ready)) pid = Number(fs.readFileSync(ready, 'utf8'));
     if (pid) { try { process.kill(-pid, 'SIGKILL'); } catch {} }
     if (!exitSeen) child.kill('SIGKILL');
@@ -122,8 +119,6 @@ test('CLI voice login still requires an interactive terminal before starting nat
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 
-// Fixture modules expose explicit async creation gates. Production entry points
-// still execute, but these tests cannot launch a provider, browser, or installer.
 async function terminalFixture(entry, mode) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-terminal-gates-'));
   const preload = path.join(home, 'preload.mjs');

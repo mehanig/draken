@@ -130,7 +130,7 @@ test('with summaries explicitly off, the timer indexes originals and small tails
  const now=Date.now(),id='synthetic-auto-session',header={type:'session',version:3,id,cwd:'/synthetic/auto',timestamp:new Date(now-1000).toISOString()};
  const contents=[header,...Array.from({length:70},(_,n)=>({type:'message',id:String(n),parentId:n?String(n-1):null,timestamp:header.timestamp,message:{role:'assistant',content:'Synthetic record '+n+'; deployment not checked.'}}))].map(JSON.stringify).join('\n')+'\n';
  fs.writeFileSync(root+'/sessions/auto.jsonl',contents);const index=new HistoryIndex(cache,getDb(),{fingerprint:'auto-synthetic-only',ready:()=>true,setup:async()=>{},embed:async()=>{embeddings++;const v=new Float32Array(384);v[0]=1;return v;}});
- await index.prepare(); // Fixture-created empty cache has a known empty checkpoint.
+ await index.prepare();
  service.historyReadiness=()=>require('../dist/memory/readiness').indexReadiness(cache,getDb());
  service.prepareHistory=async(before,signal,background=false)=>{assert.equal(signal.aborted,false);if(background)jobs++;else foregroundJobs++;await index.prepare({before},undefined,true);};
  t.mock.timers.enable({apis:['setInterval','Date'],now});

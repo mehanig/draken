@@ -16,9 +16,6 @@ export function callReadiness(id: number, _capturedOnly = false): CallReadiness 
   const conversation = conversationStatus(id);
   const briefingReady = row.status === 'open' && !conversation.ended_at && Boolean(row.briefing) && Boolean(row.compression_complete);
   const preparing = jobs.has(id), busy = activity.jobActive(id) || activity.voiceActive(id);
-  // Text and voice share the durable initial preparation, including fallback
-  // history. New arrivals cannot revoke it, and polling cannot adopt a newer
-  // receipt. Original snapshot verification remains a write-admission check.
   const history = briefingReady && !busy
     ? { ready: Boolean(conversation.history_before), before: conversation.history_before }
     : { ready: false, before: null };
@@ -33,8 +30,6 @@ export function prepareCall(id: number) {
   if (!sync.briefing || !sync.tree.complete) throw new HttpError(409, 'Prepare the briefing before preparing a call.');
   const prepared = historyPreparationStatus();
   if (!sync.conversation.history_before && prepared.ready && prepared.before) {
-    // Use the completed background index now. New arrivals are already in the
-    // briefing's snapshot and can join archive retrieval at the next idle update.
     markConversationPrepared(id, prepared.before);
     errors().delete(id);
     return getSync(id, false);
@@ -47,8 +42,6 @@ export function prepareCall(id: number) {
     const before = new Date().toISOString();
     await prepareHistory(before, controller.signal);
     controller.signal.throwIfAborted();
-    // The receipt can retain an earlier unchanged cutoff; never claim the
-    // requested cutoff was indexed if preparation reused that receipt.
     const prepared = historyReadiness(true);
     if (!prepared.ready || !prepared.before) throw new Error('History preparation did not produce a ready receipt');
     markConversationPrepared(id, prepared.before);

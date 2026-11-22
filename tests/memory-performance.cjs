@@ -1,5 +1,3 @@
-// Optional real-WASM benchmark: same pinned model/inputs/cache fingerprint.
-// Synthetic data only, existing weights, no application DB/download/provider.
 const assert=require('node:assert/strict'),path=require('node:path'),{execFileSync}=require('node:child_process');
 const modelDir=process.argv.find(arg=>arg.startsWith('--model-dir='))?.slice(12);
 if(!modelDir)throw Error('Pass --model-dir=<existing pinned test model directory>');
@@ -23,7 +21,6 @@ if(process.argv.includes('--child')){
   await embed(samples.slice(0,8));const start=performance.now(),vectors=[];
   for(let i=0;i<samples.length;i+=8)vectors.push(...await embed(samples.slice(i,i+8)));
   const ms=performance.now()-start;
-  // Long multilingual input crosses token windows; query prefix stays distinct.
   vectors.push(await model.embed('日'.repeat(1100)+' Deployment NOT checked.',false));
   vectors.push(await model.embed('Was the deployment checked?',true));
   console.log(JSON.stringify({ms,parallelism:baseline?{workers:1,threads}:model.parallelism,rss:process.memoryUsage().rss,fingerprint:baseline?MODEL_ID:model.fingerprint,vectors:Buffer.concat(vectors.map(v=>Buffer.from(v.buffer,v.byteOffset,v.byteLength))).toString('base64')}));

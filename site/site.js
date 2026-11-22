@@ -1,7 +1,5 @@
 'use strict';
 
-// A small, self-contained illustration. No API calls, storage, account access,
-// microphone, model invocation or application review state.
 const examples = {
   E01: {
     role: 'pi · assistant',

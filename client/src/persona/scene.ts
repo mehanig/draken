@@ -63,7 +63,6 @@ export function createPersonaScene(canvas: HTMLCanvasElement): PersonaScene {
         if (time - lastShadow > (software ? 1.5 : 0.5)) { renderer.shadowMap.needsUpdate = true; lastShadow = time; }
         background!.render(backdrop, camera, scene);
         canvas.dataset.background = 'blurred'; canvas.dataset.backgroundRenders = String(background!.renders);
-        // Small presentation diagnostics; never expose text or audio samples.
         canvas.dataset.mouth = String(Math.round(pose.jaw * 100));
       },
       dispose() {

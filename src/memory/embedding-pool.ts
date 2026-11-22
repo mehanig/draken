@@ -10,9 +10,6 @@ type Pending = { id: number; resolve(vector: Float32Array): void; reject(error: 
 type Lane = { worker: Worker; pending?: Pending; dead?: boolean };
 const failure = () => new Error('Local embedding worker failed; no other runtime or model was substituted');
 
-/** At most two model copies and six kernel threads. Small/constrained machines
- * keep one lane. All lanes die with their owning history process on cancellation.
- * Workers are lazy: a warm-cache query needs only one, and a read needs none. */
 export class EmbeddingPool implements Embedder {
   readonly parallelism: { workers: number; threads: number };
   readonly fingerprint = MODEL_ID;

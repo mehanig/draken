@@ -49,7 +49,7 @@ test('activity window shows ignored sessions, requires confirmation before widen
       ? route.fulfill({ status: 500, json: { error: 'Synthetic activity-window save failure' } }) : route.continue());
     await select.selectOption('7');
     await expect(dialog.getByRole('alert')).toHaveText('Synthetic activity-window save failure');
-    await page.waitForTimeout(4300); // Successful status polling must not hide a failed write.
+    await page.waitForTimeout(4300);
     await expect(dialog.getByRole('alert')).toHaveText('Synthetic activity-window save failure'); await expect(select).toHaveValue('all');
   } finally {
     await page.request.patch('/api/settings/activity-window', { data: { days: 7 } });

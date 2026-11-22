@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Installer fixture, copied to a temporary npm-cli.js. Never used in production.
 const fs=require('node:fs'),path=require('node:path');
 const controlFile=path.join(__dirname,'control.json'),control=fs.existsSync(controlFile)?JSON.parse(fs.readFileSync(controlFile,'utf8')):{};
 fs.appendFileSync(path.join(__dirname,'npm-calls.jsonl'),JSON.stringify({pid:process.pid,args:process.argv.slice(2),cwd:process.cwd(),home:process.env.HOME,agent:process.env.PI_CODING_AGENT_DIR,hasKey:Boolean(process.env.OPENAI_API_KEY),hasPreload:Boolean(process.env.NODE_OPTIONS)})+'\n');

@@ -1,5 +1,3 @@
-// Fresh identity cases, written after the original eight-case/model comparisons.
-// Expected labels are evaluator metadata, never model input.
 const copy=x=>structuredClone(x);
 function scenario(goal,context,input,output,actions,restriction,tool='local-tool',skill='task-method'){
  const records=[{ref:'U',role:'user',text:goal+'. '+restriction},{ref:'I',role:'toolResult',text:input},{ref:'O',role:'toolResult',text:output}];

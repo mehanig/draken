@@ -13,9 +13,6 @@ void main() {
   gl_FragColor += (texture2D(image, vUv + stepSize * 6.0) + texture2D(image, vUv - stepSize * 6.0)) * 0.018544;
 }`;
 
-/** Call-style background separation, not a CSS blur over the character.
- * The room and its two blur passes are cached until the camera/size changes.
- * Only a single cached image is composited behind the sharp rig each frame. */
 export class SoftBackground {
   private targets: THREE.WebGLRenderTarget[];
   private geometry = new THREE.PlaneGeometry(2, 2);
@@ -39,7 +36,6 @@ void main() { gl_FragColor = texture2D(image, vUv);
     this.quad.frustumCulled = false; this.screen.add(this.quad);
   }
   resize(width: number, height: number) {
-    // Half-resolution room; roughly 6 CSS pixels of blur at a 640px call width.
     const w = Math.max(1, Math.round(Math.min(640, width * 0.5))), h = Math.max(1, Math.round(w * height / width));
     this.dirty = true;
     if (w === this.targets[0].width && h === this.targets[0].height) return;

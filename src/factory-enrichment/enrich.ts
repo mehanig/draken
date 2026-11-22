@@ -1,6 +1,5 @@
 import type { Discovery } from './contracts';
 
-/** Bump when the host's execution permissions or required checks change. */
 export const ENRICHMENT_POLICY_VERSION = 'factory-host-policy-v4';
 export interface Guidance {
   inputs: { name: string; label: string; description: string; required: boolean }[];

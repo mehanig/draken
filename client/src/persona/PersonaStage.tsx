@@ -34,7 +34,6 @@ export function PersonaStage({ mode, playback, studioControls = false }: Persona
       scene.update({ mode: input.current.mode, motion: moving.current, playback: input.current.playback.current });
       try { scene.render(now / 1000); }
       catch { unavailable(); return; }
-      // Do not keep the browser compositing at 60 fps between our actual draws.
       if (moving.current) timer = window.setTimeout(() => { timer = 0; start(); },
         1000 / Math.min(scene.maxFps, input.current.mode === 'speaking' ? 30 : 18));
     };
@@ -59,7 +58,6 @@ export function PersonaStage({ mode, playback, studioControls = false }: Persona
     const intersection = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? true; if (visible) start(); else stop(); });
     intersection.observe(container); document.addEventListener('visibilitychange', visibility); element.addEventListener('webglcontextlost', lost);
     setFailed(false); setReady(false);
-    // Heavy WebGL code is fetched only when this presentation is mounted.
     void import('./scene').then(({ createPersonaScene }) => {
       if (disposed) return;
       try {

@@ -1,4 +1,3 @@
-// Actual browser-to-browser WebRTC audio; no microphone, account, model or database.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { chromium } = require('@playwright/test');

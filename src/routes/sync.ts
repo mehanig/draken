@@ -16,7 +16,6 @@ import { activity } from '../sync/activity';
 import { conversationStatus } from '../sync/conversation';
 
 const router = Router();
-// Mutation helpers may need originals internally; HTTP responses never ship them.
 const metadata = (sync: ReturnType<typeof getSync>) => ({ ...sync, items: [], context: [] });
 function id(req: Request): number {
   const value = Number(req.params.id);
@@ -36,7 +35,6 @@ router.get('/settings/preparation-usage', route((req, res) => res.json(preparati
 router.get('/settings/auto-index', route((_req, res) => res.json(autoIndexSettings())));
 router.patch('/settings/auto-index', route((req, res) => {
   if (!req.body || Array.isArray(req.body) || typeof req.body.enabled !== 'boolean' || (req.body.summaries !== undefined && typeof req.body.summaries !== 'boolean') || Object.keys(req.body).some(key => !['enabled', 'summaries'].includes(key))) throw new HttpError(400, 'Only boolean enabled and summaries are accepted');
-  // Old open tabs described local-only consent. Only the combined UI sends this flag.
   res.json(setAutoIndex(req.body.enabled, req.body.summaries === true));
 }));
 router.get('/settings/auto-summary', route((_req, res) => res.json(summaryPreparationSettings())));

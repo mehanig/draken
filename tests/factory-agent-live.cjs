@@ -1,4 +1,3 @@
-// Opt-in Docker integration: deterministic SDK fixture, no provider calls.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cp=require('node:child_process'),assert=require('node:assert/strict');
 const {workflowLocation}=require('../dist/factory/location'),{sessionPlan}=require('../dist/factory-enrichment');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));

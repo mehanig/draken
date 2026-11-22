@@ -28,7 +28,7 @@ beforeEach(() => {
     DRAKEN_PI_BIN: fake, DRAKEN_PI_SUMMARY_MODEL: LUNA, DRAKEN_PI_FINAL_MODEL: FINAL,
     DRAKEN_FAKE_CONTROL: controlPath, DRAKEN_TEST_CALL_LOG: logPath });
   delete process.env.DRAKEN_PI_TIMEOUT_MS; delete process.env.DRAKEN_PI_MAX_INVOCATIONS;
-  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
 });
 afterEach(() => { closeDb(); fs.rmSync(temp, { recursive: true, force: true }); });
 const control = value => fs.writeFileSync(controlPath, JSON.stringify(value));
@@ -77,7 +77,6 @@ for (const model of [LUNA, 'test/cheap']) test(`${model}: background builds reus
   untouched(300); prohibitSyncWrites(true);
   const job = preparation(value), roots = await job.tree.build(), row = job.row();
   assert.ok(roots.length); assert.equal(row.processed_entries, 300); assert.equal(row.stage, 'Summaries prepared');
-  // Completion receipts belong to the scheduler, not to SummaryTree.
   assert.equal(row.status, 'running'); assert.equal(row.completed_at, null);
   assert.equal(row.invocations, calls().length); assert.ok(calls().every(call => call.model === model && call.task !== 'final_verdict'));
   const metrics = JSON.parse(row.metrics_json);
@@ -105,9 +104,6 @@ test('ordinary large batches reuse closed leaves when an unreserved history tail
 });
 
 test('oversized recursively split batches retain every closed prefix, in background and foreground', async () => {
-  // Exercise the complete-wire fallback repeatedly without megabytes of fixture data.
-  // Only the planner threshold is reduced; real tokenization, validation, SQLite,
-  // provider transport and cache keys remain in use.
   const original = LUNA_BATCH.plannedRequestTokens;
   LUNA_BATCH.plannedRequestTokens = 14000;
   try {
@@ -187,7 +183,6 @@ test('failed reconciliation and failed compaction preserve leaves but cannot rep
   const before = calls().length; control({}); await preparation(value).tree.build();
   assert.equal(calls().slice(before).filter(call => call.stage === 'chunk').length, 0); untouched(6);
   getDb().exec('DELETE FROM summary_cache');
-  // A dense leaf requires an extra compact_for_final pass even with one root.
   session(120, { workspace: '/synthetic/dense' }); const dense = await input();
   dense.items = dense.items.filter(item => item.cwd === '/synthetic/dense');
   control({ denseOutput: true }); const compact = preparation(dense);

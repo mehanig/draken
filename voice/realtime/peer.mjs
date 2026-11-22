@@ -56,7 +56,6 @@ export class VoicePeer {
         channel.onclose = () => this.close('Voice event connection closed.');
         channel.onerror = () => this.close('Voice event connection failed.');
       });
-      // A close during the HTTP negotiation must not cause an unhandled rejection.
       void connected.catch(() => {});
       channel.onmessage = event => {
         if (this.#closed) return;
@@ -111,6 +110,6 @@ export class VoicePeer {
     this.#meter?.disconnect(); this.#gain?.disconnect(); this.#samples.fill(0);
     if (this.#decoder) { this.#decoder.pause(); this.#decoder.srcObject = null; this.#decoder = undefined; }
     if (this.#context && this.#context.state !== 'closed') void this.#context.close().catch(() => {});
-    try { this.#onClose(reason); } catch { /* Cleanup must not depend on the UI. */ }
+    try { this.#onClose(reason); } catch {}
   }
 }

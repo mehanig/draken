@@ -18,7 +18,6 @@ export interface ContractMatchInput {
   facts: Fact[];
   secondary: { role: string; action: string; tools: string[]; skills: string[] }[];
 }
-/** Preserve outcome qualifications without confusing them with workflow identity. */
 export function contractMatchInput(fragment: ProcessFragment): ContractMatchInput {
   const facts: Fact[] = [
     { id: 'GOAL', description: fragment.matching.goal, basis: 'interpreted', stage: null, role: null, refs: fragment.refs },

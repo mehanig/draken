@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-// These checks use the synthetic UI server. No real sessions, credentials, or providers.
 test('GifGun signature: square surfaces, shared palette, readable text and keyboard focus', async ({ page }) => {
   const externalRequests: string[] = [];
   page.on('request', request => {
@@ -29,7 +28,6 @@ test('GifGun signature: square surfaces, shared palette, readable text and keybo
   await expect(homeLink).toHaveCSS('outline-style', 'solid');
   await expect(homeLink).toHaveCSS('outline-color', 'rgb(145, 54, 216)');
 
-  // Small supporting text and button/citation labels need normal-text contrast.
   const contrastRatios = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);
     const luminance = (hex: string) => {

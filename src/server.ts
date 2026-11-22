@@ -32,7 +32,6 @@ export function createApp(options: { staticDir?: string; instanceId?: string } =
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-    // This local application exposes private transcripts. No cross-origin API access.
     if (req.headers.origin) {
       try {
         if (new URL(req.headers.origin).host !== req.headers.host) return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
@@ -75,8 +74,6 @@ export function startServer(trayOwned = false, options: { historyDays?: number |
   const httpsPort = Number(process.env.DRAKEN_HTTPS_PORT || 0);
   if (!Number.isInteger(httpsPort) || httpsPort < 0 || httpsPort > 65535 || (httpsPort !== 0 && httpsPort === port)) throw new Error('DRAKEN_HTTPS_PORT must be a different valid port');
   const tls = httpsPort ? { cert: fs.readFileSync(process.env.DRAKEN_TLS_CERT || ''), key: fs.readFileSync(process.env.DRAKEN_TLS_KEY || '') } : null;
-  // Bind before recovery: a second launch on an occupied port must not mark the
-  // actual server's active runs/calls interrupted or mutate its database.
   let ready = false, listening = 0, stopping = false;
   let releaseDirectory: (() => void) | undefined;
   const instanceId = randomUUID();
@@ -132,8 +129,6 @@ export function startServer(trayOwned = false, options: { historyDays?: number |
   };
   server.once('error', failed); secureServer?.once('error', failed);
   if (trayOwned) {
-    // Only the owning child-process IPC channel can request this. There is no
-    // HTTP shutdown endpoint, PID-file kill, or Windows forced termination.
     process.on('message', (message: any) => {
       if (message?.type === 'draken-shutdown' && message.instance === instanceId) shutdown();
     });

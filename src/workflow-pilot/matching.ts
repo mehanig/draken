@@ -64,7 +64,6 @@ export async function evaluateMatchingCase(store: Database.Database, file: strin
   if (prior && JSON.parse(prior.source_dependencies_json).manifestHash !== manifestHash) throw Error('This store belongs to a different frozen evaluation manifest');
   const sides = [await readMatchingSide(c.left, signal), await readMatchingSide(c.right, signal)];
   const inputs = sides.map(s => s.input);
-  // Ref numbers and expectation/case labels are absent on the wire; use local fact IDs instead.
   const wire = inputs.map(input => ({ ...input, facts: input.facts.map(({ refs: _refs, ...fact }) => fact) }));
   const payload = { task: 'compare_workflow_identity', left: wire[0], right: wire[1] };
   const recipe = digest(JSON.stringify([MATCHING_RECIPE, CONTRACT_MATCH_PROMPT, PLAIN_ENGLISH]));

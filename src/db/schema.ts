@@ -26,15 +26,10 @@ export function getDb(): Database.Database {
 
 export function initSchema(database: Database.Database): void {
   database.transaction(() => {
-  // Seed the new-install default only for a genuinely empty database, before
-  // migrations create any objects. Existing databases (even without a saved
-  // preference) retain their old behavior; local-only consent is not upgraded.
   const fresh = !database.prepare("SELECT 1 FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' LIMIT 1").get();
   renameAgentTables(database);
   const pointerOnly = database.prepare("SELECT 1 FROM sqlite_schema WHERE name='sync_settings'").get()
     && (database.prepare("SELECT value FROM sync_settings WHERE key='storage_schema'").get() as any)?.value === 'pointer-v2';
-  // Existing project/task tables are untouched. The explicit pointer migration
-  // below changes representation transactionally, not historical evidence.
   database.exec(`
     CREATE TABLE IF NOT EXISTS sync_settings (
       key TEXT PRIMARY KEY,
@@ -265,20 +260,14 @@ export function initSchema(database: Database.Database): void {
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS sync_run_request ON sync_runs(request_id) WHERE request_id IS NOT NULL');
   database.prepare('UPDATE syncs SET snapshot_at = created_at WHERE snapshot_at IS NULL').run();
   if (!columns.has('conversation_last_user_at')) {
-    // Only real user activity seeds the idle clock. Generated replies, polls,
-    // receipts and background runs are deliberately absent from this migration.
     database.exec(`UPDATE syncs SET conversation_last_user_at=MAX(created_at,
       COALESCE((SELECT MAX(created_at) FROM sync_messages WHERE sync_id=syncs.id AND role='user'),created_at),
       COALESCE((SELECT MAX(m.started_at) FROM live_messages m JOIN live_calls c ON c.id=m.call_id
         WHERE c.sync_id=syncs.id AND m.role='user' AND TRIM(m.text)!=''),created_at)) WHERE status='open'`);
-    // An already used v0.7 chat/call passed explicit history preparation. Retain
-    // a conservative cutoff even when a newer receipt format needs refreshing.
     database.exec(`UPDATE syncs SET conversation_before=snapshot_at WHERE status='open'
       AND briefing!='' AND compression_complete=1 AND (
         EXISTS(SELECT 1 FROM sync_runs WHERE sync_id=syncs.id AND request_id IS NOT NULL)
         OR EXISTS(SELECT 1 FROM live_calls WHERE sync_id=syncs.id))`);
-    // Also preserve prepared-but-not-yet-used chats from the old read-only
-    // receipt. This is historical preparation, NOT validation of current inputs.
     const file = path.join(getDataDir(), 'memory', 'index.sqlite');
     let memory: Database.Database | undefined;
     try {
@@ -296,7 +285,7 @@ export function initSchema(database: Database.Database): void {
             AND briefing!='' AND compression_complete=1 AND snapshot_at<=?`).run(marker.before, marker.before);
         }
       }
-    } catch { /* Missing/old caches do not prevent opening the original database. */ }
+    } catch {}
     finally { memory?.close(); }
   }
   migratePointers(database); migrateSnapshotPointers(database); migrateAgents(database);
@@ -310,9 +299,6 @@ export function initSchema(database: Database.Database): void {
     const seed = database.prepare('INSERT INTO sync_settings(key,value) VALUES (?,?)');
     seed.run('auto_index', 'true');
   }
-  // Summary preparation defaults on; explicit saved opt-outs remain untouched.
-  // Preserve the saved indexing choice while withdrawing the retired permission
-  // to create snapshots and spend provider quota in the background.
   database.exec(`INSERT OR IGNORE INTO sync_settings(key,value)
     SELECT 'auto_index',value FROM sync_settings WHERE key='auto_prepare_conversations';
     DELETE FROM sync_settings WHERE key IN ('auto_prepare_conversations','auto_preparing_sync','auto_briefing_failed');`);

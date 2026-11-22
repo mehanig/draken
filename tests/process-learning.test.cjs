@@ -117,7 +117,6 @@ test('cached legacy output and its comparisons cannot bypass the current source-
   const capture=capturePilot(db,'session-a',1,before),counter={n:0};
   const a=await summarizeProcessSample(db,store,capture,'fake/model',ask(counter),signal());
   const b=await summarizeProcessSample(db,store,seed('A separate user request'),'fake/model',ask(counter),signal());
-  // Simulate a receipt admitted by an older validator, without changing any original.
   const old=JSON.parse(store.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(a.id).output_json);
   old.fragments[0].stages[0].claims[0].basis='observed';
   store.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify(old),a.id);

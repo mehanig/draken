@@ -3,7 +3,6 @@ import { route, connected } from './http';
 import { historyProgress, readHistory, searchHistory, validateHistoryQuery } from '../memory/service';
 import { yieldBackgroundIndexing } from '../sync/background';
 const router = Router();
-// Metadata only: never starts a worker, downloads a model or queues behind it.
 router.get('/progress', (_req, res) => res.json(historyProgress()));
 router.post('/search', route((req, res) => connected(res, async signal => {
   const query = validateHistoryQuery(req.body);

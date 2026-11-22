@@ -1,5 +1,3 @@
-// Explicit local-model qualification. Synthetic records only; fake pi/native
-// helpers. No OpenAI request or real account. Downloads require a separate flag.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -19,7 +17,6 @@ let cache;
 (async () => {
   if (process.argv.includes('--download-model')) await prepareModelFiles(path.resolve(modelDirectory));
   if (!modelFilesPresent(path.resolve(modelDirectory))) throw new Error('Model absent. Pass --download-model explicitly, or --model-dir=<existing pinned model directory>.');
-  // Prove inference itself is offline; model loading must not fetch code/assets.
   const fetch = global.fetch; global.fetch = () => { throw new Error('Unexpected inference network request'); };
   const a = await model.embed('Retire Whisper and Kokoro. Native ChatGPT voice is the only supported speech path.', false);
   const b = await model.embed('Почему отказались от локальной озвучки?', true);
@@ -45,7 +42,6 @@ let cache;
   const syncId = Number(db.prepare("INSERT INTO syncs(created_at,snapshot_at,snapshot_version,briefing,compression_complete) VALUES(?,?,2,'Ready synthetic sync.',1)").run(at, at).lastInsertRowid);
   const protectedRows = () => JSON.stringify(['agent_entries', 'agent_sessions', 'sync_items', 'sync_coverage'].map(table => db.prepare(`SELECT * FROM ${table}`).all()));
   const original = protectedRows();
-  // No setup/index call or scope flag: the ordinary request must prepare itself.
   const progress = [], timer = setInterval(() => { const value = service.historyProgress(); if (value.active) progress.push(value); }, 50);
   const start = Date.now(); let found;
   try { found = await service.searchHistory({ question: 'Why did we stop using the speech pipeline on our machine?' }); }
@@ -57,7 +53,7 @@ let cache;
   const warmStart = Date.now(); await service.searchHistory({ question: 'Why did we stop using the speech pipeline on our machine?' });
   const warmLookupMs = Date.now() - warmStart;
   const unrelated = await service.searchHistory({ question: 'How many moons orbit Jupiter?' }); assert.equal(unrelated.results.length, 0);
-  await service.stopHistory(); // Readiness survives worker retirement; call creation cannot prepare it again.
+  await service.stopHistory();
   assert.equal(service.historyReadiness().ready, true);
   cache = new (require('better-sqlite3'))(path.join(process.env.DRAKEN_DATA_DIR, 'memory/index.sqlite'), { readonly: true });
   const cacheVersion = cache.pragma('data_version', { simple: true });

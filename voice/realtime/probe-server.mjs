@@ -4,9 +4,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { NativeVoice } from './native.mjs';
 
-/** Synthetic-only lab server. Not mounted in Draken; never imports its DB or routes. */
 export async function createProbeServer({ voiceFactory = () => new NativeVoice({
-  // Deliberately fixed synthetic facts, not a coding model or real sync context.
   answer: async () => 'The targeted export tests passed. Deployment has not been checked.',
 }), leaseMs = 10_000, lifetimeMs = 90_000 } = {}) {
   const token = randomBytes(32).toString('hex');
@@ -16,7 +14,6 @@ export async function createProbeServer({ voiceFactory = () => new NativeVoice({
   const finish = () => {
     if (!closing) {
       closing = Promise.resolve().then(() => call?.close());
-      // Event/lease shutdown may precede the terminal owner's awaited close.
       closing.catch(() => {});
     }
     return closing;
@@ -57,7 +54,6 @@ export async function createProbeServer({ voiceFactory = () => new NativeVoice({
         call.subscribe(event => {
           const method = event.method;
           if (!['thread/realtime/transcript/done', 'thread/realtime/error', 'thread/realtime/closed', 'thread/realtime/started', 'draken/closed', 'draken/blocked'].includes(method)) return;
-          // Only synthetic transcripts and event kinds. Never SDP, tokens, helper errors or IDs.
           const params = method === 'thread/realtime/transcript/done' && ['user', 'assistant'].includes(event.params?.role)
             ? { role: event.params.role, text: String(event.params.text || '').slice(0, 4000) } : {};
           events.push({ sequence: ++sequence, method, params }); if (events.length > 128) events.shift();

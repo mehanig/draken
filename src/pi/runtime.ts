@@ -14,9 +14,6 @@ export function piPaths() {
   return { root, agent: path.join(root, 'agent'), home: path.join(root, 'home'), work: path.join(root, 'workspace'), selected: path.join(root, 'selected.json') };
 }
 
-// Managed children must not inherit unrelated provider keys, pi ownership, custom
-// model URLs, preload hooks or the user's global pi configuration. A private HOME
-// also prevents ambient cloud-credential lookup. This is not an OS sandbox.
 export function managedEnvironment(): NodeJS.ProcessEnv {
   const paths = piPaths(), env: NodeJS.ProcessEnv = {};
   for (const key of ['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'LANG', 'LC_ALL', 'TERM', 'COLORTERM', 'TMPDIR', 'TMP', 'TEMP']) if (process.env[key]) env[key] = process.env[key];
@@ -82,7 +79,6 @@ export async function stopPiChecks(): Promise<void> {
   })));
 }
 
-/** Bounded protocol-only subprocess. Never return raw stderr or credential output. */
 async function inspect(args: string[]): Promise<{ code: number | null; text: string }> {
   if (checksStopping) throw new Error('Pi status checks are stopping');
   const pi = selectedPi();
@@ -117,7 +113,7 @@ async function diagnose(): Promise<PiSetupStatus> {
         const value = JSON.parse(check.text);
         if (check.code === 0 && value.status === 'ready') state = 'configured';
         else if (check.code === 1 && value.status === 'not_ready' && value.reason === 'credentials_not_configured') state = 'needs_login';
-      } catch { /* Unsupported model/status protocol, not known-ready. */ }
+      } catch {}
       result.models.push({ model, state });
     }
     result.state = result.models.every(model => model.state === 'configured') ? 'configured' : result.models.some(model => model.state === 'unavailable') ? 'error' : 'needs_login';

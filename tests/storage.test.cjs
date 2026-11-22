@@ -20,7 +20,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-storage-test-')); fs.mkdirSync(path.join(root, 'sessions'));
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(root, 'state'), DRAKEN_PI_SESSIONS_DIR: path.join(root, 'sessions') });
   db = getDb(); caches = [];
-  db.prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+  db.prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
 });
 afterEach(() => { for (const cache of caches) cache.close(); closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
 function source(records, id = 'demo') {
@@ -169,8 +169,6 @@ test('frozen historical search windows survive migration, ordinary preparation a
   }
   for (const record of frozenRecords) sourceEntry(db, process.env.DRAKEN_PI_SESSIONS_DIR, record.text,
     { session: record.session, name: record.title, role: record.role, timestamp: at });
-  // Only attribution comes from canonical sources. No live index supplies any
-  // historical offset, body, hash or vector in this fixture.
   const records = [...historySources(db)];
   assert.equal(records.length, 2);
   for (const record of records) {
@@ -203,8 +201,6 @@ test('frozen historical search windows survive migration, ordinary preparation a
   await restored.prepare(); assert.equal(queries, 0);
   assert.deepEqual(links(), expectedLinks(records));
 
-  // Newly frozen aliases force the ordinary live recipe to look up these old
-  // hashes, rather than merely accepting already-embedded legacy occurrences.
   const snapshot = store.startSync(), aliases = [...historySources(db)];
   assert.equal(aliases.length, 4);
   await restored.prepare(); assert.equal(queries, 0);

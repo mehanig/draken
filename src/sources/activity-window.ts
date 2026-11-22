@@ -26,7 +26,6 @@ export function assertRecentSessions(db: Database.Database, sessions: Iterable<s
 }
 export function activityWindowStatus(db: Database.Database, proposed = activityDays(db)) {
   const current = activityDays(db), now = Date.now();
-  // Widening always requires consent, even before all files have been discovered.
   const widens = current !== null && (proposed === null || proposed > current);
   if (!widens) return { days: current, proposed_days: proposed, additional_sessions: 0, confirmation_required: false, confirmation: '' };
   const sessions = db.prepare(`SELECT s.id,s.last_message_at FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent

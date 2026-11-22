@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Repository snapshots and Docker control only. Repository setup/check commands never run on the host.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const {validate,pinned,fingerprint}=require('./factory-workspace/environment.cjs');
 const {assertDockerHost,dockerIsolation}=require('../dist/factory/docker');
@@ -86,7 +85,6 @@ async function main(){
   if(checkoutComplete){
    const exporter=prefix+'-export';resources.push(['container',exporter]);
    try{
-    // Stop all repository processes before taking a read-only handoff to a fresh collector.
     await docker(['rm','--force',container]);
     await docker(['create','-i',...dockerIsolation(exporter,'none',prefix),'--mount',`type=volume,src=${volume},dst=/workspace,readonly`,image]);
     save('export-container.json',JSON.parse((await docker(['inspect',exporter])).toString())[0]);

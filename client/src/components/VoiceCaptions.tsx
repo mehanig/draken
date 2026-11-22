@@ -4,7 +4,6 @@ import type { CallState } from '../voice/api';
 const thinking = ['[Thinking...]', '[Hmmm...]', '[Hmmmmmm...]'];
 const checking = ['[Checking...]', '[Looking that up...]'];
 
-/** A short window onto the live transcript, not word-timed playback receipts. */
 function excerpt(text: string) {
   const characters = Array.from(text.trim().replace(/\s+/g, ' '));
   if (characters.length <= 140) return characters.join('');
@@ -35,8 +34,6 @@ export function VoiceCaptions({ call, historyLookup }: { call: CallState; histor
   else if (call.question) { text = excerpt(call.question); speaker = 'You'; }
   else text = call.phase === 'speaking' ? '[Speaking...]' : call.muted ? '[Microphone off]' : '[Listening...]';
 
-  // Keep captions in the scene's DOM layer: accessible text that is still
-  // present if WebGL fails. Cycling filler is visual only, never spoken or saved.
   return <div className="voice-captions" role="region" aria-label="Live captions" aria-live="off" data-kind={speaker ? 'transcript' : 'status'}>
     {speaker && <span className="voice-caption-speaker">{speaker}</span>}
     <div className="voice-caption-window"><p>{text}</p></div>

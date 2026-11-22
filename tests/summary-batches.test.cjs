@@ -22,7 +22,7 @@ beforeEach(() => {
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(temp, 'state'), DRAKEN_PI_SESSIONS_DIR: root, DRAKEN_PI_BIN: fake,
     DRAKEN_PI_SUMMARY_MODEL: LUNA, DRAKEN_PI_FINAL_MODEL: ASTRA, DRAKEN_FAKE_CONTROL: controlPath, DRAKEN_TEST_CALL_LOG: logPath });
   delete process.env.DRAKEN_PI_TIMEOUT_MS; delete process.env.DRAKEN_PI_MAX_INVOCATIONS;
-  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
 });
 afterEach(() => { closeDb(); fs.rmSync(temp, { recursive: true, force: true }); });
 const calls = () => fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
@@ -68,7 +68,7 @@ test('aggregate citation compaction preserves all claims, uses one targeted repa
       return JSON.stringify({ observations: claims.map((claim, i) => ({ ...claim, evidence: request.allowed_source_ids.slice(next, next += i < 7 ? 7 : 6) })), limitations: ['All deployment claims remain unverified.'], process: processRecord });
     }
     assert.equal(request.input.goal, 'current_project_briefing');
-    return JSON.stringify(request.input.children[0].summary); // Reproduce an otherwise valid result still citing 151 sources.
+    return JSON.stringify(request.input.children[0].summary);
   });
   await assert.rejects(generateReply(sync.id), /Synthetic final-provider interruption/);
   const result = store.getSync(sync.id);
@@ -217,7 +217,6 @@ test('new caches survive reference renumbering and allow a final-only one-call b
   for (const row of getDb().prepare('SELECT event_key,evidence_json FROM sync_items WHERE sync_id=?').all(second.id)) {
     const encoded = JSON.parse(row.evidence_json);
     assert.ok(encoded.source_pointer); assert.ok(encoded.source_key); assert.equal(Object.hasOwn(encoded, 'text'), false);
-    // Keep the frozen pointer and canonical identity when changing only the label.
     const ref = `E${10000 + Number(encoded.ref.slice(1))}`;
     getDb().prepare('UPDATE sync_items SET evidence_json=? WHERE sync_id=? AND event_key=?')
       .run(JSON.stringify({ ...encoded, ref }), second.id, row.event_key);
@@ -314,7 +313,6 @@ test('the metrics migration preserves old run metadata and defaults history to a
   session(3); const sync = await start();
   const db = getDb(); db.prepare(`INSERT INTO sync_runs(sync_id,status,summary_model,final_model,max_invocations,total_entries,started_at)
     VALUES (?,'completed',?,?,120,3,'2026-01-01T00:00:00.000Z')`).run(sync.id, LUNA, ASTRA);
-  // Synthetic legacy schema only, never the production database.
   db.exec('ALTER TABLE sync_runs DROP COLUMN metrics_json'); closeDb();
   const run = store.getProgress(sync.id).run; assert.equal(run.status, 'completed'); assert.equal(run.total_entries, 3); assert.deepEqual(run.metrics, []);
   unchanged(sync, 3);

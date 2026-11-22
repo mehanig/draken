@@ -11,7 +11,6 @@ export function launchServer(logPath: string): OwnedServer {
   let target: ServerTarget | undefined, done = false, stopped: Promise<boolean> | undefined;
   let readyResolve: (target: ServerTarget) => void, readyReject: (error: Error) => void;
   const ready = new Promise<ServerTarget>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
-  // Keep only a bounded private diagnostic tail, never stdout in the launch terminal.
   let tail = Buffer.alloc(0);
   const log = (part: Buffer) => {
     tail = Buffer.concat([tail, part]).subarray(-64 * 1024);
@@ -20,7 +19,7 @@ export function launchServer(logPath: string): OwnedServer {
       if (fs.existsSync(logPath) && fs.lstatSync(logPath).isSymbolicLink()) return;
       fd = fs.openSync(logPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW || 0), 0o600);
       fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, tail);
-    } catch { /* Status still reports process failure. */ } finally { if (fd !== undefined) fs.closeSync(fd); }
+    } catch {} finally { if (fd !== undefined) fs.closeSync(fd); }
   };
   child.stdout!.on('data', log); child.stderr!.on('data', log);
   const timer = setTimeout(() => readyReject(new Error('Server startup timed out')), 15_000);
@@ -47,7 +46,6 @@ export function launchServer(logPath: string): OwnedServer {
     stopped = (async () => {
       // IPC is private to this child. Windows kill(SIGTERM) is not graceful.
       if (child.connected) child.send({ type: 'draken-shutdown', instance: target?.instance }, () => {});
-      // Disconnect also requests shutdown, including a failed pre-ready launch.
       if (child.connected) child.disconnect();
       let deadline: NodeJS.Timeout | undefined;
       const result = await Promise.race([exited.then(() => true), new Promise<boolean>(resolve => { deadline = setTimeout(() => resolve(false), 10_000); })]);

@@ -55,13 +55,9 @@ export function preparationUsage(db: Database.Database, query: Record<string, un
       const exact = typeof metric.started_at === 'string' && Number.isFinite(Date.parse(metric.started_at));
       add(exact ? metric.started_at! : run.started_at, 1, metric, !exact);
     }
-    // Older/crashed runs may have reserved invocations without a metric. Never
-    // turn those requests into zero-cost work or fabricate per-call timestamps.
     add(run.started_at, Math.max(0, run.invocations - metrics.length), undefined, true);
     const failed = (date: string | null) => { const bin = at(date); if (bin) { bin.failed_attempts++; totals.failed_attempts++; } };
     if (run.background) {
-      // A resumed run keeps its allowance and request metrics. Attempt failures
-      // need their own events: cancellation can happen between successful calls.
       let events: { status: string; at: string }[];
       try {
         events = JSON.parse(run.failure_events_json!);

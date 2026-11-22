@@ -40,8 +40,6 @@ function readState(): ServerState | undefined {
       if (key === 'https_url' && value[key] === null) continue;
       if (typeof value[key] !== 'string' || value[key].length > 256) throw new Error('Invalid server record');
       const url = new URL(value[key]);
-      // Saved addresses come from the actual bound sockets, never arbitrary URLs
-      // or dashboard input. Explicit operator overrides may still use DNS names.
       if (url.protocol !== protocol || url.port === '0' || !isIP(url.hostname.replace(/^\[|\]$/g, '')) || url.origin !== value[key]) throw new Error('Invalid server record');
     }
     return value;

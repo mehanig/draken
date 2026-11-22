@@ -159,7 +159,6 @@ export function requireOpen(id: number, allowBusy = false, evidence = true): Syn
   return sync;
 }
 
-/** No LIMIT: the snapshot contains ALL eligible entries. Inference, not coverage, is chunked. */
 function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence[] } {
   const db = getDb();
   const old = new Map(previous?.items.map(item => [item.event_key, item]) || []);
@@ -180,7 +179,6 @@ function snapshot(previous?: SyncDetail): { items: Evidence[]; context: Evidence
     seen.add(row.event_key);
     firstBySession.set(row.session_id, Math.min(firstBySession.get(row.session_id) ?? Infinity, source_id));
   }
-  // Preserve evidence behind old conversation citations, but don't treat obsolete branch evidence as new work.
   const current = new Set(items.map(sourceKey));
   const context = [...(previous?.context || []), ...(previous?.items || [])].filter(item => !current.has(sourceKey(item)));
   const contextKeys = new Set(context.map(sourceKey));

@@ -11,7 +11,7 @@ beforeEach(()=>{
  const fake=path.join(root,'pi');fs.copyFileSync(path.join(__dirname,'fixtures/fake-pi.cjs'),fake);fs.chmodSync(fake,0o700);
  control=path.join(root,'control.json');log=path.join(root,'calls.jsonl');fs.writeFileSync(control,'{}');
  Object.assign(process.env,{DRAKEN_DATA_DIR:path.join(root,'state'),DRAKEN_PI_SESSIONS_DIR:path.join(root,'sessions'),DRAKEN_PI_BIN:fake,DRAKEN_PI_SUMMARY_MODEL:'test/cheap',DRAKEN_PI_FINAL_MODEL:'test/strong',DRAKEN_FAKE_CONTROL:control,DRAKEN_TEST_CALL_LOG:log,DRAKEN_HOST:'127.0.0.1',DRAKEN_NO_AUTH:'true',DRAKEN_CODEX_BIN:path.join(root,'no-native-helper'),DRAKEN_CODEX_HOME:path.join(root,'no-native-account')});
- getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+ getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
  originals={readHistory:memory.readHistory,historyReadiness:memory.historyReadiness,searchPreparedHistory:memory.searchPreparedHistory,searchHistory:memory.searchHistory,prepareHistory:memory.prepareHistory};
 });
 afterEach(async()=>{for(const id of activity.busyIds)cancelReply(id);await idle();if(server)await new Promise(r=>server.close(r));server=null;Object.assign(memory,originals);closeDb();fs.rmSync(root,{recursive:true,force:true});});
@@ -69,7 +69,6 @@ test('actual chat route survives appended/scanned originals and adopts newly ind
  assert.equal(JSON.stringify(done.items),originalItems);assert.equal(done.briefing,initial.briefing);assert.equal(store.homeOverview().covered,0);
  assert.ok(calls().at(-1).historical_evidence.sources.some(item=>item.text.includes('Fresh original update')),'New original is supplied separately as H history');
  assert.ok(done.messages.some(item=>/\[H[a-f0-9]{24}\]/.test(item.content))||calls().at(-1).historical_evidence.sources.length>0);
- // Damage outside the supplied evidence is not a chat admission veto.
  fs.writeFileSync(path.join(root,'sessions',trail+'.jsonl'),'damaged original\n');
  const sessions=getDb().prepare('SELECT id FROM agent_sessions ORDER BY id').all().map(row=>row.id);
  fs.writeFileSync(control,JSON.stringify({evidencePlan:{scope:'project',sessions:['P'+(sessions.indexOf(beacon)+1)],query:'Beacon outcomes',kind:'sources',recent:true}}));
@@ -97,7 +96,7 @@ test('history cutoff stays pinned for the whole answer; unavailable search fails
 
 test('prepared chat never traverses the summary tree, reads the frozen corpus or starts indexing',async t=>{
  const {id}=await ready(),initial=store.getSync(id),before=calls().length;
- getDb().prepare('DELETE FROM summary_planning_context WHERE sync_id=?').run(id); // Pre-receipt briefing upgrade.
+ getDb().prepare('DELETE FROM summary_planning_context WHERE sync_id=?').run(id);
  const {SummaryTree}=require('../dist/sync/tree'),{EvidenceReader}=require('../dist/db/evidence');
  const forbidden=()=>{throw Error('Chat entered a preparation/full-snapshot path');};
  for(const method of ['beforePreparation','build','beforeFinal','verifyFinal'])t.mock.method(SummaryTree.prototype,method,forbidden);

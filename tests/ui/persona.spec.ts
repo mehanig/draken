@@ -18,7 +18,7 @@ test('standalone 3D persona renders locally, follows actual playback and stops o
   await expect(canvas).toHaveAttribute('data-mouth', '0');
   await expect(canvas).toHaveAttribute('data-background', 'blurred');
   const cached = await canvas.getAttribute('data-background-renders');
-  await page.waitForTimeout(400); // Several animated foreground frames must reuse the cached room.
+  await page.waitForTimeout(400);
   await expect(canvas).toHaveAttribute('data-background-renders', cached!);
   await page.getByRole('button', { name: 'Play speech sample', exact: true }).click();
   await expect(stage).toHaveAttribute('data-mode', 'speaking');
@@ -40,8 +40,6 @@ test('standalone 3D persona renders locally, follows actual playback and stops o
 });
 
 test('hardware-quality compositing renders without shader errors and preserves static reduced motion', async ({ page }) => {
-  // Exercise the high-quality branch on CI's software GL too; this does not
-  // claim verification on a physical hardware GPU.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() => {
     const original = WebGL2RenderingContext.prototype.getParameter;

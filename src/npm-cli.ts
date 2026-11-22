@@ -13,7 +13,7 @@ export function npmCli(env: NodeJS.ProcessEnv = process.env, node = process.exec
         const file = fs.realpathSync(path.join(directory, name));
         candidates.push(file, path.join(path.dirname(file), 'node_modules/npm/bin/npm-cli.js'),
           path.join(directory, 'node_modules/npm/bin/npm-cli.js'));
-      } catch { /* Try the other known npm installation layouts. */ }
+      } catch {}
     }
   }
   const found = candidates.find(file => {

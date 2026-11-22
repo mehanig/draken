@@ -125,7 +125,6 @@ export async function generateReply(id: number, question?: string, requestId?: s
   try {
     runId = db.transaction(() => {
       historyBefore = question ? captureConversationHistory(id) : null;
-      // Millisecond-equal sends still belong after the captured archive cutoff.
       const started = new Date(Math.max(Date.now(), historyBefore ? Date.parse(historyBefore) + 1 : 0)).toISOString();
       const result = Number(db.prepare(`INSERT INTO sync_runs(sync_id, summary_model, final_model, max_invocations, total_entries, question, started_at, request_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, sync.models.summary, sync.models.final || 'pi configured default',
@@ -137,8 +136,6 @@ export async function generateReply(id: number, question?: string, requestId?: s
       }
       return result;
     })();
-    // Retain old node/input associations for output-only cache recovery. Node
-    // registration tags the current run for display without erasing provenance.
     const tree = new SummaryTree(sync, runId, controller.signal);
     if (!question) {
       await tree.beforePreparation();
@@ -148,12 +145,9 @@ export async function generateReply(id: number, question?: string, requestId?: s
         for (const prior of inputs) {
           db.prepare('UPDATE sync_runs SET stage=? WHERE id=?').run(`Recapping earlier sync #${prior.sync_id}`, runId);
           const recap = await summarizeRecap(prior, sync.models.summary, (payload, system) => tree.call(payload, system), controller.signal, result => {
-            // Recap calls are sequential. Annotate their existing metric slot,
-            // including rejected responses, without storing model/source text.
             db.prepare("UPDATE sync_runs SET metrics_json=json_set(metrics_json,'$[#-1].recap_validation',json(?)) WHERE id=? AND json_array_length(metrics_json)>0").run(JSON.stringify(result), runId);
           });
           memory.push({ sync_id: prior.sync_id, status: prior.status, snapshot_at: prior.snapshot_at, recap, decisions: prior.decisions, carry_forward: prior.carry_forward });
-          // Do not overwrite a newer presentation if the prior sync changed meanwhile.
           if (recapHash(recapInput(getSync(prior.sync_id, false)), sync.models.summary) === recapHash(prior, sync.models.summary)) saveRecap(prior, sync.models.summary, recap);
         }
         db.prepare('UPDATE syncs SET memory_json=? WHERE id=?').run(JSON.stringify(memory), id);
@@ -172,8 +166,6 @@ export async function generateReply(id: number, question?: string, requestId?: s
     if (requested.length) readRequested();
     let archive: EvidenceResult | undefined;
     if (question) {
-      // Cancel and await owned indexing before touching the prepared index. The
-      // cutoff was already captured at admission and stays pinned across awaits.
       await yieldBackgroundIndexing();
       controller.signal.throwIfAborted();
       if (!historyBefore) throw new Error('No prepared history cutoff');
@@ -189,11 +181,8 @@ export async function generateReply(id: number, question?: string, requestId?: s
           return output;
         } }, evidenceDependencies);
     }
-    // Tree boundaries check source consent; lifecycle checks need no bodies.
     checkOpen();
     const scopeReply = archive && archive.kind !== 'ready' ? archive.message : undefined;
-    // Selection awaited a provider: do not reuse a frozen-original byte check
-    // across that await. At most three explicitly requested originals are read.
     if (requested.length && !scopeReply) readRequested();
     let answer: string;
     if (question && archive?.kind === 'ready' && archive.workflowCreation) {
@@ -292,7 +281,7 @@ export function launchChat(id: number, question: string, requestId: string): Syn
   assertConversationActive(id);
   const sync = requireOpen(id, false, false);
   if (!sync.briefing || !sync.tree.complete || !sync.conversation.history_before) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
-  void generateReply(id, question, requestId).catch(() => { /* Run status is durable and pollable. */ });
+  void generateReply(id, question, requestId).catch(() => {});
   const started = getSync(id, false);
   if (started.tree.run?.request_id !== requestId) throw new HttpError(500, 'The chat request could not be saved. Your question was not sent.');
   return started;
@@ -306,6 +295,6 @@ export function launchReply(id: number, question?: string, snapshot?: SyncDetail
   assertEvidenceAvailable(sync);
   if (sync.snapshot_version < 2) throw new HttpError(409, 'Expand the partial snapshot first');
   if (question && (!sync.briefing || !sync.tree.complete || !sync.conversation.history_before)) throw new HttpError(409, 'Prepare the briefing and history before chatting.');
-  void generateReply(id, question, undefined, { snapshot: sync }).catch(() => { /* Persisted run error is available through /progress. */ });
+  void generateReply(id, question, undefined, { snapshot: sync }).catch(() => {});
   return getSync(id, false);
 }

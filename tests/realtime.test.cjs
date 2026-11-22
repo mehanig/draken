@@ -78,7 +78,6 @@ test('native login check does not mistake pi direct tokens or API keys for nativ
     }
     fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'synthetic', refresh_token: 'synthetic', id_token: 'synthetic' } }));
     assert.equal(hasNativeLogin(home), true);
-    // Validate input before touching an installed helper or any credentials.
     for (const sdp of ['not-sdp', 'v=0\r\nm=audio 9 x\r\nm=audio 9 x', 'v=0\r\nm=audio 9 x\r\nm=video 9 x']) {
       const voice = new NativeVoice({ home, binary: '/no-helper' }); await assert.rejects(voice.open(sdp), /One audio track/); await voice.close();
     }
@@ -155,8 +154,6 @@ test('native adapter preserves ordering, rejects API auth/provider drift, and te
       const pending = voice.open('v=0\r\nm=audio 9 test', { signal: controller.signal,
         onReady: () => {
           if (scenario !== 'slow') return;
-          // Wait for the synthetic pending request, not a 30ms process-start
-          // guess that can abort before the fixture creates its files under load.
           const deadline = Date.now() + 5000;
           const abortPending = () => {
             let pendingRequest = false;

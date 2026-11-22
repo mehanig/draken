@@ -108,7 +108,7 @@ test('settings inventory shows recorded sources; scan, selection and missing-sou
     await expect(row).toContainText('First message:'); await expect(row).toContainText('Last message:'); await expect(row).toContainText('1 unreviewed entry');
     await expect(dialog.getByRole('list', { name: 'Scan warnings' })).toContainText('inventory-malformed.jsonl');
     const selected = row.getByRole('checkbox'); await expect(selected).toBeChecked(); await expect(selected).toBeEnabled();
-    await selected.click(); await expect(row).toHaveCount(0); // The optimistic update removes this checkbox.
+    await selected.click(); await expect(row).toHaveCount(0);
     await pi.getByRole('button', { name: 'Show ignored sessions', exact: true }).click();
     await expect(row).toContainText('Manually excluded');
     await expect.poll(async () => (await inventory(page)).sessions.find((session: any) => session.id === id).included).toBe(0);
@@ -178,7 +178,7 @@ test('Codex and Claude history opt-ins persist and scan real synthetic transcrip
     await dialog.getByRole('button', { name: 'Scan enabled agents' }).click();
     for (const name of ['Codex CLI', 'Claude Code']) {
       const region = dialog.getByRole('region', { name, exact: true });
-      await region.getByRole('button', { name: 'Show ignored sessions', exact: true }).click(); // These fixtures predate the activity window.
+      await region.getByRole('button', { name: 'Show ignored sessions', exact: true }).click();
       await expect(region.locator('.session-source')).toHaveCount(1);
     }
     const codex = dialog.getByRole('region', { name: 'Codex CLI', exact: true });

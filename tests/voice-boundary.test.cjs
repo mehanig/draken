@@ -1,4 +1,3 @@
-// Native voice configuration and preservation of legacy call history.
 require('./fixtures/fake-memory.cjs');
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');

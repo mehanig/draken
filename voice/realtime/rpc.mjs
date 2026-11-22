@@ -39,11 +39,9 @@ export class NativeRpc {
       try { event = JSON.parse(line); } catch { return this.close('Malformed native voice event.'); }
       if (!event || typeof event !== 'object' || Array.isArray(event)) return this.close('Malformed native voice event.');
       if (typeof event.method === 'string') {
-        // A call must never become an execution/approval/elicitation client.
-        // Do not accept even a nominally read-only command request.
         if (Object.hasOwn(event, 'id')) {
           try { this.#send({ id: event.id, error: { code: -32601, message: 'Draken voice does not execute tools or grant approvals.' } }); }
-          catch { /* A closed input pipe cannot grant an operation. */ }
+          catch {}
           finally { this.close('Native voice requested an unsupported operation.'); }
           return;
         }
@@ -51,7 +49,7 @@ export class NativeRpc {
         if (this.#closed) return;
       } else if (Object.hasOwn(event, 'id')) {
         const pending = this.#pending.get(event.id);
-        if (!pending) continue; // A timed-out response must not settle a later request.
+        if (!pending) continue;
         this.#pending.delete(event.id); pending.cleanup();
         if (Object.hasOwn(event, 'error')) pending.reject(new Error('Native voice request was rejected. Check account access and helper compatibility.'));
         else if (Object.hasOwn(event, 'result')) pending.resolve(event.result);

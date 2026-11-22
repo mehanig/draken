@@ -1,8 +1,6 @@
 import * as THREE from 'three';
 import { StudioAssets, type StudioMaterials } from './geometry';
 
-/** A quiet call backdrop. Room details sit behind the focus plane; only the
- * seated character, chair and uncluttered desk belong to the sharp foreground. */
 export function createStudio(room: THREE.Scene, foreground: THREE.Scene, a: StudioAssets, m: StudioMaterials) {
   a.box(room, [12, 0.10, 12], [0, -0.07, 0], a.material({ color: '#827565', roughness: 1 })).castShadow = false;
   a.box(room, [11, 6, 0.16], [0, 2.8, -2.2], m.wall).castShadow = false;

@@ -19,8 +19,6 @@ async function read(source: Database.Database, dependencies: Dependencies, signa
   signal.throwIfAborted();
   return packets;
 }
-/** Experiment only: dedicated store, exclusive ownership by caller, at most SEVEN invocations total (five initial calls plus two explicit source-audit correction calls).
- * Failed/interrupted rows never automatically retry. The next iteration needs explicit retry policy. */
 async function invoke<T>(source: Database.Database, store: Database.Database, dependencies: Dependencies, model: string,
   kind: 'summary' | 'comparison', payload: unknown, prompt: string, validate: (raw: string) => T, ask: PilotModel, signal: AbortSignal) {
   const before = JSON.stringify(await read(source, dependencies, signal));

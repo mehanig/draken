@@ -8,8 +8,6 @@ import { historyUpdate, type HistoryPage, type HistoryProgress, type HistoryQuer
 import { storedHistoryReadiness } from './readiness';
 import { scanSessions } from '../sync/collector';
 
-// One owned CPU worker; ordinary concurrent requests wait rather than requiring
-// the user to manage an index. No model/runtime is loaded in the dashboard.
 interface Work {
   id: number; method: string; args: Record<string, unknown>; background: boolean;
   resolve(value: unknown): void; reject(error: Error): void;
@@ -92,8 +90,6 @@ function pump() {
     start();
     work.started = work.updated = Date.now(); work.progress = historyUpdate(work.method.startsWith('read') ? 'reading' : 'scanning');
     watch(work);
-    // A healthy first index can exceed an interactive-query timeout. Progress
-    // renews its stall deadline, but total work remains bounded to two hours.
     work.deadline = setTimeout(() => { if (active === work) { settle(work, failure()); retire(); } }, 2 * 60 * 60000);
     child!.send({ id: work.id, method: work.method, ...work.args }, error => { if (error && active === work) { settle(work, failure()); retire(); } });
   } catch { settle(work, failure()); retire(); if (!retiring.size) pump(); }
@@ -106,7 +102,7 @@ function request<T>(method: string, args: Record<string, unknown> = {}, signal?:
   if (background && (active || queue.length || retiring.size)) return Promise.reject(cancelled());
   if (!background && active?.background) { settle(active, cancelled()); retire(); }
   if (queue.length >= 8) return Promise.reject(new HttpError(429, 'Too many history requests. Try again shortly.'));
-  getDb(); // Only the app initializes its DB. The worker opens it read-only.
+  getDb();
   return new Promise<T>((resolve, reject) => {
     const work: Work = { id: ++sequence, method, args, signal, background, resolve: value => resolve(value as T), reject, abort: () => {
       if (active === work) { settle(work, cancelled()); retire(); }

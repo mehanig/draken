@@ -1,14 +1,10 @@
 import type Database from 'better-sqlite3';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_BYTES, validEmbedding } from './embedding-contract';
 
-/** One physical passage/vector, many scoped occurrences. `chunks` and
- * `embedding_cache` are read views, not additional text/vector stores. */
 export function initHistoryStorage(db: Database.Database, fingerprint: string): void {
   const version = 'history-index-v3-contentless';
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='meta'").get()) {
     const get = db.prepare('SELECT value FROM meta WHERE key=?');
-    // A cold prepared-only voice lookup must not perform even no-op schema
-    // writes. Real migrations/model changes still take the transactional path.
     if ((get.get('schema') as { value: string } | undefined)?.value === version
       && (get.get('model') as { value: string } | undefined)?.value === fingerprint
       && (get.get('covered-tails-removed') as { value: string } | undefined)?.value === '1') return;
@@ -41,8 +37,6 @@ export function initHistoryStorage(db: Database.Database, fingerprint: string): 
       const cache = db.prepare('SELECT embedding FROM embedding_cache WHERE hash=?');
       const vector = db.prepare('SELECT embedding FROM vectors WHERE rowid=?');
       const save = db.prepare('INSERT INTO passage_vectors(rowid,embedding) VALUES(?,?)');
-      // Cache-only rows are retained too; ordinary admission refresh may later
-      // prune genuinely unreferenced data, just as before this migration.
       for (const row of db.prepare('SELECT hash FROM embedding_cache').all() as any[]) insert.run(row.hash, null);
       for (const passage of db.prepare('SELECT id,hash FROM passages ORDER BY id').all() as any[]) {
         let bytes = (cache.get(passage.hash) as any)?.embedding as Buffer | undefined;
@@ -55,8 +49,6 @@ export function initHistoryStorage(db: Database.Database, fingerprint: string): 
         if (bytes.length !== EMBEDDING_BYTES || !validEmbedding(new Float32Array(Uint8Array.from(bytes).buffer))) throw new Error('Invalid retained embedding');
         save.run(BigInt(passage.id), bytes); db.prepare('UPDATE passages SET embedded=1 WHERE id=?').run(passage.id);
       }
-      // Preserve the external-content FTS index and occurrence IDs, including
-      // its document frequencies. Only its backing table becomes a join view.
       db.exec('DROP TRIGGER IF EXISTS chunks_insert; DROP TRIGGER IF EXISTS chunks_delete; DROP TABLE chunks; DROP TABLE vectors; DROP TABLE embedding_cache');
       if (!db.prepare("SELECT 1 FROM meta WHERE key='covered-tails-removed'").get()) {
         const remove = db.prepare('DELETE FROM chunk_links WHERE id=?');
@@ -75,8 +67,6 @@ export function initHistoryStorage(db: Database.Database, fingerprint: string): 
     }
     if ((db.pragma('table_info(passages)') as { name: string }[]).some(column => column.name === 'body')) {
       if (db.prepare('SELECT 1 FROM chunk_links c JOIN passages p ON p.id=c.passage_id WHERE p.body IS NULL LIMIT 1').get()) throw new Error('A stored search passage is missing; conversion refused');
-      // FTS retains token postings/positions, not original passage strings.
-      // Re-tokenize existing inputs only; vector bytes and IDs do not change.
       db.exec(`CREATE VIRTUAL TABLE words_source USING fts5(body,content='',contentless_delete=1);
         INSERT INTO words_source(rowid,body) SELECT c.id,p.body FROM chunk_links c JOIN passages p ON p.id=c.passage_id;
         DROP TRIGGER IF EXISTS links_insert; DROP TRIGGER IF EXISTS links_delete;
@@ -93,7 +83,6 @@ export function initHistoryStorage(db: Database.Database, fingerprint: string): 
     `);
     const oldModel = (db.prepare("SELECT value FROM meta WHERE key='model'").get() as any)?.value;
     if (oldModel && oldModel !== fingerprint) {
-      // A real fingerprint change invalidates derived passages, never canonical records.
       db.exec('DELETE FROM records; DELETE FROM passages');
     }
     const metadata = db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE meta.value!=excluded.value');

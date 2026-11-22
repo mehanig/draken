@@ -16,7 +16,6 @@ Use kind sources for recorded engineering work, including recommendations based 
 Write a concise search query resolving ambiguous follow-ups and covering the requested topics. Keep exact source references when present. Do not invent outcomes or use an earlier assistant claim as an established fact.
 Use recent true for present status, next steps, open issues and whether an earlier plan or blocker has since changed. This includes casual questions such as 'what's up', paraphrases and misspellings. Also use recent true for the last, latest or previous discussion/question without a specific historical date: the user wants the most recent relevant discussion, not an arbitrary older match. Use recent false for an explicitly dated historical event or a general explanation that does not ask for later developments. Recent adds later candidates; it does not exclude older matches. Respect the supplied cutoff; never claim this is a complete archive search.`;
 
-/** The only application-facing operation. All host operations are injected. */
 export async function prepareEvidence(request: EvidenceRequest, dependencies: EvidenceDependencies): Promise<EvidenceResult> {
   const { signal, before, ask } = request, clean = dependencies.cleanText;
   signal.throwIfAborted();
@@ -41,13 +40,11 @@ export async function prepareEvidence(request: EvidenceRequest, dependencies: Ev
   } catch { throw new Error('Evidence planning returned invalid source IDs or JSON. No answer was generated; retry the message.'); }
   if (plan.scope !== 'project') return scopeReply(plan.scope);
   const selected = plan.sessions.map(id => sessions[Number(id.slice(1)) - 1].id);
-  // Citation syntax is mechanical: an explicit original must survive query rewriting.
   const refs = [...new Set(request.question.match(/\bH[a-f0-9]{24}\b/g) || [])].slice(0, 3);
   const query: EvidenceQuery = { question: clean([...refs, plan.query].join('\n'), 2000), before, limit: 64,
     kind: plan.kind === 'all' ? undefined : plan.kind, recent: plan.recent,
     ...(request.scope?.session_ids ? { session_ids: selected.length ? selected : request.scope.session_ids }
       : plan.kind === 'sources' && selected.length ? { session_ids: selected } : {}) };
-  // Search failures remain failures, never a scope decision or an empty match.
   const found = await dependencies.search(query, signal);
   signal.throwIfAborted();
   return selectHistory(found, { ...query, question: clean(request.question, 2000) }, before,

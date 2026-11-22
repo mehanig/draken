@@ -1,5 +1,3 @@
-// Fresh production-only npm install and loopback lifecycle smoke; no accounts,
-// histories, providers, model downloads, native desktop or microphone access.
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
 const {spawn,execFileSync}=require('node:child_process');
 const net=require('node:net');
@@ -39,7 +37,6 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  assert.equal((await fetch(url)).status,200);
  assert.equal((await fetch(url+'/api/scan',{method:'POST',headers:{Origin:'https://elsewhere.invalid'}})).status,403);
  const setup=await(await fetch(url+'/api/setup')).json();assert.notEqual(setup.pi.state,'configured');
- // Settings reads only: do not add activity/session GETs or conversation/provider work here.
  const automatic=await(await fetch(url+'/api/settings/auto-index')).json();assert.equal(automatic.enabled,true,'Fresh production installs enable local indexing only');
  assert.equal(automatic.phase,'waiting');assert.equal(automatic.batch_records,1);
  for(const key of ['sync_id','ready_sync_id','progress'])assert.equal(Object.hasOwn(automatic,key),false,'Indexing must not expose automatic briefing ownership');

@@ -1,10 +1,8 @@
-// Synthetic real JSONL pointers for tests that do not exercise discovery itself.
 const fs=require('node:fs'),path=require('node:path');
 const {normalizeEntry,digest}=require('../../dist/sync/normalize');
 const {EntryReader}=require('../../dist/sync/source-files');
 const {EvidenceReader}=require('../../dist/db/evidence');
 exports.sourceEntry=(db,directory,text,options={})=>{
-  // These provenance fixtures intentionally include historical (often 2020) work.
   db.prepare("INSERT OR IGNORE INTO sync_settings(key,value) VALUES('activity_days','null')").run();
   fs.mkdirSync(directory,{recursive:true});
   const session=options.session||'session-a',id=options.id||String(db.prepare('SELECT COUNT(*) n FROM agent_entries').get().n+1),timestamp=options.timestamp||'2020-01-02T00:00:00.000Z';
@@ -20,8 +18,6 @@ exports.sourceEntry=(db,directory,text,options={})=>{
     VALUES(@session,@entry_id,@parent_id,@timestamp,@type,@role,@event_key,@is_activity,1,1,@target_id,@offset,@bytes,@hash,@text_length,@replacement_length,@text_length,@normalization)`).run({...normalized,session,offset,bytes:bytes.length,hash:digest(bytes),text_length:normalized.text.length,replacement_length:normalized.replacement?.length||0,normalization:options.normalization||2});
   return Number(result.lastInsertRowid);
 };
-// Persistable snapshot evidence, with normalized text verified against the JSONL
-// original before freezing. The caller owns the temporary directory and root config.
 exports.frozenEvidence=(db,directory,text,options={})=>{
   const id=exports.sourceEntry(db,directory,text,options);
   const row=db.prepare('SELECT * FROM agent_entries WHERE id=?').get(id);

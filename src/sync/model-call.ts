@@ -4,7 +4,6 @@ import type { ModelCallMetric, SyncModels } from '../types';
 import { invokePi } from './pi';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens, summaryTokens } from './summary-budget';
 
-/** Shared paid-call accounting for preparation, text answers and voice selection. */
 export async function modelCall(payload: unknown, system: string, options: {
   models: SyncModels; runId: number; signal: AbortSignal; table?: 'sync_runs' | 'background_runs';
   final?: boolean; reserveAnswer?: boolean; accounting?: boolean;

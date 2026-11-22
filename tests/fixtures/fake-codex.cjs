@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Synthetic protocol fixture. Never contacts a provider or runs tools.
 const fs = require('node:fs'), path = require('node:path'), readline = require('node:readline');
 if (process.argv.includes('--version')) { console.log('codex-cli 0.166.0'); process.exit(0); }
 const home = process.env.CODEX_HOME;

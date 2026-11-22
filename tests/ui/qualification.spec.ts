@@ -12,7 +12,6 @@ test('real-provider qualification can validate its current-build fixture without
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-qualification-check-'));
   const env: NodeJS.ProcessEnv = { PI_CODING_AGENT_DIR: home,
     DRAKEN_CODEX_SESSIONS_DIR: path.join(home, 'codex'), DRAKEN_CLAUDE_SESSIONS_DIR: path.join(home, 'claude') };
-  // Keep browser installation discovery, not provider credentials or an alternate client build.
   for (const key of ['PATH', 'HOME', 'USERPROFILE', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PLAYWRIGHT_BROWSERS_PATH']) {
     if (process.env[key]) env[key] = process.env[key];
   }

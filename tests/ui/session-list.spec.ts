@@ -39,7 +39,7 @@ test('sessions flow with the page and ignored rows have a read-only keyboard tog
     await expect(pi.locator('.session-ignored')).toHaveCount(4);
     const hide = pi.getByRole('button', { name: 'Hide ignored sessions', exact: true });
     await expect(hide).toHaveAttribute('aria-expanded', 'true');
-    await page.waitForTimeout(4200); // Inventory polling must keep the user's view choice.
+    await page.waitForTimeout(4200);
     await expect(rows).toHaveCount(34);
     const bounds = await list.boundingBox(), button = await hide.boundingBox();
     expect(button!.y).toBeGreaterThanOrEqual(bounds!.y + bounds!.height);

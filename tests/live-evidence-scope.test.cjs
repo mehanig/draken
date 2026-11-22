@@ -1,5 +1,3 @@
-// Real temporary JSONL/SQLite + successful cache adoption. All model/native
-// boundaries are in-process synthetic providers; no helper, audio or server.
 require('./fixtures/fake-memory.cjs');
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -34,7 +32,7 @@ beforeEach(() => {
   closeDb(); root = fs.mkdtempSync(path.join(os.tmpdir(), 'draken-live-scope-'));
   Object.assign(process.env, { DRAKEN_DATA_DIR: path.join(root, 'db'), DRAKEN_PI_SESSIONS_DIR: path.join(root, 'sessions'), DRAKEN_VOICE_MODE: 'native',
     DRAKEN_PI_SUMMARY_MODEL: 'openai/gpt-6-luna', DRAKEN_PI_FINAL_MODEL: 'openai/gpt-6-astra' });
-  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+  getDb().prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
   fs.mkdirSync(process.env.DRAKEN_PI_SESSIONS_DIR); file = path.join(process.env.DRAKEN_PI_SESSIONS_DIR, 'scope.jsonl');
   const rows = [{ type: 'session', version: 3, id: 'scope', cwd: '/synthetic/old', timestamp: '2026-01-01T00:00:00.000Z' }];
   for (let n = 0; n < 3; n++) rows.push({ type: 'message', id: `m${n}`, parentId: n ? `m${n - 1}` : null,
@@ -117,7 +115,6 @@ for (const boundary of ['typed', 'audio', 'requested context', 'after context be
   test(`active adopted BG revocation blocks ${boundary} and holds ownership until helper exit`, async () => {
     const before = await prepared(), call = await connected();
     if (boundary === 'requested context' || boundary === 'continuation') await live.sendLiveText(call.id, 'Explain C1', randomUUID());
-    // Already generated/interrupted speech must not be erased on revocation.
     event('assistant', 'Already spoken qualification. ', false);
     if (boundary === 'continuation') event('assistant', 'Let me check that.');
     const exit = deferred(); closeHook = () => exit.promise;
@@ -132,7 +129,6 @@ for (const boundary of ['typed', 'audio', 'requested context', 'after context be
         if (boundary === 'audio') event('user', 'Spoken question about C1');
         if (boundary === 'requested context') await assert.rejects(native.options.answer('C1', signal()), /unavailable|changed|excluded|superseded/);
         if (boundary === 'continuation') {
-          // Drive a real continuation timer without provider/audio I/O.
           await new Promise(resolve => setTimeout(resolve, 1700));
         }
       }

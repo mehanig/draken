@@ -1,5 +1,3 @@
-// Opt-in end-to-end continuation proof: real ChatGPT audio, controlled synthetic lookup.
-// No production DB, real microphone, local speech engine or second answer model.
 if (!process.argv.includes('--allow-provider')) throw Error('Pass --allow-provider for synthetic native voice qualification.');
 process.umask(0o077);
 require('./fixtures/fake-memory.cjs');

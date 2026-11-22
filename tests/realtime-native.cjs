@@ -1,5 +1,3 @@
-// Optional REAL pinned-helper compatibility checks. Unusable synthetic API auth,
-// loopback-only backing endpoints, no user credentials or provider requests.
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), http = require('node:http');
 const assert = require('node:assert/strict');
 (async () => {
@@ -54,7 +52,6 @@ const assert = require('node:assert/strict');
           url = backend.url;
         }
         const args = helperArguments(url);
-        // TEST ONLY: NativeVoice never permits API auth or this override.
         args[args.indexOf('forced_login_method="chatgpt"')] = 'forced_login_method="api"';
         active();
         rpc = new NativeRpc(defaultBinary, args, { cwd: home, env: helperEnvironment(home) });

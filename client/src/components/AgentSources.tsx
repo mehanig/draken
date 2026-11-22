@@ -7,7 +7,6 @@ import type { Overview, ScanResult } from '../types';
 const date = (value: string) => new Date(value).toLocaleString();
 const formats = { pi: 'pi v3 JSONL', codex: 'Rollout JSONL', claude: 'Transcript JSONL' };
 
-/** Recorded session inventory and bounded directory-presence metadata. */
 export function AgentSources({ open }: { open: boolean }) {
   const [expanded, setExpanded] = useState(false), [sources, setSources] = useState<Overview | null>(null);
   const [showIgnored, setShowIgnored] = useState<Record<string, boolean>>({});

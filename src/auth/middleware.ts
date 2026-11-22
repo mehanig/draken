@@ -22,8 +22,6 @@ export function isLoopbackHost(host: string): boolean {
   return ['127.0.0.1', 'localhost', '::1'].includes(host);
 }
 
-// A plain local launch needs no account setup. Explicit credentials keep their
-// existing meaning, and non-loopback bindings never default to anonymous access.
 export function isNoAuthMode(): boolean {
   const override = process.env.DRAKEN_NO_AUTH;
   if (override !== undefined) {

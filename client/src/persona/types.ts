@@ -1,6 +1,5 @@
 import type { PlaybackCue } from '../audio/playback';
 
-/** Standalone presentation contract. No sync, API, authentication or call objects. */
 export type PersonaMode = 'idle' | 'listening' | 'thinking' | 'speaking' | 'ended';
 export interface PersonaInput {
   mode: PersonaMode;

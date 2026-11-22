@@ -17,8 +17,6 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
 }) {
   const [loadedSync, setSync] = useState<SyncDetail | null>(null);
   const [conversation, setConversation] = useState<{ id: number; state: ConversationState } | null>(null);
-  // Metadata may arrive before the full snapshot. Retain it independently, and
-  // never let an older full response erase an observed terminal idle ending.
   const sync = loadedSync && conversation?.id === id && !loadedSync.conversation?.ended_at
     ? { ...loadedSync, conversation: conversation.state } : loadedSync;
   const [readiness, setReadiness] = useState<CallReadiness | null>(null);
@@ -113,7 +111,6 @@ export function Sync({ id, chat = false, callIntent, consumeIntent, navigate, se
     let value: SyncDetail;
     try { value = await api.chat(id, text, pending.id); }
     catch (error) {
-      // Recover an accepted job after a lost response; never silently resend it.
       const recovered = await api.sync(id).catch(() => null);
       if (recovered?.tree.run?.request_id !== pending.id) {
         if (recovered) setSync(current => current ? { ...current, conversation: recovered.conversation } : current);

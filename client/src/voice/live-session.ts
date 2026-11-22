@@ -61,8 +61,6 @@ export class LiveVoiceSession {
     try {
       if (!this.alive) return;
       this.set({ notice: 'Connecting your call. Your microphone is still off.' });
-      // The server only accepts already-prepared history. A stale readiness
-      // check fails without starting indexing, a provider session or capture.
       // Own the cancellation identity BEFORE sending creation. Aborting a fetch
       // may discard an already-committed response, including its server ID.
       this.id = crypto.randomUUID();
@@ -71,7 +69,6 @@ export class LiveVoiceSession {
       if (!this.alive) { void voiceRequest(`/live/calls/${this.id}/end`, { method: 'POST', keepalive: true }).catch(() => {}); return; }
       if (document.visibilityState !== 'visible') throw new Error('History is ready. Return to this page and start the call again to enable the microphone.');
       this.set({ historyReady: true, startedAt: call.startedAt, notice: 'History is ready. Waiting for microphone permission…' });
-      // Keep the prepared reservation alive while the permission dialog is open.
       void this.poll();
       let input: MediaStream;
       try { input = await this.microphone(); this.set({ notice: '' }); }
@@ -79,7 +76,7 @@ export class LiveVoiceSession {
       this.input = input;
       await this.peer.open(input, async (sdp, signal) => (await voiceRequest<{ sdp: string }>(`/live/calls/${call.id}/connect`, { method: 'POST', body: JSON.stringify({ sdp }), signal })).sdp);
       if (!this.alive) return;
-      try { this.options.onPlayback?.({ text: '', samples: new Float32Array(0), sampleRate: 0, duration: Infinity, startedAt: 0, now: () => this.peer.clock, level: () => this.peer.level }); } catch { /* Visual observer cannot own the call. */ }
+      try { this.options.onPlayback?.({ text: '', samples: new Float32Array(0), sampleRate: 0, duration: Infinity, startedAt: 0, now: () => this.peer.clock, level: () => this.peer.level }); } catch {}
       this.set({ phase: this.state.replyPendingSince ? 'thinking' : 'listening' }); this.timer = window.setInterval(() => this.meter(), 80);
     } catch (error) {
       if (this.alive) { this.set({ error: error instanceof Error ? error.message : 'Live voice could not start' }); await this.end(); }
@@ -214,13 +211,13 @@ export class LiveVoiceSession {
     clearInterval(this.timer); this.life.abort();
     this.input?.getTracks().forEach(track => track.stop()); this.inputSource?.disconnect();
     this.peer.close(); void this.inputContext.close().catch(() => {});
-    try { this.options.onPlayback?.(null); } catch { /* Presentation only. */ }
+    try { this.options.onPlayback?.(null); } catch {}
     this.pendingAnswer = false; this.awaitingUser = false;
     this.set({ phase: 'ended', muted: true, notice: '', replyPendingSince: 0 });
     if (this.id) {
       const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 4000);
       try { await voiceRequest(`/live/calls/${this.id}/end`, { method: 'POST', keepalive: true, signal: controller.signal }); }
-      catch { /* Server lease bounds cleanup when the network is gone. */ }
+      catch {}
       finally { clearTimeout(timer); }
     }
   }

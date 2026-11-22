@@ -9,8 +9,6 @@ import { MODEL_ID } from './model-files';
 import { modelFilesPresent } from './model-assets';
 
 const KEY = 'call-history-ready-v1';
-// Keep the storage key so old receipts are replaced by explicit preparation,
-// not mistaken for current coverage. Compatible passages/vectors remain intact.
 const VERSION = 2;
 export interface HistoryReadiness { ready: boolean; before: string | null }
 interface RequiredFile {
@@ -20,8 +18,6 @@ interface CachedStamp {
   revision: string; roots: string; before?: string; from: number; until: number; stamp: string;
   files: RequiredFile[]; metadata: string;
 }
-// Two replaceable slots, not a map of every preparation/cutoff ever requested.
-// Retain only required-file descriptors and digests, never per-entry/frozen JSON.
 const cached = new WeakMap<Database.Database, { current?: CachedStamp; captured?: CachedStamp }>();
 
 function fileMetadata(files: RequiredFile[]): string {
@@ -31,8 +27,6 @@ function fileMetadata(files: RequiredFile[]): string {
     if (!stat.isFile() || `${stat.dev}:${stat.ino}` !== row.file_identity || stat.size < row.scanned_bytes) throw new Error('Original session file is unavailable.');
     if (stat.size === row.scanned_bytes && stat.mtime.toISOString() !== row.modified_at) throw new Error('Original session file is unavailable or changed. Prepare history again.');
     if (row.scanned_bytes <= 0 || row.scanned_bytes < row.byte_offset || row.byte_offset < row.end) throw new Error('Finish importing history before calling.');
-    // This is only a cache invalidator, NOT receipt identity. A valid append may
-    // rebuild metadata without changing the captured stamp. Never read bodies.
     metadata.update(JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]));
   }
   return metadata.digest('hex');
@@ -43,9 +37,6 @@ function fileMetadata(files: RequiredFile[]): string {
  * import cursors: an append followed by a scan must preserve a prepared prefix.
  * Frozen aliases need their own links even when sourceStamps coalesces them. */
 export function historyStamp(source: Database.Database, before?: string, roots?: RootInput, capturedOnly = false): string {
-  // A failed discovery of a NEW file must block new global coverage, but cannot
-  // revoke a previously captured context. Its own files still need completed
-  // imports below. Preparing a receipt always uses the strict check.
   if (!capturedOnly && (source.prepare("SELECT value FROM sync_settings WHERE key='source-scan-complete-v1'").get() as { value: string } | undefined)?.value === '0') throw new Error('History import has not completed. Scan sessions before calling.');
   const now = Date.now(), cutoff = before || new Date(now).toISOString();
   const rootKey = JSON.stringify(sourceRoots(roots));
@@ -53,12 +44,9 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
   const slots = cached.get(source) || {};
   cached.set(source, slots);
   const slot = before === undefined ? 'current' : 'captured', prior = slots[slot];
-  // Drop before validation/rebuilding so failures cannot leave reusable state.
   delete slots[slot];
   if (prior?.revision === revision && prior.before === before && prior.roots === rootKey
     && now < prior.until && (before !== undefined || now >= prior.from)) {
-    // SQL metadata can be cached, external file changes cannot. In particular,
-    // frozen-only branches still require their original file on every poll.
     if (fileMetadata(prior.files) === prior.metadata) {
       slots[slot] = prior;
       return prior.stamp;
@@ -93,9 +81,6 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
     requirePointer(session, pointer);
     const key = JSON.stringify([session, entry, pointer]);
     if (verified.has(key)) return;
-    // A frozen-only superseded branch is not represented by the live stamps.
-    // A rescan that removed/rewrote its bytes must still revoke readiness, even
-    // though the immutable frozen pointer itself (correctly) never changes.
     const row = original.get(session, entry) as { record_offset: number; record_bytes: number; record_hash: string; present: number } | undefined;
     if (!row?.present || row.record_hash !== pointer.record_hash || row.record_offset !== pointer.record_offset || row.record_bytes !== pointer.record_bytes) throw new Error('Original frozen session record is unavailable or changed.');
     verified.add(key);
@@ -120,8 +105,6 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
   for (const [id, row] of sessions) {
     const end = required.get(id); if (end === undefined) continue;
     descriptors.push({ ...row, end });
-    // Cursors are validated, never hashed. They advance on normal append+scan;
-    // old record hashes/projections/admission below still detect actual damage.
     files.update(JSON.stringify([id, row.path, row.file_identity]));
   }
   const metadata = fileMetadata(descriptors);
@@ -141,13 +124,12 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
 export function saveHistoryReadiness(db: Database.Database, source: Database.Database, before: string, stamp: string, model: string, roots?: RootInput): void {
   if (historyStamp(source, before, roots) !== stamp) throw new Error('History changed during preparation. Prepare the remaining changes before calling.');
   const prior = db.prepare('SELECT value FROM meta WHERE key=?').get(KEY) as { value: string } | undefined;
-  // Unchanged preparation must not rewrite derived state merely to move a clock.
   if (prior && prior.value.length <= 1024) {
     try {
       const value = JSON.parse(prior.value);
       if (value.version === VERSION && value.stamp === stamp && value.model === model && typeof value.before === 'string'
         && new Date(value.before).toISOString() === value.before && value.before <= before) return;
-    } catch { /* Explicit preparation can replace an invalid receipt, not source evidence. */ }
+    } catch {}
   }
   db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(KEY, JSON.stringify({ version: VERSION, before, stamp, model }));
 }
@@ -162,17 +144,10 @@ export function indexReadiness(db: Database.Database, source: Database.Database 
     if (marker.version !== VERSION || typeof marker.before !== 'string' || !Number.isFinite(Date.parse(marker.before)) || new Date(marker.before).toISOString() !== marker.before || marker.before > new Date().toISOString()
       || typeof marker.stamp !== 'string' || !/^[a-f0-9]{64}$/.test(marker.stamp)
       || marker.model !== (db.prepare("SELECT value FROM meta WHERE key='model'").get() as { value: string } | undefined)?.value) return absent;
-    // Status polling reports the recorded checkpoint, not verified admission.
     if (source === null) return { ready: true, before: marker.before };
-    // Start with incomplete physical passages, not every occurrence/alias. The
-    // correlated lookup uses links_passage; new caches also have a tiny partial
-    // passages index. Older read-only schemas need no migration to run this.
     if (db.prepare(`SELECT 1 FROM passages p WHERE p.embedded=0 AND EXISTS (
       SELECT 1 FROM chunk_links c JOIN records r ON r.ref=c.ref
       WHERE c.passage_id=p.id AND r.at<=?) LIMIT 1`).get(marker.before)) return absent;
-    // New post-cutoff entries/messages/sessions are not claimed as indexed.
-    // An alias of an OLD record still needs a link, regardless of snapshot age;
-    // unlike an alias of a post-cutoff record, it must invalidate this receipt.
     return marker.stamp === historyStamp(source, capturedOnly ? marker.before : undefined, undefined, capturedOnly) ? { ready: true, before: marker.before } : absent;
   } catch { return absent; }
 }

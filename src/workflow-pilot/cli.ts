@@ -69,7 +69,6 @@ No --all option or background processing. Use --resume for the SAME captured sam
       refs: job.capture.originals.map(item => item.ref) }, null, 2));
     if (!flags.has('--run')) { console.log(`No inference started. Inspect this selection; run: draken workflow-pilot --resume ${job.id} --run`); return; }
     process.on('SIGINT', stop); process.on('SIGTERM', stop);
-    // Remove an older static report before revalidation; failed revalidation must not leave it presented as current.
     const report = path.join(dir, `pilot-${job.id}.md`);
     if (fs.existsSync(report)) fs.unlinkSync(report);
     const markdown = await runPilot(source, store, job, (prompt, request) => invokePi(prompt, { ...request,

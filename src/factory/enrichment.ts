@@ -18,7 +18,7 @@ export function savedEnrichment(workflow: Discovery): SavedEnrichment {
   const row = latest(workflow);
   if (!row) return { status: 'pending' };
   if (row.status === 'completed') {
-    try { const value = JSON.parse(row.output_json!); if (JSON.stringify(enrich(workflow, value.guidance)) === JSON.stringify(value)) return { status: 'ready', value }; } catch { /* Invalid saved output is not execution-ready. */ }
+    try { const value = JSON.parse(row.output_json!); if (JSON.stringify(enrich(workflow, value.guidance)) === JSON.stringify(value)) return { status: 'ready', value }; } catch {}
   }
   const owner = getDb().prepare(`SELECT status FROM ${row.run_table} WHERE id=?`).get(row.run_id) as {status: string} | undefined;
   return { status: row.status === 'running' && owner?.status === 'running' ? 'running' : 'failed' };

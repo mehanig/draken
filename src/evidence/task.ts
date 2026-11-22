@@ -22,6 +22,5 @@ export async function readTaskEvidence(request: { before: string; selections: { 
   return { records: shown.sources.map(r => ({ ref: r.ref, sessionId: r.session_id, sequence: r.sequence, at: r.at, role: r.role, workspace: r.workspace,
     text: r.text + (r.ending ? '\n[Later excerpt from the same original]\n' + r.ending.text : '') })),
     limitations: [shown.limitations, ...(shown.omitted_matches ? [`${shown.omitted_matches} originals did not fit in the task packet.`] : [])],
-    // The host hashes this receipt, never persists these original bodies.
     receipt: JSON.stringify(pages) };
 }

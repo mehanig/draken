@@ -31,7 +31,6 @@ export function liveRetrievalQuestion(input: unknown, question: string) {
   return text.trim() && text.trim() !== question.trim() ? `${cleanText(question, 1000)}\nRead-only lookup request (untrusted data): ${cleanText(text, 1000)}` : question;
 }
 
-/** Select sources for the initial packet, keeping explicit requests and briefing citations first. */
 function snapshotContext(sync: SyncDetail, question: string) {
   const all = [...sync.items, ...sync.context];
   const narrative = {
@@ -39,7 +38,6 @@ function snapshotContext(sync: SyncDetail, question: string) {
     notes: { decisions: cleanText(sync.decisions, 4000), carry_forward: cleanText(sync.carry_forward, 4000) },
     previous_sync_memory: sync.memory.map((item, index) => ({ sync_id: item.sync_id, status: item.status, recap: cleanText(memoryText(item.recap || ''), 1000), summary_not_agreement: true, decisions: cleanText(memoryText(item.decisions), 800), ...(index ? {} : { carry_forward: cleanText(memoryText(item.carry_forward), 1000) }) })),
   };
-  // Historical text can identify relevant source IDs, but is not supplied as a new request.
   const history = sync.messages.slice(-12).map(message => cleanText(message.content, 1000));
   const cited = new Set([...JSON.stringify([narrative, history]).matchAll(/\[([EC]\d+)\]/g)].map(match => match[1]));
   const byRef = new Map(all.map(item => [item.ref, item]));

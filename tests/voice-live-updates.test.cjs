@@ -1,4 +1,3 @@
-// Synthetic native protocol only: no provider, microphone, live database or model.
 require('./fixtures/fake-memory.cjs');
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,8 +23,6 @@ function packet(ref = 'Hfixture') { return { text: JSON.stringify({ sources: [{ 
 const requests = () => fs.readFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
 const event = (role, text, done = true) => emit({ method: `thread/realtime/transcript/${done ? 'done' : 'delta'}`, params: { role, [done ? 'text' : 'delta']: text } });
 const gate = () => { const value = deferred(); gates.push(value); return value; };
-// Run the real scheduler through asynchronous preparation, not just its idle
-// predicate. Wire the public cancellation path to this exact worker owner.
 async function heldIndexer() {
   const exited = gate(); let preparationSignal, retired = false, preparations = 0;
   const worker = background.createAutoIndexer({
@@ -68,7 +65,6 @@ beforeEach(() => {
 });
 afterEach(async () => {
   for (const value of gates) value.resolve();
-  // Restore the wall clock before lifecycle teardown.
   for (const restore of restores.splice(0).reverse()) restore();
   await live.stopLiveCalls(); closeDb(); fs.rmSync(root, { recursive: true, force: true });
 });
@@ -148,8 +144,6 @@ test('setup and readiness polling never adopt newer READY history; the first rea
 
 test('setup rechecks its own preparation after native status, without borrowing globally ready history', async () => {
   const pending = live.createLiveCall(syncId, signal());
-  // createLiveCall has reached its native-status await; revoke only this
-  // conversation's marker while the synthetic helper check is outstanding.
   getDb().prepare('UPDATE syncs SET conversation_before=NULL WHERE id=?').run(syncId);
   await assert.rejects(pending, /History changed.*Prepare history before calling/);
   assert.equal(conversation.conversationStatus(syncId).history_before, null);
@@ -344,7 +338,6 @@ test('conversation inactivity waits for the in-flight reply, then expires withou
   const call = await connected();
   await live.sendLiveText(call.id, 'Check the tests.', randomUUID());
   const old = new Date(Date.now() - 31 * 60_000).toISOString();
-  // Simulate a due conversation clock independently of the separate hard call cap.
   getDb().prepare('UPDATE syncs SET conversation_last_user_at=? WHERE id=?').run(old, syncId);
   event('assistant', 'Still explaining ', false);
   conversation.expireConversations();
@@ -363,7 +356,6 @@ test('conversation inactivity waits for the in-flight reply, then expires withou
 test('hard call time, turn count and heartbeat lease stay separate from active conversation expiry', async () => {
   const call = await connected(); let now = Date.now(); const started = call.startedAt;
   replace(Date, 'now', () => now);
-  // Keep both real-user inactivity and transport lease current until the cap.
   for (let minute = 1; minute <= 29; minute++) {
     now = started + minute * 60_000;
     if (minute % 10 === 0 || minute === 29) { await live.sendLiveText(call.id, 'A real question.', randomUUID()); event('assistant', 'Recorded answer.'); }
@@ -519,7 +511,6 @@ test('Stop cannot retire a dispatched continuation append before its promise set
   await live.sendLiveText(call.id, 'Check the tests.', randomUUID());
   t.mock.timers.enable({ apis: ['setTimeout'] });
   try {
-    // Exercise the actual automatic continuation dispatch, not its callback in isolation.
     event('assistant', 'I will check the records.');
     t.mock.timers.tick(400); await flush();
     assert.equal(continued, 1);
@@ -566,7 +557,6 @@ test('stalled continuation after Stop times out through native close before awai
   const close = replace(NativeVoice.prototype, 'close', async function () {
     closing = true;
     const result = await close.call(this);
-    // Like RPC teardown: this append cannot settle until native.close is invoked.
     appended.reject(Error('Synthetic RPC closed'));
     await cleaned.promise;
     return result;
@@ -727,7 +717,6 @@ for (const operation of ['question', 'context', 'typed Stop', 'control Stop', 'o
   const pending = operation === 'open' ? live.connectLiveCall(call.id, 'v=0\r\nm=audio 9 test', signal()) :
     operation === 'control Stop' ? live.interruptLiveCall(call.id) :
     live.sendLiveText(call.id, operation === 'typed Stop' ? 'Stop speaking.' : 'Check the tests.', randomUUID());
-  // open is expected to reject after End, regardless of its late native result.
   const settled = pending.then(() => null, error => error);
   await until(() => dispatched);
   let ended = false;
@@ -882,8 +871,6 @@ test('instant-final late assistant retains a fixed background retirement deadlin
 });
 
 test('failed background retirement stays fail-closed even after scheduler and native helper exit', () => {
-  // A deliberately unconfirmed owner is terminal. Isolate it so teardown cannot
-  // fake a release merely to let later tests create calls.
   fs.writeFileSync(path.join(process.env.DRAKEN_CODEX_HOME, 'scenario.txt'), 'controlled');
   const child = require('node:child_process').spawnSync(process.execPath, ['-e', `
     require('./tests/fixtures/fake-memory.cjs');

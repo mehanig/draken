@@ -24,7 +24,7 @@ let checksStopping = false;
 function inspectNative({ binary, home, signal }) {
   let helper;
   if (!checksStopping && !signal?.aborted) {
-    try { helper = new NativeHelperProcess(binary, ['--version'], { env: helperEnvironment(home) }); } catch { /* Structural status only. */ }
+    try { helper = new NativeHelperProcess(binary, ['--version'], { env: helperEnvironment(home) }); } catch {}
   }
   if (!helper) return { stop() {}, done: Promise.resolve({ installed: false, exited: true }) };
   let stdout = '', failed = false;
@@ -60,8 +60,6 @@ export async function stopNativeChecks() {
   if (results.some(exited => !exited)) throw new Error('Native status helper exit could not be confirmed.');
 }
 
-// Positive allowlist: no API keys, pi session ownership, cloud credentials,
-// proxy overrides, provider URLs, NODE_OPTIONS, or user agent configuration.
 export function helperEnvironment(home, source = process.env) {
   const env = { CODEX_HOME: home, HOME: home, USERPROFILE: home,
     APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), RUST_LOG: 'off' };
@@ -169,7 +167,6 @@ export class NativeVoice {
         if (event.method === 'turn/started' && !this.#answer) { this.#emit({ method: 'draken/blocked', params: {} }); void this.close(); return; }
         if (event.method === 'draken/closed') { this.#emit(event); void this.close(); return; }
         if (event.method.startsWith('thread/realtime/') && event.params?.threadId === this.#thread) {
-          // SDP never enters the general event stream or a saved report.
           if (event.method !== 'thread/realtime/sdp') this.#emit(event);
         }
       });
@@ -237,7 +234,7 @@ export class NativeVoice {
     this.#preflight?.stop();
     const preflightExited = !this.#preflight || (await this.#preflight.done).exited;
     if (this.#thread && this.#rpc && !this.#rpc.closed) {
-      try { await this.#rpc.request('thread/realtime/stop', { threadId: this.#thread }, { timeoutMs: 1500 }); } catch { /* Terminate below, even if stop was rejected. */ }
+      try { await this.#rpc.request('thread/realtime/stop', { threadId: this.#thread }, { timeoutMs: 1500 }); } catch {}
     }
     this.#rpc?.close();
     const rpcExited = !this.#rpc || await this.#rpc.waitForExit();

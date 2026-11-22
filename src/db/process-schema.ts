@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3';
 
-/** Additive process knowledge. No raw transcript bodies, no review/coverage writes. */
 export function initProcessSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS process_extractions (
@@ -85,7 +84,6 @@ export function initProcessSchema(db: Database.Database): void {
       WHEN NEW.kind='comparison' AND NEW.status='completed' AND CASE WHEN json_valid(NEW.output_json) THEN json_extract(NEW.output_json,'$.sameWorkflow')=1 ELSE 0 END
       BEGIN INSERT OR IGNORE INTO workflow_discoveries(id,origin,model,created_at) VALUES(NEW.id,'recurring',NEW.model,NEW.created_at); END;
   `);
-  // A discovery can now come from one requested task, not only a comparison.
   if ((db.prepare('PRAGMA foreign_key_list(workflow_enrichments)').all() as { table: string }[]).some(fk => fk.table === 'process_extractions')) db.transaction(() => {
     db.exec(`CREATE TABLE workflow_enrichments_next (
       id INTEGER PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflow_discoveries(id),

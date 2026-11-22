@@ -14,7 +14,7 @@ let root,db,cache,index,model,calls;
 beforeEach(()=>{
  root=fs.mkdtempSync(path.join(os.tmpdir(),'draken-live-readiness-'));fs.mkdirSync(root+'/sessions');
  Object.assign(process.env,{DRAKEN_DATA_DIR:root+'/state',DRAKEN_PI_SESSIONS_DIR:root+'/sessions',DRAKEN_PI_BIN:'/not-a-provider'});
- db=getDb();db.prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run(); // Historical fixtures use All history.
+ db=getDb();db.prepare("INSERT INTO sync_settings VALUES('activity_days','null')").run();
  fs.mkdirSync(root+'/state/memory');cache=new Database(root+'/state/memory/index.sqlite');calls=0;
  model={fingerprint:'synthetic-live-readiness',ready:()=>true,setup:async()=>{},embed:async()=>{calls++;const vector=new Float32Array(384);vector[0]=1;return vector;}};
  index=new HistoryIndex(cache,db,model);
@@ -45,8 +45,6 @@ function snapshot(entryId='answer',created=OLD,sessionId='captured'){
  db.prepare('INSERT INTO sync_items VALUES(?,?,?)').run(id,row.event_key,evidence);
  return id;
 }
-// Instrument the source connection, not derived-index queries. Repeated polls
-// may do constant-size revision/flag reads, but must not walk source metadata.
 function sourceQueries(){
  const prepare=db.prepare,counts={prepare:0,walks:0,originals:0};
  db.prepare=function(sql){
@@ -163,7 +161,6 @@ test('home/overview report checkpoints without walking history; admission still 
   assert.ok(store.homeOverview().syncs.every(card=>card.conversation.available_before===BEFORE));assert.equal(queries,0);assert.equal(stats,0);
   assert.equal(indexReadiness(cache,db,true).ready,false,'actual admission rejects missing originals');
   assert.equal(canonical(),saved);
-  // Only the two explicit embedding mutations above may change derived rows.
   assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes+2*cache.prepare('SELECT COUNT(*) n FROM passages').get().n);
  }finally{memory.historyPreparationStatus=ready;cache.prepare=prepare;fs.lstatSync=lstat;}
 });
@@ -185,12 +182,10 @@ test('incomplete-passage query starts with the partial index, not all occurrence
  try{
   readonly.pragma('query_only=ON');
   assert.equal(indexReadiness(readonly,db,true).ready,true);
-  // Only derived state changes, on another connection, with warm source stamps.
   cache.exec('UPDATE passages SET embedded=0');assert.equal(indexReadiness(readonly,db,true).ready,false);
   cache.exec('UPDATE passages SET embedded=1');assert.equal(indexReadiness(readonly,db,true).ready,true);
   assert.equal(readonly.pragma('schema_version',{simple:true}),version,'read-only checks never install the new index');
  }finally{readonly.close();}
- // Raw fixture caches predating even links_passage also work without migration.
  const raw=new Database(':memory:');
  try{
   raw.exec('CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE passages(id INTEGER PRIMARY KEY,embedded INTEGER); CREATE TABLE chunk_links(passage_id INTEGER,ref TEXT); CREATE TABLE records(ref TEXT PRIMARY KEY,at TEXT);');
@@ -326,8 +321,6 @@ test('post-cutoff context edits to captured content invalidate readiness without
 
 test('rewrites/removals of frozen-only old branch records are rejected after scan, even though immutable frozen stamps never change',async()=>{
  await prepared();snapshot();
- // A later branch bypasses the frozen assistant entry. Its original bytes are
- // still retained and searchable through the snapshot, not the live projection.
  fs.appendFileSync(root+'/sessions/captured.jsonl',JSON.stringify(message('branch','user',NEW,'A different branch report.'))+'\n');await scan();
  assert.equal(db.prepare("SELECT active FROM agent_entries WHERE entry_id='answer'").get().active,0);
  await index.prepare({before:BEFORE},undefined,true);const stamps=[...sourceStamps(db,BEFORE)];

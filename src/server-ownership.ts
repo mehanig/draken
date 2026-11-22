@@ -13,7 +13,7 @@ export function ownServerDirectory(directory: string): () => void {
   try {
     fs.chmodSync(file, 0o600);
     owner.exec('BEGIN EXCLUSIVE');
-    owner.pragma('schema_version'); // Refuse corrupt/incompatible ownership storage.
+    owner.pragma('schema_version');
   } catch (error) {
     owner.close();
     if (['SQLITE_BUSY', 'SQLITE_LOCKED'].includes((error as { code?: string }).code || '')) {

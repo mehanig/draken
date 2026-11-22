@@ -1,4 +1,3 @@
-// Run only on a real macOS/Windows desktop. No provider, server, source or mic use.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
 const {nativeTray}=require('../dist/tray/native');
 async function main(){

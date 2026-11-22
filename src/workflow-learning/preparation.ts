@@ -1,6 +1,5 @@
 import { PROCESS_PROMPT, validateProcess, validateProcessEvidence, type ProcessExtraction } from './process';
 
-/** An additional field, not a replacement for the existing briefing summary. */
 export const SUMMARY_PROCESS_PROMPT = '\nAlso include a process property alongside observations and limitations. The following contract applies ONLY to process; keep the normal summary fields unchanged.\n' +
   PROCESS_PROMPT.replace('Return ONLY JSON', 'The process property is JSON');
 export function preparedProcess(value: unknown, references: readonly string[], roles: readonly string[]): ProcessExtraction {

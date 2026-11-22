@@ -1,5 +1,3 @@
-// Run directly: node --test tests/rollover-index.test.cjs
-// Transpile into this test process only: never build, replace, or depend on dist.
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
@@ -15,8 +13,6 @@ try {
   Module._resolveFilename = function(request, parent, ...rest) {
     if (request.startsWith('.') || path.isAbsolute(request)) {
       let file = path.resolve(path.dirname(parent.filename), request);
-      // The shared original-file fixture uses dist imports; resolve those to the
-      // same source modules as this test, not a second schema singleton.
       if (file.startsWith(project + '/dist/')) file = project + '/src/' + file.slice((project + '/dist/').length);
       if (file.startsWith(project + '/src/') && fs.existsSync(file + '.ts')) request = file + '.ts';
     }
@@ -42,7 +38,6 @@ function synthetic(fingerprint = 'rollover-synthetic-v1') {
     embed: async (body, query) => {
       (query ? model.queries : model.calls).push(body);
       const vector = new Float32Array(384);
-      // Distinct, deterministic unit vectors make byte preservation observable.
       const hash = require('node:crypto').createHash('sha256').update(fingerprint + body).digest();
       vector[hash.readUInt16LE(0) % 384] = 1;
       return vector;
@@ -59,7 +54,6 @@ beforeEach(() => {
   env = { ...process.env };
   process.env.DRAKEN_DATA_DIR = root;
   process.env.DRAKEN_PI_SESSIONS_DIR = path.join(root, 'originals');
-  // Explicit roots prevent even metadata checks against a user's other agents.
   for (const agent of ['CODEX', 'CLAUDE']) process.env[`DRAKEN_${agent}_SESSIONS_DIR`] = path.join(root, agent.toLowerCase());
   db = schema.getDb();
   db.prepare("INSERT OR REPLACE INTO sync_settings(key,value) VALUES('auto_index','false')").run();
@@ -116,7 +110,7 @@ function canonical() {
 }
 async function prepareDelta(expected) {
   const before = model.calls.length, queries = model.queries.length, original = canonical();
-  await index.prepare(); // Global coverage, not a source/sync-scoped shortcut.
+  await index.prepare();
   assert.deepEqual(model.calls.slice(before).sort(), [...expected].sort(), 'inference only for genuinely missing passage inputs');
   assert.equal(model.queries.length, queries, 'preparation must not embed queries');
   assert.equal(canonical(), original, 'index preparation cannot change review, membership or source metadata');
@@ -154,7 +148,6 @@ test('actual expired unreviewed syncs roll into a combined snapshot: only new pa
   const delta = expectedMissing(); assert.equal(delta.length, 3);
   assert.ok(delta.every(body => !oldBodies.has(body)));
   await prepareDelta(delta); retained(oldVectors); retainedLinks(oldLinks);
-  // Every new frozen occurrence resolves to the already shared physical passage.
   const originals = new Map(records().filter(r => r.kind === 'session').map(r => [r.identity, r]));
   for (const alias of records().filter(r => r.sync_id === combined.id)) {
     const ids = ref => cache.prepare('SELECT offset,passage_id FROM chunk_links WHERE ref=? ORDER BY offset').all(ref);
@@ -175,7 +168,6 @@ test('cancelled rollover preparation retains its committed delta vectors across 
   await prepareDelta(expectedMissing()); const oldVectors = vectors(), oldLinks = links();
   expire(first);
   const combined = store.startSync(); sameItems(combined, oldIds);
-  // Expire again so the arrivals really belong to a new full store snapshot.
   expire(combined);
   const ids = [...oldIds, ...entries('CANCEL DELTA', 72)];
   const next = store.startSync(); sameItems(next, ids);
@@ -214,14 +206,11 @@ test('metadata-only alias replacement keeps unchanged passage bytes; title is in
   entries('METADATA', 3); entries('UNAFFECTED', 2, 'session-b');
   await prepareDelta(expectedMissing());
   const originalOnly = vectors();
-  // Exercise replacement even without an old frozen alias keeping the physical
-  // passage alive: add the new metadata link before collecting orphaned input.
   db.prepare("UPDATE agent_sessions SET cwd='/synthetic/first-move' WHERE id='session-a'").run();
   await prepareDelta([]); retained(originalOnly);
   const first = store.startSync(); await prepareDelta([]); expire(first);
   const oldVectors = vectors();
   const frozenRefs = records().filter(row => row.kind === 'snapshot').map(row => row.ref);
-  // Workspace changes H metadata but, with a nonempty title, not the input body.
   db.prepare("UPDATE agent_sessions SET cwd='/synthetic/moved' WHERE id='session-a'").run();
   const second = store.startSync();
   await prepareDelta([]); retained(oldVectors);
@@ -231,7 +220,7 @@ test('metadata-only alias replacement keeps unchanged passage bytes; title is in
   store.startSync();
   const delta = expectedMissing(); assert.equal(delta.length, 3);
   assert.ok(delta.every(body => body.startsWith('Renamed title\n')));
-  await prepareDelta(delta); retained(oldVectors); // Earlier snapshots still use the old title.
+  await prepareDelta(delta); retained(oldVectors);
   reopen(); await prepareDelta([]);
 });
 
@@ -264,8 +253,6 @@ test('rollover reuse never bypasses original verification, exclusions or missing
   assert.equal(model.calls.length, calls); assert.equal(model.queries.length, 1, 'query inference selects candidates before original validation');
   fs.renameSync(file + '.missing', file); await prepareDelta([]);
   fs.writeFileSync(file, original.toString().replace('VERIFY', 'BROKEN'));
-  // Scoped preparation bypasses receipt-file metadata checks, not authoritative
-  // original record hashing. Even warm normalization/vector caches must fail.
   await assert.rejects(index.prepare({ sync_id: combined.id }), /unavailable|changed/);
   assert.throws(() => index.read(refs[0]), /unavailable|changed/);
   assert.equal(model.calls.length, calls);
@@ -280,7 +267,6 @@ test('rollover reuse never bypasses original verification, exclusions or missing
     assert.deepEqual((await index.search({ question: 'VERIFY', session_id: 'session-a' }, undefined, true)).results, []);
     assert.equal(model.queries.length, 1, 'an empty admitted scope adds no query inference');
     db.prepare("UPDATE agent_sessions SET included=1,missing=0 WHERE id='session-a'").run();
-    // Pruned excluded passages may legitimately need rebuilding after readmission.
     const delta = expectedMissing(); assert.equal(delta.length, 3);
     await prepareDelta(delta); retained(safeVectors);
   }

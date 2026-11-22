@@ -25,8 +25,6 @@ export function initPilotStore(db: Database.Database): void {
 }
 export function createPilot(db: Database.Database, source: string, capture: PilotCapture, model: string): PilotJob {
   if (!model.trim() || model.length > 200) throw new Error('Select an explicit pilot model.');
-  // Identical originals reuse their first captured cutoff rather than paying again
-  // merely because the operator repeats --session later with the same sample.
   const { before: _cutoff, ...identity } = capture;
   const existing = db.prepare("SELECT id FROM workflow_pilot_jobs WHERE source=? AND model=? AND recipe=? AND json_remove(capture_json,'$.before')=json(?) LIMIT 1")
     .get(source, model, recipe(), JSON.stringify(identity)) as { id: string } | undefined;
@@ -42,7 +40,6 @@ export function loadPilot(db: Database.Database, id: string): PilotJob {
   return { id: row.id, source: row.source, capture: JSON.parse(row.capture_json), model: row.model, recipe: row.recipe, calls: row.calls, status: row.status };
 }
 export function recoverPilotStore(db: Database.Database): void {
-  // Called only after the pilot's exclusive OS-backed SQLite lock is acquired.
   db.prepare("UPDATE workflow_pilot_attempts SET status='interrupted',completed_at=? WHERE status='running'").run(new Date().toISOString());
   db.prepare("UPDATE workflow_pilot_jobs SET status='interrupted' WHERE status='running'").run();
 }
@@ -78,7 +75,6 @@ export async function runPilot(source: Database.Database, store: Database.Databa
             model: job.model, system, signal,
             onAccounting: usage => store.prepare('UPDATE workflow_pilot_attempts SET usage_json=? WHERE id=?').run(JSON.stringify(usage), attempt),
           }), signal);
-          // Verify all dependencies again, including uncited records, after model work.
           const checked = await readPilotBatch(source, job.capture, entries, signal);
           if (JSON.stringify(input) !== JSON.stringify(checked)) throw new Error('Evidence changed during extraction. Result was not admitted.');
           signal.throwIfAborted();
@@ -95,7 +91,6 @@ export async function runPilot(source: Database.Database, store: Database.Databa
       store.prepare('INSERT OR REPLACE INTO workflow_pilot_batches(job_id,ordinal,artifact_key) VALUES (?,?,?)').run(job.id, offset / 8, key);
       outputs.push({ ordinal: offset / 8 + 1, key, value });
     }
-    // Cached artifacts and early completed batches cannot bypass current original/consent checks.
     for (const item of outputs) {
       const entries = job.capture.originals.slice((item.ordinal - 1) * 8, item.ordinal * 8);
       const input = await readPilotBatch(source, job.capture, entries, signal);

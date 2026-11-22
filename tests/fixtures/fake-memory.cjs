@@ -1,17 +1,11 @@
-// Test-only module mocks. Never imported by production code and no runtime env
-// switch can select them. Ordinary tests must not download/run a real model.
 const service = require('../../dist/memory/service');
 let preparedBefore = new Date().toISOString();
 service.prepareHistory = async before => { preparedBefore = before || new Date().toISOString(); };
-// Readiness reads do not advance a preparation receipt or adopt new evidence.
 service.historyReadiness = () => ({ ready: true, before: preparedBefore });
 service.historyPreparationStatus = () => service.historyReadiness(true, true);
 service.searchHistory = async () => ({ mode: 'hybrid', results: [], limitations: 'Synthetic empty historical lookup.' });
 service.searchPreparedHistory = (...args) => service.searchHistory(...args);
 
-// Browser fixtures exercise the actual automatic index/ranking/reader against
-// synthetic rows, replacing only local embedding inference. The explicit real
-// model qualification does not import this fixture.
 exports.useIndexedHistory = () => {
   const Database = require('better-sqlite3');
   const { getDb } = require('../../dist/db/schema');

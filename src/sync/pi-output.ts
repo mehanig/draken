@@ -12,7 +12,6 @@ function usage(value: any): Usage | undefined {
   const costs = value.cost, fields = ['input', 'output', 'cacheRead', 'cacheWrite', 'total'];
   const valid = costs && fields.every(key => typeof costs[key] === 'number' && Number.isFinite(costs[key]) && costs[key] >= 0 && costs[key] <= 1e6);
   const sum = valid ? costs.input + costs.output + costs.cacheRead + costs.cacheWrite : 0;
-  // Zero catalog rates are indistinguishable from unavailable pricing here.
   const usd = valid && costs.total > 0 && Math.abs(sum - costs.total) <= Math.max(1e-9, costs.total * 1e-6) ? costs.total : null;
   return { input: value.input, output: value.output, cacheRead: value.cacheRead, cacheWrite: value.cacheWrite, reasoning, usd };
 }
@@ -83,7 +82,7 @@ export class PiOutput {
       }
     } else if (event.type === 'message_end' && event.message?.role === 'assistant') {
       const message = event.message, key = createHash('sha256').update(JSON.stringify(message)).digest('hex');
-      if (!this.active && key === this.lastEnd) return; // Never count a repeated final event twice.
+      if (!this.active && key === this.lastEnd) return;
       if (!this.active) throw new Error('Unexpected pi assistant completion');
       this.active = false; this.lastEnd = key;
       this.add(usage(message.usage)); this.latest = undefined;

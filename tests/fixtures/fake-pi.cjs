@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Synthetic test provider. Production never imports this file.
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('1.4.0'); process.exit(0); }

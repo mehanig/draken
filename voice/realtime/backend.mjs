@@ -16,8 +16,6 @@ export async function createReadOnlyBackend({ answer, authorize = () => false, o
     let removeAbort = () => {};
     const stopBody = () => { if (!req.complete) req.destroy(); };
     try {
-      // Admission is inside the error boundary too: URL/auth failures must not
-      // escape this async listener and terminate the hosting Draken process.
       if (answer && !authorize(req.headers)) { req.resume(); res.writeHead(403); res.end('{}'); return; }
       let pathname;
       try { pathname = new URL(req.url, 'http://localhost').pathname; }

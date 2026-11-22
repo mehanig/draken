@@ -5,7 +5,6 @@ import { discoveryFromProposal, readProposal } from './discovery';
 import { savedEnrichment } from './enrichment';
 import type { FactoryPage } from './types';
 
-/** Reads saved proposals only. Background summarization owns all learning. */
 export async function readFactory(cursor: number | undefined, signal: AbortSignal): Promise<FactoryPage> {
   if (cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 1)) throw new HttpError(400, 'Invalid Factory cursor');
   signal.throwIfAborted();

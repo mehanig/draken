@@ -129,7 +129,7 @@ test('a missing older checkpoint is restored for small archives without re-embed
 test('local indexing establishes a missing older checkpoint and unchanged checks do not repeat work',async()=>{
  const s=session('upgrade');s.append(64);await scanSessions();await history().prepare();
  assert.equal(embeddings,64);
- cache.prepare("DELETE FROM meta WHERE key='background-source-stamps-v1'").run(); // Prior-release cache.
+ cache.prepare("DELETE FROM meta WHERE key='background-source-stamps-v1'").run();
  const worker=scheduler();await worker.tick();assert.equal(jobs,1);assert.equal(embeddings,64,'compatible vectors are reused while establishing the checkpoint');
  assert.equal(worker.state.error,'');
  assert.equal(loadSourceCheckpoint(root+'/state').size,64);
