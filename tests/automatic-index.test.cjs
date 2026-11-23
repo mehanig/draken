@@ -34,11 +34,16 @@ test('zero-delta receipt/link recovery is local and bounded without an active co
 });
 test('discovery, local indexing and escaped model-preparation failures keep distinct labels',async()=>{
  for(const [operation,expected] of [['scan','History discovery'],['prepare','Local indexing'],['prepareSummaries','Model preparation']]){
-  const f=fixture(1);f.ops[operation]=async()=>{throw Error('PRIVATE_SOURCE /private/session.jsonl');};
-  await f.worker.tick();assert.equal(f.worker.state.error_operation,expected);assert.ok(f.worker.state.error.startsWith(expected+' did not finish.'));
-  assert.doesNotMatch(f.worker.state.error,/PRIVATE_SOURCE|private\/session|Check provider/);
+  const f=fixture(1),errors=[];f.ops.reportError=(operation,error)=>errors.push({operation,error});f.ops[operation]=async()=>{throw Error('PRIVATE_SOURCE /private/session.jsonl');};
+  await f.worker.tick();assert.equal(errors[0].operation,expected);assert.match(errors[0].error.message,/PRIVATE_SOURCE/);assert.equal(f.worker.state.phase,'waiting');
+  assert.equal(f.worker.state.error,'');
   f.worker.retry();assert.equal(f.worker.state.error_operation,undefined);
  }
+});
+for(const operation of ['scan','prepare'])test(`${operation} errors and local retry delays do not stop model preparation`,async()=>{
+ const f=fixture(1),errors=[];let summaries=0;f.ops[operation]=async()=>{throw Error('local operation failed');};f.ops.reportError=(name,error)=>errors.push([name,error.message]);f.ops.prepareSummaries=async()=>{summaries++;};
+ await f.worker.tick();assert.equal(summaries,1);assert.equal(errors.length,1);assert.equal(f.worker.state.phase,'waiting');
+ f.now=60000;await f.worker.tick();assert.equal(summaries,2);assert.equal(errors.length,1,'local backoff does not repeat the failed local operation');
 });
 test('expiry runs even with indexing disabled, foreground admission blocked, or an owned job running',async()=>{
  const f=fixture(1),expired=[];f.ops.expire=now=>expired.push(now);f.on=false;
@@ -78,19 +83,19 @@ test('connected voice is background-idle only between turns; preemption aborts a
 test('an incomplete scan never advances the baseline or leaks private scan warnings',async()=>{
  const f=fixture(64);let completed=0;f.ops.completed=()=>{completed++;};
  f.ops.scan=async()=>({warnings:['PRIVATE_SOURCE /private/session.jsonl']});await f.worker.tick();
- assert.equal(f.prepares,0);assert.equal(completed,0);assert.equal(f.worker.state.phase,'error');assert.doesNotMatch(f.worker.state.error,/PRIVATE_SOURCE|private\/session/);
+ assert.equal(f.prepares,0);assert.equal(completed,0);assert.equal(f.worker.state.phase,'waiting');assert.doesNotMatch(f.worker.state.error,/PRIVATE_SOURCE|private\/session/);
  f.now=300000;f.ops.scan=async()=>({warnings:[]});await f.worker.tick();assert.equal(f.prepares,1);assert.equal(completed,1);
 });
 test('cancellation preserves the last successful baseline; retry is bounded and failure messages contain no source data',async()=>{
  const f=fixture(64);let captured;f.ops.prepare=(_before,signal)=>new Promise((resolve,reject)=>{captured=signal;signal.addEventListener('abort',()=>reject(Error('PRIVATE_SOURCE')));});
  const running=f.worker.tick();while(!captured)await Promise.resolve();f.worker.pause();await running;assert.equal(captured.aborted,true);assert.equal(f.worker.state.phase,'paused');assert.equal(f.worker.state.error,'');
- let calls=0;f.ops.prepare=async()=>{calls++;throw Error('PRIVATE_SOURCE');};f.now=60000;await f.worker.tick();assert.equal(calls,1);assert.equal(f.worker.state.phase,'error');assert.doesNotMatch(f.worker.state.error,/PRIVATE_SOURCE/);
+ let calls=0;f.ops.prepare=async()=>{calls++;throw Error('PRIVATE_SOURCE');};f.now=60000;await f.worker.tick();assert.equal(calls,1);assert.equal(f.worker.state.phase,'waiting');assert.doesNotMatch(f.worker.state.error,/PRIVATE_SOURCE/);
  f.now=120000;f.worker.pause();f.now=180000;await f.worker.tick();assert.equal(calls,1,'foreground activity cannot shorten failure backoff');f.now=360000;f.ops.prepare=async()=>{calls++;};await f.worker.tick();assert.equal(calls,2);assert.equal(f.worker.state.pending_records,0);
  for(let n=0;n<64;n++)f.rows.set(String(n),'v2');f.now=960000;f.ops.prepare=async()=>{throw new HttpError(409,'cancelled by foreground');};await f.worker.tick();assert.equal(f.worker.state.phase,'paused');assert.equal(f.worker.state.error,'');
 });
 test('summary backlog is independent of local embedding changes and paid failures do not erase local progress',async()=>{
  const f=fixture(1);let summaries=0;f.ops.prepareSummaries=async()=>{summaries++;throw Error('PRIVATE_PROVIDER_FAILURE');};
- await f.worker.tick();assert.equal(summaries,1);assert.equal(f.prepares,1);assert.equal(f.worker.state.phase,'error');assert.doesNotMatch(f.worker.state.error,/PRIVATE/);
+ await f.worker.tick();assert.equal(summaries,1);assert.equal(f.prepares,1);assert.equal(f.worker.state.phase,'waiting');assert.doesNotMatch(f.worker.state.error,/PRIVATE/);
  f.now=300000;for(let n=1;n<64;n++)f.rows.set(String(n),'v1');await f.worker.tick();assert.equal(f.prepares,2);assert.equal(summaries,2);assert.equal(f.worker.state.pending_records,0);assert.ok(f.worker.state.last_completed_at);
  f.idle=false;await f.worker.tick();assert.equal(summaries,2);f.idle=true;
  f.now=600000;f.ops.prepare=async()=>{f.idle=false;};for(let n=0;n<64;n++)f.rows.set(String(n),'v2');await f.worker.tick();assert.equal(summaries,2,'idle admission rechecked after indexing');

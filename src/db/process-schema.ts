@@ -1,7 +1,14 @@
 import type Database from 'better-sqlite3';
 
 export function initProcessSchema(db: Database.Database): void {
+  const migrateErrors = !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='preparation_errors'").get();
   db.exec(`
+    CREATE TABLE IF NOT EXISTS preparation_errors (
+      id INTEGER PRIMARY KEY, scope TEXT NOT NULL, operation_key TEXT NOT NULL,
+      run_id INTEGER, entity_id TEXT, error TEXT NOT NULL, created_at TEXT NOT NULL,
+      retry_state INTEGER NOT NULL DEFAULT 0, details_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS preparation_errors_operation ON preparation_errors(scope,operation_key,id);
     CREATE TABLE IF NOT EXISTS process_extractions (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL CHECK(kind IN ('summary','comparison')),
@@ -145,4 +152,23 @@ export function initProcessSchema(db: Database.Database): void {
     ALTER TABLE workflow_enrichments_next RENAME TO workflow_enrichments;
     CREATE INDEX workflow_enrichments_source ON workflow_enrichments(workflow_id,revision,policy_version,recipe_version);`);
   })();
+  if (migrateErrors) db.exec(`
+    INSERT INTO preparation_errors(scope,operation_key,run_id,entity_id,error,created_at)
+      SELECT 'reconstruction',r.model||':'||r.current_extraction||':'||r.current_fragment,r.run_id,
+        (SELECT episode_id FROM episode_extractions WHERE extraction_id=r.current_extraction AND fragment_key=r.current_fragment LIMIT 1),
+        COALESCE(r.error,'Task reconstruction failed'),COALESCE(r.completed_at,r.created_at)
+      FROM episode_reconstructions r WHERE r.status='failed' ORDER BY r.rowid;
+    INSERT INTO preparation_errors(scope,operation_key,run_id,entity_id,error,created_at)
+      SELECT 'comparison',json_array(recipe_version,model,json_array(min(left_id,right_id),max(left_id,right_id))),run_id,entity,
+        COALESCE(message,'Workflow comparison failed'),at
+      FROM (SELECT recipe_version,model,json_extract(usage_json,'$.backgroundRun') run_id,
+        json_extract(source_dependencies_json,'$.parents[0].episode') entity,
+        json_extract(output_json,'$.failure.message') message,COALESCE(completed_at,created_at) at,
+        json_extract(source_dependencies_json,'$.identities['||json_extract(source_dependencies_json,'$.pair[0]')||']') left_id,
+        json_extract(source_dependencies_json,'$.identities['||json_extract(source_dependencies_json,'$.pair[1]')||']') right_id
+        FROM process_extractions WHERE kind='comparison' AND status='failed' AND json_extract(source_dependencies_json,'$.phase')='match');
+    INSERT INTO preparation_errors(scope,operation_key,run_id,error,created_at)
+      SELECT 'enrichment',workflow_id||':'||revision||':'||model,run_id,'Workflow enrichment failed',COALESCE(completed_at,created_at)
+      FROM workflow_enrichments WHERE status='failed' AND run_table='background_runs';
+  `);
 }

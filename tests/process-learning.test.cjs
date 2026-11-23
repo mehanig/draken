@@ -41,11 +41,22 @@ afterEach(() => {
 
 test('additive migration creates process and saved-enrichment tables and is repeatable', () => {
   initProcessSchema(store);
-  assert.deepEqual(store.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(x => x.name), ['episode_extractions', 'episode_memberships', 'episode_reconstructions', 'episode_revisions', 'process_extractions', 'work_episodes', 'workflow_consolidation_batches', 'workflow_consolidation_members', 'workflow_consolidations', 'workflow_discoveries', 'workflow_enrichments', 'workflow_requests']);
+  assert.deepEqual(store.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(x => x.name), ['episode_extractions', 'episode_memberships', 'episode_reconstructions', 'episode_revisions', 'preparation_errors', 'process_extractions', 'work_episodes', 'workflow_consolidation_batches', 'workflow_consolidation_members', 'workflow_consolidations', 'workflow_discoveries', 'workflow_enrichments', 'workflow_requests']);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE name='process_extractions'").get().n, 1);
   assert.equal(store.pragma('foreign_key_check').length, 0);
 });
 
+test('legacy reconstruction, comparison and enrichment failures migrate without altering receipts or losing retry identity',()=>{
+ store.exec('DROP TABLE preparation_errors');const at='2026-11-23T19:42:15.625Z';
+ store.prepare("INSERT INTO process_extractions VALUES ('parent','summary','input','recipe','fixture/model','completed','{}','{}','{}',?,?)").run(at,at);
+ store.prepare("INSERT INTO work_episodes(id,state,description_json) VALUES ('fragment-episode','partial','{}')").run();store.prepare("INSERT INTO episode_extractions VALUES ('fragment-episode','parent','global-agent-guidance')").run();
+ for(const run of [430,431])store.prepare("INSERT INTO episode_reconstructions(id,input_key,recipe_version,model,current_extraction,current_fragment,run_id,status,source_dependencies_json,raw_output,error,created_at,completed_at) VALUES (?,?,?,'fixture/model','parent','global-agent-guidance',?,'failed','{}','retained task response','Task boundary cites another task or unknown original',?,?)").run('task-'+run,'input-'+run,'recipe',run,at,at);
+ const deps=JSON.stringify({phase:'match',parents:[{episode:'fragment-episode',revision:1}],identities:['right','left'],pair:[0,1]});store.prepare("INSERT INTO process_extractions VALUES ('comparison','comparison','input','recipe','fixture/model','failed',?,?,'{\"backgroundRun\":427}',?,?)").run(deps,JSON.stringify({failure:{stage:'validation',message:'Pair must cite supplied main stages'},raw_output:'retained comparison response'}),at,at);
+ store.prepare("INSERT INTO workflow_discoveries(id,origin,model,created_at) VALUES ('workflow','recurring','fixture/model',?)").run(at);store.prepare("INSERT INTO workflow_enrichments(workflow_id,revision,policy_version,recipe_version,model,run_id,status,raw_output,created_at) VALUES ('workflow','revision','policy','recipe','fixture/model',432,'failed','retained enrichment response',?)").run(at);
+ const tables=['process_extractions','episode_reconstructions','workflow_enrichments','work_episodes'],before=tables.map(table=>store.prepare(`SELECT * FROM ${table}`).all());initProcessSchema(store);const errors=store.prepare('SELECT * FROM preparation_errors ORDER BY id').all();assert.equal(errors.length,4);
+ assert.equal(errors[0].operation_key,'fixture/model:parent:global-agent-guidance');assert.equal(errors[1].operation_key,errors[0].operation_key);assert.equal(errors[0].entity_id,'fragment-episode');assert.equal(errors[2].operation_key,JSON.stringify(['recipe','fixture/model',['left','right']]));assert.equal(errors[3].operation_key,'workflow:revision:fixture/model');
+ initProcessSchema(store);assert.deepEqual(store.prepare('SELECT * FROM preparation_errors ORDER BY id').all(),errors);assert.deepEqual(tables.map(table=>store.prepare(`SELECT * FROM ${table}`).all()),before);assert.equal(store.pragma('foreign_key_check').length,0);
+});
 test('strict process schema validates tool/skill references and preserves empty skill uncertainty', () => {
   const v = value('R1'); assert.deepEqual(validateProcess(JSON.stringify(v), ['R1']), v);
   for (const change of [x => x.fragments[0].stages[0].tools[0].refs = ['unknown'], x => x.fragments[0].stages[0].skills = [{name:'invented',usage:'Used',refs:[]}], x => x.fragments[0].state = ['completed'], x => x.fragments[0].stages[0].claims[0].basis = 'success', x => x.fragments.push(x.fragments[0]), x => x.extra = true]) {

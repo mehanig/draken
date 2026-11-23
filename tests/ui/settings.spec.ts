@@ -53,8 +53,8 @@ test('automatic indexing saves only enabled, preserves the choice on reload and 
   state = { ...state, enabled: true, phase: 'error', error: 'Synthetic local indexing failure' };
   await page.reload(); dialog = await open();
   await expect(dialog.getByRole('alert')).toHaveText('Synthetic local indexing failure');
-  await dialog.getByRole('button', { name: 'Retry automatic preparation' }).click();
-  await expect(dialog.getByRole('button', { name: 'Retry automatic preparation' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Retry failed operations' }).click();
+  await expect(dialog.getByRole('button', { name: 'Retry failed operations' })).toHaveCount(0);
   await expect(dialog.getByRole('region', { name: 'Automatic preparation', exact: true })).toContainText('Waiting for the next preparation batch');
   expect(patches).toEqual([true, false, false, true].map(enabled => ({ enabled, summaries: true })));
   expect(mutations).toEqual(patches.map(() => '/api/settings/auto-index'));

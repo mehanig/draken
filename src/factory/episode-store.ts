@@ -1,4 +1,5 @@
 import { getDb } from '../db/schema';
+import { preparationOperation, preparationRetryRequested, isPreparationLimit, recordPreparationError } from '../sync/preparation-errors';
 import { digest, cleanText } from '../sync/normalize';
 import { workflowLocation } from './location';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens } from '../sync/summary-budget';
@@ -103,13 +104,11 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
     JOIN episode_extractions l ON l.episode_id=e.id JOIN process_extractions p ON p.id=l.extraction_id
     WHERE e.assembly='fragment' AND e.learning_status='pending' AND p.status='completed'
       AND json_extract(p.source_dependencies_json,'$.format')=? ORDER BY e.rowid`).all(LEARNING_FORMAT) as (ProcessParent & { id: string })[];
-  for (const current of pending) {
+  const prepareTask = async (current: (typeof pending)[number]) => {
     signal.throwIfAborted();
-    if (!(db.prepare("SELECT 1 FROM work_episodes WHERE id=? AND learning_status='pending'").get(current.id))) continue;
-    let first: Loaded;
-    try { first = await readProcessParent(current, signal); }
-    catch { signal.throwIfAborted(); db.prepare("UPDATE work_episodes SET learning_status='completed' WHERE id=?").run(current.id); continue; }
-    if (first.location.kind === 'unavailable') continue;
+    if (!(db.prepare("SELECT 1 FROM work_episodes WHERE id=? AND learning_status='pending'").get(current.id))) return;
+    const first = await readProcessParent(current, signal);
+    if (first.location.kind === 'unavailable') throw Error('Task location is unavailable');
     const groups: Group[] = [], parents: ProcessParent[] = [{ extraction: current.extraction, fragment: current.fragment }], loaded = [first];
     const fits = (values: Loaded[]) => {
       const input = JSON.stringify(payload(values));
@@ -124,7 +123,9 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
         AND NOT EXISTS (SELECT 1 FROM episode_extractions l JOIN episode_memberships m ON m.extraction_id=l.extraction_id AND m.fragment_key=l.fragment_key WHERE l.episode_id=e.id)))
       ORDER BY e.rowid DESC`).iterate(current.id) as Iterable<{ id: string; assembly: string }>;
     let scanned = 0;
-    for (const candidate of candidates) {
+    // Error writes must wait until the SQLite read iterator is closed.
+    const contextErrors: { id: string; error: unknown }[] = [];
+    try { for (const candidate of candidates) {
       if (groups.length === 24 || parents.length === 64) break;
       if (++scanned % 32 === 0) { await new Promise<void>(resolve => setImmediate(resolve)); signal.throwIfAborted(); }
       const members = db.prepare(`SELECT l.extraction_id extraction,l.fragment_key fragment,json_extract(p.source_dependencies_json,'$.input.workspace') workspace
@@ -132,15 +133,18 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
       if (!members.length || parents.length + members.length > 64 || members.some(p => workflowLocation(p.workspace).key !== first.location.key || seen.has(key(p)))) continue;
       let values: Loaded[];
       try { values = await load(members, signal); }
-      catch { signal.throwIfAborted(); continue; }
+      catch (error) { signal.throwIfAborted(); contextErrors.push({ id: candidate.id, error }); continue; }
       if (values.some(v => v.location.key !== first.location.key) || !fits([...loaded, ...values])) continue;
       const group = { ...(candidate.assembly === 'reconciled' ? { episode: candidate.id } : {}), parents: members.map(({ extraction, fragment }) => ({ extraction, fragment })) };
       groups.push(group); for (const p of group.parents) seen.add(key(p)); parents.push(...group.parents); loaded.push(...values);
     }
+    } finally { for (const { id, error } of contextErrors) recordPreparationError(run, 'reconstruction-context', id, error, undefined, {}, 2); }
     const identities = loaded.map(v => v.identity), deps = { format: FORMAT, projection: 'task-excerpts-v2', prompt: TASK_RECONSTRUCTION_PROMPT, parents, identities, location: first.location.key };
     const input = payload(loaded), inputKey = learningInputKey(deps, input, model), recipe = digest(TASK_RECONSTRUCTION_PROMPT);
-    const previous = db.prepare('SELECT status,run_id FROM episode_reconstructions WHERE input_key=? ORDER BY rowid DESC LIMIT 1').get(inputKey) as { status: string; run_id: number } | undefined;
-    if (previous?.run_id === run && previous.status !== 'cancelled') throw Error('Task reconstruction needs an explicit retry');
+    const previous = db.prepare('SELECT status,input_key,error FROM episode_reconstructions WHERE current_extraction=? AND current_fragment=? AND model=? ORDER BY rowid DESC LIMIT 1').get(current.extraction, current.fragment, model) as { status: string; input_key: string; error?: string } | undefined;
+    if (previous?.status === 'failed' && !preparationRetryRequested('reconstruction', `${model}:${current.extraction}:${current.fragment}`)) throw Error(previous.error || 'Previously failed task reconstruction retained without automatic retry');
+    if (previous?.status === 'running') throw Error('Task reconstruction still has a running owner');
+    if (previous?.status === 'completed' && previous.input_key === inputKey) { db.prepare("UPDATE work_episodes SET learning_status='completed' WHERE id=?").run(current.id); return; }
     const id = digest(JSON.stringify([inputKey, recipe, run, db.prepare('SELECT COUNT(*) n FROM episode_reconstructions WHERE input_key=?').get(inputKey)]));
     db.prepare(`INSERT INTO episode_reconstructions(id,input_key,recipe_version,model,current_extraction,current_fragment,run_id,status,source_dependencies_json,created_at)
       VALUES (?,?,?,?,?,?,?,'running',?,?)`).run(id, inputKey, recipe, model, current.extraction, current.fragment, run, JSON.stringify(deps), new Date().toISOString());
@@ -173,8 +177,9 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
         db.prepare("UPDATE episode_reconstructions SET status='completed',output_json=?,completed_at=? WHERE id=?").run(JSON.stringify(result), new Date().toISOString(), id);
       })();
     } catch (error) {
-      db.prepare('UPDATE episode_reconstructions SET status=?,error=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed', cleanText(error instanceof Error ? error.message : 'Task reconstruction failed', 1500), new Date().toISOString(), id);
+      db.prepare('UPDATE episode_reconstructions SET status=?,error=?,completed_at=? WHERE id=?').run(signal.aborted || isPreparationLimit(error) ? 'cancelled' : 'failed', cleanText(error instanceof Error ? error.message : 'Task reconstruction failed', 1500), new Date().toISOString(), id);
       throw error;
     }
-  }
+  };
+  for (const current of pending) await preparationOperation(run, 'reconstruction', `${model}:${current.extraction}:${current.fragment}`, signal, () => prepareTask(current), current.id);
 }

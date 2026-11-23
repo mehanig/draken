@@ -26,7 +26,8 @@ test('legacy comparison failure is explained from its own saved attempt, not lat
  try{
   const text=savedPreparationError();assert.match(text,/Workflow comparison stopped/);assert.match(text,/model compared steps outside/);assert.match(text,new RegExp(`Attempt #${id} used 9 of 120`));
   assert.doesNotMatch(text,/summaries could not finish|Check provider|limit.*reached/);
-  assert.equal(summaryPreparationSettings().error,text);assert.equal((await readFactory(undefined,new AbortController().signal)).learningError,text);
+  assert.equal(summaryPreparationSettings().error,'');assert.equal(summaryPreparationSettings().status,'waiting');assert.equal(summaryPreparationSettings().error_count,1);
+  const page=await readFactory(undefined,new AbortController().signal);assert.equal(page.learning,'enabled');assert.equal(page.preparationErrors,1);
   assert.equal(db.prepare('SELECT total_changes() n').get().n,before);assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,legacy);
  }finally{fs.readFileSync=original;}
 });

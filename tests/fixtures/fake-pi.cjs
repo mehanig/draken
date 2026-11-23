@@ -26,7 +26,9 @@ process.stdin.on('end', () => {
     recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, citation_repair: value.citation_repair, reference_labels: value.reference_labels,
     allowed_source_ids: value.allowed_source_ids, allowed_observation_ids: value.allowed_observation_ids, repair: value.repair, citation_repairs: value.citation_repairs,
   }) + '\n');
-  if (value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage) || (control.failRepair && value.repair)) {
+  const taskCall = (control.taskOutputs?.[value.task] || control.failTaskCalls?.[value.task]) && process.env.DRAKEN_TEST_CALL_LOG
+    ? fs.readFileSync(process.env.DRAKEN_TEST_CALL_LOG, 'utf8').trim().split('\n').map(JSON.parse).filter(c => c.task === value.task).length : 0;
+  if (control.failTaskCalls?.[value.task]?.includes(taskCall) || value.user_question === 'FAIL' || (control.failStage && value.stage === control.failStage) || (control.failRepair && value.repair)) {
     console.error('provider unavailable'); process.exit(1);
   }
   if (value.user_question === 'TIMEOUT') { setTimeout(() => console.log('too late'), 10000); return; }
@@ -41,6 +43,7 @@ process.stdin.on('end', () => {
         {type:'message_end',message},{type:'turn_end',message,toolResults:[]},{type:'agent_end',messages:[message],willRetry:false},{type:'agent_settled',aborted:false}])console.log(JSON.stringify(event));
     } else console.log(text);
   }, control.taskDelays?.[value.task] ?? control.delay ?? 20);
+  if (control.taskOutputs?.[value.task]?.[taskCall] !== undefined) return emit(control.taskOutputs[value.task][taskCall]);
   if (control.hugeOutput) return emit('界'.repeat(24000));
   if (value.task === 'plan_evidence') return emit(control.badPlan ? { scope: 'project', sessions: ['P9999'] } : control.evidenceScope && control.evidenceScope !== 'project' ? { scope: control.evidenceScope } : control.evidencePlan || { scope: 'project', sessions: [], query: value.question, kind: 'sources', recent: true });
   if (value.task === 'select_evidence') return emit(control.badSelection ? { scope: 'project', selected: ['S9999'] } : { scope: control.evidenceScope || 'project', selected: control.evidenceScope && control.evidenceScope !== 'project' ? [] : value.candidates.slice(0, 8).map(item => item.id) });

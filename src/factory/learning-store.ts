@@ -1,4 +1,6 @@
 import { getDb } from '../db/schema';
+import { defaultModels } from '../sync/models';
+import { preparationOperationFailed } from '../sync/preparation-errors';
 import { digest } from '../sync/normalize';
 import { CONTRACT_MATCH_PROMPT, decideContractMatch } from '../workflow-learning';
 import { LEARNING_FORMAT, COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, type LearningRow } from './process-store';
@@ -23,6 +25,12 @@ export async function readWorkflowComparison(row: LearningRow, signal: AbortSign
   return { decision, evidence, location };
 }
 export function pendingWorkflows(): boolean {
-  return !!getDb().prepare(`SELECT 1 FROM work_episodes e JOIN episode_extractions l ON l.episode_id=e.id JOIN process_extractions p ON p.id=l.extraction_id
-    WHERE e.learning_status='pending' AND p.status='completed' AND json_extract(p.source_dependencies_json,'$.format')=? LIMIT 1`).get(LEARNING_FORMAT);
+  const models = defaultModels();
+  const rows = getDb().prepare(`SELECT e.id,e.revision,e.assembly,l.extraction_id,l.fragment_key FROM work_episodes e
+    JOIN episode_extractions l ON l.episode_id=e.id JOIN process_extractions p ON p.id=l.extraction_id
+    WHERE e.learning_status='pending' AND e.superseded_by IS NULL AND p.status='completed'
+    AND json_extract(p.source_dependencies_json,'$.format')=? GROUP BY e.id`).all(LEARNING_FORMAT) as { id: string; revision: number; assembly: string; extraction_id: string; fragment_key: string }[];
+  return rows.some(row => row.assembly === 'fragment'
+    ? !preparationOperationFailed('reconstruction', `${models.final}:${row.extraction_id}:${row.fragment_key}`)
+    : !preparationOperationFailed('workflow-task', `${models.summary}:${row.id}:${row.revision}`));
 }

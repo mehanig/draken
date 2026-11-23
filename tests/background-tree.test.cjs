@@ -170,7 +170,8 @@ test('corrupt leaves are rejected/recomputed, never counted as successfully prep
   assert.equal(calls().length - before, 2); assert.equal(second.row().processed_entries, 0); assert.equal(second.row().cache_hits, 0);
   assert.notEqual(second.row().stage, 'Summaries prepared'); assert.equal(second.row().completed_at, null);
   assert.equal(getDb().prepare("SELECT count(*) n FROM summary_cache WHERE kind='chunk'").get().n, 0);
-  control({}); const retry = preparation(value); await retry.tree.build(); assert.equal(retry.row().processed_entries, 3); untouched(3);
+  control({});const spent=calls().length;await assert.rejects(preparation(value).tree.build(),/previously/);assert.equal(calls().length,spent);
+  require('../dist/sync/preparation-errors').retryPreparationErrors();const retry = preparation(value); await retry.tree.build(); assert.equal(retry.row().processed_entries, 3); untouched(3);
 });
 
 test('failed reconciliation and failed compaction preserve leaves but cannot report prepared roots', async () => {
@@ -180,7 +181,7 @@ test('failed reconciliation and failed compaction preserve leaves but cannot rep
   job.tree.compactRoots = nodes => nodes.length === 1 && fits(nodes);
   await assert.rejects(job.tree.build(), /provider unavailable/);
   assert.equal(job.row().processed_entries, 6); assert.notEqual(job.row().stage, 'Summaries prepared');
-  const before = calls().length; control({}); await preparation(value).tree.build();
+  const before = calls().length; control({});require('../dist/sync/preparation-errors').retryPreparationErrors(); await preparation(value).tree.build();
   assert.equal(calls().slice(before).filter(call => call.stage === 'chunk').length, 0); untouched(6);
   getDb().exec('DELETE FROM summary_cache');
   session(120, { workspace: '/synthetic/dense' }); const dense = await input();
@@ -188,7 +189,7 @@ test('failed reconciliation and failed compaction preserve leaves but cannot rep
   control({ denseOutput: true }); const compact = preparation(dense);
   await assert.rejects(compact.tree.build(), /compact final budget/i);
   assert.equal(compact.row().processed_entries, 120); assert.notEqual(compact.row().stage, 'Summaries prepared');
-  const compactBefore = calls().length; control({ compactOutput: true }); const retry = preparation(dense); await retry.tree.build();
+  const compactBefore = calls().length; control({ compactOutput: true });require('../dist/sync/preparation-errors').retryPreparationErrors(); const retry = preparation(dense); await retry.tree.build();
   assert.equal(calls().slice(compactBefore).filter(call => call.stage === 'chunk').length, 0);
   assert.ok(calls().slice(compactBefore).some(call => call.stage === 'overview'));
   assert.equal(retry.row().stage, 'Summaries prepared'); assert.ok(calls().every(call => call.task !== 'final_verdict')); untouched(126);

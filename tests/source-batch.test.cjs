@@ -104,14 +104,14 @@ test('real source rewrites count each edited record once; failed preparation kee
  for(let i=1;i<=63;i++)lines[i].message.content+=' Corrected; still unverified.';
  fs.writeFileSync(s.file,lines.map(JSON.stringify).join('\n')+'\n');
  const worker=scheduler(),embed=model.embed;model.embed=async()=>{throw Error('Synthetic model failure');};
- await worker.tick();assert.equal(worker.state.phase,'error');assert.deepEqual(loadSourceCheckpoint(root+'/state'),before);
+ await worker.tick();assert.equal(worker.state.phase,'waiting');assert.deepEqual(loadSourceCheckpoint(root+'/state'),before);
  model.embed=embed;await scheduler().tick();assert.equal(jobs,2);assert.equal(embeddings,127);
 });
 
 test('an interrupted first preparation retains a known empty checkpoint and can retry after restart',async()=>{
  const s=session('first-failure');s.append(64);history();
  const embed=model.embed;model.embed=async()=>{throw Error('Synthetic setup failure');};
- const worker=scheduler();await worker.tick();assert.equal(worker.state.phase,'error');assert.equal(jobs,1);
+ const worker=scheduler();await worker.tick();assert.equal(worker.state.phase,'waiting');assert.equal(jobs,1);
  assert.equal(loadSourceCheckpoint(root+'/state').size,0);
  model.embed=embed;await scheduler().tick();assert.equal(jobs,2);assert.equal(embeddings,64);
  assert.equal(loadSourceCheckpoint(root+'/state').size,64);

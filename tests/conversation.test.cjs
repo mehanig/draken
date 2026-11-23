@@ -187,11 +187,11 @@ test('production background status reports failure, recovery and opt-out without
     assert.equal(bridge.backgroundUpdateStatus().phase, 'indexing');
     assert.equal(lifecycle.conversationStatus(id).update_state, 'preparing');
     rejectPrepare(Error('PRIVATE /original/session failure'));
-    await until(() => background.autoIndexSettings().phase === 'error');
+    await until(() => background.autoIndexSettings().summary.error_count === 1);
     const saved = persisted(id), changes = getDb().prepare('SELECT total_changes() n').get().n;
     for (let n = 0; n < 3; n++) {
       const status = lifecycle.conversationStatus(id);
-      assert.equal(status.update_state, 'error'); assert.ok(status.error); assert.doesNotMatch(status.error, /PRIVATE|original\/session/);
+      assert.equal(status.update_state, 'preparing'); assert.equal(status.error,'');assert.equal(background.autoIndexSettings().phase,'waiting');
     }
     assert.equal(scans, 1); assert.equal(prepares, 1, 'Polling never retries work');
     assert.deepEqual(persisted(id), saved); assert.equal(getDb().prepare('SELECT total_changes() n').get().n, changes);

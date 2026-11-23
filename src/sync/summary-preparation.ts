@@ -13,7 +13,8 @@ import { prepareCachedProcesses } from '../factory/prepare';
 import { prepareEnrichment, prepareDiscoveredEnrichments, requireEnrichment } from '../factory/enrichment';
 import { modelCall } from './model-call';
 
-import { preparationFailure, preparationOperation, savedPreparationError, nonblockingComparisonFailure } from './preparation-status';
+import { preparationOperation as operationName } from './preparation-status';
+import { preparationOperation, preparationErrorCount, preparationRetryPending, retryPreparationErrors, isPreparationLimit, recordPreparationError, failedPreparationOperations, finishPreparationRetries } from './preparation-errors';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
 function save(key: string, value: string) {
   getDb().prepare('INSERT INTO sync_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
@@ -21,9 +22,8 @@ function save(key: string, value: string) {
 const summaryPreparationEnabled = () => (setting('auto_summary') ?? 'true') === 'true';
 const indexingEnabled = () => setting('auto_index') === 'true';
 const idle = () => activity.backgroundIdle && !historyProgress().active && !historyProgress().queued;
-interface Receipt { cache_receipt_json: string; total_entries: number; completed_at: string | null }
-interface Run { id: number; invocations: number; max_invocations: number }
-let consentRevision = 0;
+interface Receipt { cache_receipt_json: string; total_entries: number; completed_at: string | null; stage: string }
+interface Run { id: number; invocations: number; max_invocations: number; stage?: string }
 let active: { controller: AbortController; done: Promise<void>; working: boolean; operation?: string } | undefined;
 
 /** Cancellation is irrevocable for this job even if consent is immediately re-enabled. */
@@ -37,16 +37,15 @@ export function cancelSummaryPreparation(): Promise<void> {
 export function configureAutoSummary(value: unknown): void {
   if (typeof value !== 'boolean') throw new HttpError(400, 'enabled must be a boolean');
   if (value && !indexingEnabled()) throw new HttpError(409, 'Enable local indexing before enabling model-backed summary and workflow preparation.');
-  consentRevision++;
   active?.controller.abort();
   getDb().transaction(() => {
     save('auto_summary', String(value));
-    if (value) save('auto_summary_error', '');
+    if (value) { save('auto_summary_error', ''); retryPreparationErrors(); }
   })();
 }
 
 function matching(key: string): Receipt | undefined {
-  return getDb().prepare("SELECT cache_receipt_json,total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key=? ORDER BY id DESC LIMIT 1").get(key) as Receipt | undefined;
+  return getDb().prepare("SELECT cache_receipt_json,total_entries,completed_at,stage FROM background_runs WHERE status='completed' AND input_key=? ORDER BY id DESC LIMIT 1").get(key) as Receipt | undefined;
 }
 
 function cacheIntact(value: string | [string, string][]): boolean {
@@ -63,10 +62,10 @@ function cacheIntact(value: string | [string, string][]): boolean {
 /** Historical progress, not a live readiness claim. Polling must not reopen
  * transcript bodies; the preparing owner and explicit sync validate originals. */
 export function summaryPreparationSettings(): SummaryPreparationSettings {
-  const enabled = summaryPreparationEnabled(), error = savedPreparationError();
-  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key NOT LIKE 'workflow-enrichment:%' AND input_key NOT LIKE 'workflow-consolidation:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
-  return { enabled, status: !enabled ? 'off' : error ? 'error' : !indexingEnabled() || !idle() || active?.controller.signal.aborted ? 'paused' : active?.working ? 'running' : 'waiting',
-    prepared_entries: last?.total_entries || 0, last_completed_at: last?.completed_at || null, error, operation: active?.operation };
+  const enabled = summaryPreparationEnabled();
+  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND stage!='Completed with errors' AND input_key NOT LIKE 'workflow-enrichment:%' AND input_key NOT LIKE 'workflow-consolidation:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
+  return { enabled, status: !enabled ? 'off' : !indexingEnabled() || !idle() || active?.controller.signal.aborted ? 'paused' : active?.working ? 'running' : 'waiting',
+    prepared_entries: last?.total_entries || 0, last_completed_at: last?.completed_at || null, error: '', error_count: preparationErrorCount(), failed_operations: failedPreparationOperations(), operation: active?.operation };
 }
 
 /** Explicit preparation/retry of an older workflow. Shares the background owner, not its error/reset state. */
@@ -96,26 +95,22 @@ export async function prepareWorkflowEnrichment(id: string, body: unknown, signa
 }
 
 /** Prepare reusable summaries and workflows. No sync identity, snapshot, briefing or verdict.
- * A successful receipt suppresses repeated work; a failure blocks all automatic
- * paid retries until explicit consent/retry. Invalid comparisons are retained and skipped
- * without stopping unrelated work. Cancellation retains its allowance. */
+ * Failed operations are logged and skipped, not a global pause. Independent work
+ * continues. Explicit retry can revisit failed operations; cancellation retains its allowance. */
 export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void, processLeaves?: readonly string[]): Promise<void> {
   if (processLeaves && (!processLeaves.length || processLeaves.length > 6 || new Set(processLeaves).size !== processLeaves.length || processLeaves.some(key => !/^[a-f0-9]{64}$/.test(key)))) throw Error('Select one to six distinct saved summary keys');
   if (signal.aborted || !summaryPreparationEnabled() || !indexingEnabled() || !idle()) return;
   if (active) return active.done;
-  const comparisonFailure = nonblockingComparisonFailure();
-  if (setting('auto_summary_error') && comparisonFailure === undefined) return;
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener('abort', abort, { once: true });
-  const revision = consentRevision;
   const owner = { controller, done: Promise.resolve(), working: false, operation: 'History preparation' };
   active = owner;
   owner.done = Promise.resolve().then(async () => {
     let run: Run | undefined;
     let task = 'planning';
     const step = (next: string) => {
-      task = next; owner.operation = preparationOperation(next);
+      task = next; owner.operation = operationName(next);
       if (run) getDb().prepare('UPDATE background_runs SET stage=? WHERE id=?').run(owner.operation, run.id);
     };
     const admitted = () => !controller.signal.aborted && summaryPreparationEnabled() && indexingEnabled() && idle();
@@ -124,25 +119,23 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       check();
       const db = getDb();
       const orphan = db.prepare("SELECT id,invocations,max_invocations FROM background_runs WHERE status='running' LIMIT 1").get() as Run | undefined;
-      if (orphan) { run = orphan; throw new Error('Background ownership was not recovered'); }
-      if (comparisonFailure !== undefined) {
-        save('auto_summary_error', '');
-        console.warn(`Preparation attempt ${comparisonFailure}: recorded comparison validation failure no longer pauses unrelated work. Failed comparison will not be automatically retried.`);
-      }
+      if (orphan) return;
+      if (setting('auto_summary_error')) save('auto_summary_error', '');
       step('sources');
-      const input = processLeaves ? { items: [], context: [], models: defaultModels() } : previewSummaryInput(); assertEvidenceAvailable(input);
+      const input = processLeaves ? { items: [], context: [], models: defaultModels() } : previewSummaryInput();
       const key = summaryPreparationKey(input) + (processLeaves ? digest(JSON.stringify(processLeaves)) : input.items.length ? '' : digest(JSON.stringify(db.prepare("SELECT id FROM process_extractions WHERE kind='summary' AND status='completed' AND json_extract(source_dependencies_json,'$.format')='summary-workflows-v1' ORDER BY id").all())));
       const receipt = matching(key);
-      const summariesReady = !!receipt && cacheIntact(receipt.cache_receipt_json);
-      if ((summariesReady || (processLeaves && receipt)) && !pendingWorkflows()) return;
-      if (!processLeaves && !input.items.length && !pendingWorkflows()) return;
+      const summariesReady = !!receipt && receipt.stage !== 'Completed with errors' && cacheIntact(receipt.cache_receipt_json);
+      if ((summariesReady || receipt?.stage === 'Completed with errors' || (processLeaves && receipt)) && !pendingWorkflows() && !preparationRetryPending()) return;
+      if (!processLeaves && !input.items.length && !pendingWorkflows() && !preparationRetryPending()) return;
       check();
-      run = db.prepare(`SELECT id,invocations,max_invocations FROM background_runs WHERE input_key=?
-        AND (status IN ('cancelled','interrupted') OR (?=1 AND status='completed') OR (status='failed' AND id=?)) ORDER BY id DESC LIMIT 1`).get(key, Number(summariesReady), comparisonFailure ?? -1) as Run | undefined;
+      run = db.prepare(`SELECT id,invocations,max_invocations,stage FROM background_runs WHERE input_key=?
+        AND status IN ('cancelled','interrupted','completed','failed') ORDER BY id DESC LIMIT 1`).get(key) as Run | undefined;
       const latest = db.prepare('SELECT id FROM background_runs WHERE input_key=? ORDER BY id DESC LIMIT 1').get(key) as { id: number } | undefined;
       if (run && latest?.id !== run.id) run = undefined;
+      if (run?.stage === 'Call limit reached' && run.invocations >= run.max_invocations) return;
       if (run) {
-        db.prepare("UPDATE background_runs SET status='running',stage='Planning',processed_entries=0,cache_hits=0,error='',completed_at=NULL WHERE id=?").run(run.id);
+        db.prepare("UPDATE background_runs SET status='running',stage='Planning',processed_entries=0,cache_hits=0,completed_at=NULL WHERE id=?").run(run.id);
         input.models = { ...input.models, max_invocations: run.max_invocations };
       } else {
         const result = db.prepare(`INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key)
@@ -159,43 +152,44 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
         return call(payload, system, false);
       };
       step('summarize');
-      if (input.items.length) await tree.build();
+      const summaries = await preparationOperation(run.id, 'summary-batch', key, controller.signal, async () => {
+        assertEvidenceAvailable(input);
+        if (input.items.length) await tree.build();
+      });
       if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
       step('select_workflow_candidates');
-      await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal,
+      await preparationOperation(run.id, 'workflow-learning-batch', key, controller.signal, () => learnSummaryWorkflows(run!.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal,
         { model: input.models.final, ask: (payload, system) => {
           check(); step((payload as { task?: string }).task || 'reconstruct_task');
           return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
-        } });
+        } }));
       check();
       step('enrich_workflow');
-      await prepareDiscoveredEnrichments(run.id, input.models.final, (payload, system) => {
+      await preparationOperation(run.id, 'enrichment-batch', key, controller.signal, () => prepareDiscoveredEnrichments(run!.id, input.models.final, (payload, system) => {
         check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
-      }, controller.signal);
+      }, controller.signal));
       check();
       step('finalization');
-      tree.verifyFinal();
       if (JSON.stringify(defaultModels()) !== JSON.stringify(input.models)) { controller.abort(); throw new Error('Models changed'); }
       const cacheReceipt = tree.cacheReceipt();
-      if (input.items.length && !cacheIntact(cacheReceipt)) throw new Error('Summary cache changed before completion');
-      const failedComparison = db.prepare(`SELECT 1 FROM process_extractions WHERE status='failed' AND kind='comparison'
-        AND json_extract(usage_json,'$.backgroundRun')=? AND json_extract(source_dependencies_json,'$.phase')='match' LIMIT 1`).get(run.id);
-      db.prepare("UPDATE background_runs SET status='completed',stage=?,error='',completed_at=?,cache_receipt_json=? WHERE id=?")
-        .run(failedComparison ? 'Cached; failed comparisons retained' : 'Cached', new Date().toISOString(), JSON.stringify(cacheReceipt), run.id);
+      const complete = summaries.ok && !tree.incomplete;
+      if (complete) tree.verifyFinal();
+      if (complete && input.items.length && !cacheIntact(cacheReceipt)) throw new Error('Summary cache changed before completion');
+      finishPreparationRetries();
+      db.prepare("UPDATE background_runs SET status='completed',stage=?,completed_at=?,cache_receipt_json=? WHERE id=?")
+        .run(complete ? 'Cached' : 'Completed with errors', new Date().toISOString(), complete ? JSON.stringify(cacheReceipt) : '[]', run.id);
     } catch (error) {
       const db = getDb();
-      const counters = run && db.prepare('SELECT invocations,max_invocations FROM background_runs WHERE id=?').get(run.id) as Run | undefined;
       const cancelled = controller.signal.aborted;
-      const exhausted = Boolean(counters && counters.invocations >= counters.max_invocations);
-      const status = cancelled && !exhausted ? 'cancelled' : 'failed', at = new Date().toISOString();
-      const failure = preparationFailure(run?.id, task, error);
-      db.transaction(() => {
-        if (run) db.prepare(`UPDATE background_runs SET status=?,error=?,completed_at=?,
-          failure_events_json=json_insert(failure_events_json,'$[#]',json(?)) WHERE id=?`)
-          .run(status, cancelled && !exhausted ? '' : failure.message, at, JSON.stringify({ status, at, operation: failure.operation, reason: failure.reason }), run.id);
-        if (revision === consentRevision && (!cancelled || exhausted)) save('auto_summary_error', failure.message);
-      })();
+      const status = cancelled ? 'cancelled' : isPreparationLimit(error) ? 'interrupted' : 'failed', at = new Date().toISOString();
+      if (!cancelled && !isPreparationLimit(error)) recordPreparationError(run?.id, 'preparation-stage', task, error, undefined, {}, 2);
+      if (run) {
+        db.prepare("UPDATE background_runs SET status=?,stage=?,completed_at=? WHERE id=?")
+          .run(status, isPreparationLimit(error) ? 'Call limit reached' : cancelled ? 'Cancelled' : 'Completed with errors', at, run.id);
+        if (cancelled || isPreparationLimit(error)) db.prepare("UPDATE background_runs SET failure_events_json=json_insert(failure_events_json,'$[#]',json(?)) WHERE id=?")
+          .run(JSON.stringify({ status, at, operation: operationName(task) }), run.id);
+      }
     }
   }).finally(() => {
     signal.removeEventListener('abort', abort);

@@ -67,10 +67,10 @@ export function saveMissingWorkflowDisplays(ids?: readonly string[]): void {
 }
 
 export function displayEnrichment(id: string): SavedEnrichment {
-  const row = getDb().prepare(`SELECT e.status,e.output_json,CASE e.run_table WHEN 'sync_runs' THEN s.status ELSE b.status END owner_status
+  const row = getDb().prepare(`SELECT e.status,e.output_json,e.run_table,CASE e.run_table WHEN 'sync_runs' THEN s.status ELSE b.status END owner_status
     FROM workflow_enrichments e LEFT JOIN sync_runs s ON e.run_table='sync_runs' AND s.id=e.run_id
     LEFT JOIN background_runs b ON e.run_table='background_runs' AND b.id=e.run_id WHERE e.workflow_id=? ORDER BY e.id DESC LIMIT 1`)
-    .get(id) as { status: string; output_json: string | null; owner_status: string | null } | undefined;
-  if (!row) return { status: 'pending' };
+    .get(id) as { status: string; output_json: string | null; owner_status: string | null; run_table: string } | undefined;
+  if (!row || (row.status === 'cancelled' && row.run_table === 'background_runs')) return { status: 'pending' };
   return row.status === 'completed' ? { status: 'ready', value: JSON.parse(row.output_json!) } : { status: row.status === 'running' && row.owner_status === 'running' ? 'running' : 'failed' };
 }

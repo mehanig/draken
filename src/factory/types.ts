@@ -25,5 +25,6 @@ export interface FactoryPage {
   unavailable: number;
   learning: 'enabled' | 'paused' | 'error';
   learningError?: string;
+  preparationErrors?: number;
   failedExtractions: number;
 }

@@ -16,7 +16,7 @@ export function learningInputKey(deps: unknown, payload: unknown, model: string)
   return digest(JSON.stringify([deps, payload, model]));
 }
 export interface LearningRow { id: string; kind: string; status: string; input_key: string; recipe_version: string; model: string; output_json: string; source_dependencies_json: string; created_at: string }
-export function saveSummaryProcess(leaf: string, model: string, run: { table: 'sync_runs' | 'background_runs'; id: number }, input: string, value: unknown, references: string[], roles: string[], options: { sourceError?: string; separateCall?: boolean; location?: WorkflowLocation } = {}): boolean {
+export function saveSummaryProcess(leaf: string, model: string, run: { table: 'sync_runs' | 'background_runs'; id: number }, input: string, value: unknown, references: string[], roles: string[], options: { sourceError?: string; separateCall?: boolean; location?: WorkflowLocation; rawOutputs?: readonly string[] } = {}): boolean {
   const db = getDb(), recipe = digest(options.separateCall ? PROCESS_PROMPT : SUMMARY_PROCESS_PROMPT);
   const base = digest(JSON.stringify([LEARNING_FORMAT, leaf, model, recipe]));
   const previous = db.prepare('SELECT status FROM process_extractions WHERE id=?').get(base) as { status: string } | undefined;
@@ -36,7 +36,7 @@ export function saveSummaryProcess(leaf: string, model: string, run: { table: 's
   const dependencies = JSON.stringify({ format: LEARNING_FORMAT, leaf, input: frozen, location: options.location || location });
   db.prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,usage_json,created_at,completed_at)
     VALUES (?,'summary',?,?,?,?,?,?,?,?,?)`).run(id, digest(dependencies), recipe, model, output ? 'completed' : 'failed', dependencies,
-      output ? JSON.stringify(output) : JSON.stringify({ failure, outputHash: digest(JSON.stringify(value) ?? 'missing') }), JSON.stringify({ summaryRun: run, includedInSummaryCall: !options.separateCall }), new Date().toISOString(), new Date().toISOString());
+      output ? JSON.stringify(output) : JSON.stringify({ failure, outputHash: digest(JSON.stringify(value) ?? 'missing'), raw_output: options.rawOutputs, process: value }), JSON.stringify({ summaryRun: run, includedInSummaryCall: !options.separateCall }), new Date().toISOString(), new Date().toISOString());
   if (output) for (const f of output.fragments) {
     const episode = digest(JSON.stringify([id, f.key]));
     db.prepare('INSERT INTO work_episodes(id,state,description_json) VALUES (?,?,?)').run(episode, f.state, JSON.stringify(f));
