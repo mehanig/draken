@@ -5,6 +5,10 @@ export { PROCESS_RECIPE, PROCESS_PROMPT, MATCH_PROMPT, validateProcess, validate
 export type { ProcessExtraction, ProcessFragment, ProcessMatch } from './process';
 export { TASK_WORKFLOW_PROMPT, taskWorkflow } from './task';
 export type { TaskWorkflow } from './task';
+export { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence } from './reconstruction';
+export type { TaskFragment } from './reconstruction';
+export { TASK_REVIEW_PROMPT, reviewTaskReconstruction } from './reconstruction-review';
+export { CONSOLIDATION_PROMPT, consolidatedWorkflows } from './consolidation';
 
 export const PROCEDURE_RECIPE = 'procedure-observations-v1';
 export const PROCEDURE_PROMPT = `Extract procedural observations from the supplied small sample of engineering history. This is research for a workflow identifier, NOT a request to execute work or design an ideal process.

@@ -2,7 +2,8 @@ import { HttpError } from '../errors';
 import type { SavedEnrichment } from './types';
 import { getDb } from '../db/schema';
 import { digest } from '../sync/normalize';
-import { readDiscovery } from './discovery';
+import { readDiscovery, readProposal, discoveryFromProposal } from './discovery';
+import { saveWorkflowDisplay } from './display-store';
 import { COMPARISON_FORMAT } from './learning-store';
 import { enrich, proposeEnrichment, ENRICHMENT_PROMPT, ENRICHMENT_POLICY_VERSION, type Discovery, type Enrichment } from '../factory-enrichment';
 
@@ -30,7 +31,8 @@ export async function requireEnrichment(id: string, signal: AbortSignal): Promis
 }
 /** The preparation owner supplies accounting and cancellation. Failed attempts require explicit retry. */
 export async function prepareEnrichment(id: string, owner: PreparationOwner, model: string, ask: (payload: unknown, prompt: string) => Promise<string>, signal: AbortSignal, retry = false): Promise<Enrichment> {
-  const workflow = await readDiscovery(id, signal), state = savedEnrichment(workflow);
+  const proposal = await readProposal(id, signal), workflow = discoveryFromProposal(proposal), state = savedEnrichment(workflow);
+  saveWorkflowDisplay(proposal);
   if (state.value) return state.value;
   if (state.status === 'running' || (state.status === 'failed' && !retry)) throw new HttpError(409, 'Enrichment already attempted; wait for completion or explicitly retry the failed attempt.');
   signal.throwIfAborted();
@@ -53,7 +55,7 @@ export async function prepareEnrichment(id: string, owner: PreparationOwner, mod
 }
 /** New discoveries are prepared by the same background owner, never by a page read or execution run. */
 export async function prepareDiscoveredEnrichments(run: number, model: string, ask: (payload: unknown, prompt: string) => Promise<string>, signal: AbortSignal): Promise<void> {
-  const rows = getDb().prepare(`SELECT id FROM process_extractions WHERE kind='comparison' AND status='completed'
+  const rows = getDb().prepare(`SELECT id FROM process_extractions WHERE id IN (SELECT id FROM active_workflow_discoveries) AND kind='comparison' AND status='completed'
     AND json_extract(source_dependencies_json,'$.format')=? AND json_extract(source_dependencies_json,'$.phase')='match'
     AND json_extract(output_json,'$.sameWorkflow')=1 ORDER BY rowid`).all(COMPARISON_FORMAT) as {id: string}[];
   for (const row of rows) {

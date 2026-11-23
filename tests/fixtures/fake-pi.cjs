@@ -52,6 +52,13 @@ process.stdin.on('end', () => {
     if (control.badCitationSelection) return emit({ selections: value.citation_repairs.map(item => ({ observation: item.observation, evidence: item.candidate_source_ids })) });
     return emit({ selections: value.citation_repairs.map(item => ({ observation: item.observation, evidence: [item.candidate_source_ids[0], item.candidate_source_ids.at(-1)] })) });
   }
+  if (value.task === 'reconstruct_task') {
+    if (control.taskReconstruction !== undefined) return emit(control.taskReconstruction);
+    const identity = f => control.taskInstances?.[f.process.key] ?? control.taskSessions?.[f.records[0].sessionId] ?? f.records[0].sessionId;
+    const members = value.fragments.filter(f => identity(f) === identity(value.fragments[0]));
+    const refs = key => [...new Set(members.flatMap(f => f.process.coverage[key]))].slice(0, 24);
+    return emit({ status: 'task', members: members.map(f => f.id), reason: 'Synthetic task-instance decision', coverage: { triggerRefs: refs('triggerRefs'), outcomeRefs: refs('outcomeRefs'), gaps: [...new Set(members.flatMap(f => f.process.coverage.gaps))].slice(0, 12) } });
+  }
   if (value.task === 'select_workflow_candidates') return emit({ selected: control.workflowSelection ?? value.candidates.slice(0, 1).map(c => c.id) });
   if (value.task === 'create_workflow_from_history') {
     if (control.taskWorkflow) return emit(control.taskWorkflow);

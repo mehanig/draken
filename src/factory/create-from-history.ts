@@ -1,4 +1,5 @@
 import { getDb } from '../db/schema';
+import { saveMissingWorkflowDisplays } from './display-store';
 import { readTaskEvidence, type EvidenceResult } from '../evidence';
 import { evidenceDependencies, evidenceQuestions, evidenceDiscussion } from '../evidence-adapter';
 import { cleanText, digest } from '../sync/normalize';
@@ -85,7 +86,7 @@ export async function createWorkflowFromHistory(input: {
     const row = { model: input.model, source_json: sourceJson, output_json: raw, request_json: requestJson };
     const id = taskDiscoveryId(row), createdAt = new Date().toISOString();
     const proposal = await readTaskProposal({ ...row, id, origin: 'requested', created_at: createdAt }, signal);
-    const existing = db.prepare('SELECT id FROM workflow_discoveries ORDER BY rowid DESC').all() as { id: string }[];
+    const existing = db.prepare('SELECT id FROM active_workflow_discoveries ORDER BY cursor DESC').all() as { id: string }[];
     for (const entry of existing) {
       if (candidates.length === 24) break;
       try {
@@ -116,6 +117,7 @@ export async function createWorkflowFromHistory(input: {
       }
       db.prepare('UPDATE workflow_requests SET workflow_id=? WHERE request_id=?').run(savedId, requestId);
     })();
+    saveMissingWorkflowDisplays([savedId!]);
     const url = `/factory#workflow-${savedId}`;
     try {
       await prepareEnrichment(savedId!, { table: 'sync_runs', id: runId }, input.model,

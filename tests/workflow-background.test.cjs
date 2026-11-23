@@ -40,10 +40,12 @@ test('normal background tick saves process records with summaries and detects a 
  const worker=createAutoIndexer({enabled:()=>true,idle:()=>true,now:Date.now,scan:scanSessions,stamp:()=>new Map(),baseline:()=>new Map(),prepare:async()=>assert.fail('No new indexing is needed'),completed:()=>{},prepareSummaries:warmSummaryCache});
  await worker.tick();await worker.stop();
  const db=getDb(),run=db.prepare('SELECT * FROM background_runs ORDER BY id DESC LIMIT 1').get();assert.equal(run.status,'completed');
- assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model===(c.task==='enrich_workflow'?'openai/gpt-6-astra':'openai/gpt-6-luna')));assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
+ assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model===(['enrich_workflow','reconstruct_task'].includes(c.task)?'openai/gpt-6-astra':'openai/gpt-6-luna')));assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
  const chunks=calls().filter(c=>c.task==='summarize'&&c.stage==='chunk');assert.equal(chunks.length,2);
  assert.ok(chunks.every(c=>c.system.includes('process property alongside observations')));
  assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,2);
+ assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,2);
+ assert.ok(JSON.parse(run.metrics_json).filter(m=>m.task==='reconstruct_task').every(m=>m.accounting.complete&&m.model===run.final_model));
  assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,1);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
  assert.equal(pendingWorkflows(),false);noSync();
  const count=calls().length;const page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].decision.sameWorkflow,true);assert.equal(page.proposals[0].enrichment.status,'ready');assert.equal(calls().length,count);
@@ -61,13 +63,24 @@ test('explicit enrichment retries retain failed paid output and do not reset the
  assert.equal((await factory()).proposals[0].enrichment.status,'ready');assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'Existing learning failure');
  assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_enrichments').get().n,2);const count=calls().length;await factory();await warm();assert.equal(calls().length,count);
 });
+test('task reconstruction shares the existing allowance and cannot automatically retry a paid failure',async()=>{
+ history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='3';await warm();const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();
+ assert.equal(run.status,'failed');assert.equal(run.invocations,3);assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,1);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='completed'").get().n,1);assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='failed'").get().n,1);
+ const count=calls().length;await warm();assert.equal(calls().length,count);assert.equal((await factory()).proposals.length,0);
+});
+test('cancelling reconstruction retains the owner and remaining allowance on resume',async()=>{
+ history(1);await scanSessions();controls({taskDelays:{reconstruct_task:1000}});const done=warm();await waitFor(()=>calls().some(c=>c.task==='reconstruct_task'));controller.abort();await done;
+ const db=getDb(),before=db.prepare('SELECT * FROM background_runs').get();assert.equal(before.status,'cancelled');assert.equal(db.prepare('SELECT status FROM episode_reconstructions').get().status,'cancelled');
+ controller=new AbortController();controls({});await warm();const after=db.prepare('SELECT * FROM background_runs').get();assert.equal(after.id,before.id);assert.equal(after.max_invocations,before.max_invocations);assert.equal(after.invocations,before.invocations+1);assert.equal(after.status,'completed');
+});
 test('enrichment uses the remaining shared preparation allowance, not a new budget',async()=>{
- history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='4';await warm();const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.invocations,4);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,0);assert.equal((await factory()).proposals[0].enrichment.status,'failed');assert.equal(run.status,'failed');
+ history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='6';await warm();const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.invocations,6);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,0);assert.equal((await factory()).proposals[0].enrichment.status,'failed');assert.equal(run.status,'failed');
 });
 test('uncited source revocation during enrichment prevents publication and retains the attempt',async()=>{
  history();await scanSessions();controls({taskDelays:{enrich_workflow:500}});const done=warm();await waitFor(()=>calls().some(c=>c.task==='enrich_workflow'));
  const db=getDb(),entries=db.prepare("SELECT entry_id FROM agent_entries WHERE session_id='job-0'").all();db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='job-0' AND entry_id=?").run(entries.at(-1).entry_id);await done;
- assert.equal((await factory()).proposals.length,0);assert.equal(db.prepare('SELECT status FROM workflow_enrichments').get().status,'failed');assert.ok(db.prepare('SELECT raw_output FROM workflow_enrichments').get().raw_output);
+ assert.equal((await factory()).proposals[0].enrichment.status,'failed');assert.equal(db.prepare('SELECT status FROM workflow_enrichments').get().status,'failed');assert.ok(db.prepare('SELECT raw_output FROM workflow_enrichments').get().raw_output);
 });
 test('different repositories never reach candidate selection or workflow matching',async()=>{
  const {execFileSync}=require('node:child_process');const a=root+'/a',b=root+'/b';
@@ -153,8 +166,8 @@ test('two invalid comparison responses retain the exact error and outputs, then 
  assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,2);const count=calls().length;await warm();assert.equal(calls().length,count);
 });
 test('comparison correction cannot obtain a new invocation allowance',async()=>{
- history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='4';controls({workflowAssessment:'not JSON',workflowRepairAssessment:nonMatch});await warm();
- const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'failed');assert.equal(run.invocations,4);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
+ history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='6';controls({workflowAssessment:'not JSON',workflowRepairAssessment:nonMatch});await warm();
+ const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'failed');assert.equal(run.invocations,6);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
  const output=JSON.parse(db.prepare("SELECT output_json FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get().output_json);assert.match(output.failure.message,/Invocation budget/);assert.equal(output.validationRepairs.length,1);
 });
 for(const stop of ['revoke','cancel'])test(`${stop} after an invalid comparison prevents a correction call`,async()=>{
@@ -225,13 +238,14 @@ test('source revocation during candidate inference prevents admission and furthe
  assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,0);assert.equal((await factory()).proposals.length,0);
  const count=calls().length;await warm();assert.equal(calls().length,count);
 });
-test('uncited originals and unselected candidate dependencies are revalidated before Factory display',async()=>{
+test('uncited originals and unselected dependencies remain required for preparation, not saved display',async()=>{
  history(3);await scanSessions();await warm();const page=await factory();assert.equal(page.proposals.length,2);
  const db=getDb(),row=db.prepare("SELECT source_dependencies_json FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match' ORDER BY rowid DESC LIMIT 1").get(),deps=JSON.parse(row.source_dependencies_json);
  assert.equal(deps.parents.length,3);assert.ok(!deps.pair.includes(2));
- const parent=db.prepare('SELECT source_dependencies_json FROM process_extractions WHERE id=?').get(deps.parents[2].extraction),input=JSON.parse(parent.source_dependencies_json).input;
+ const task=deps.parents[2],receipt=db.prepare('SELECT r.source_dependencies_json FROM episode_revisions v JOIN episode_reconstructions r ON r.id=v.reconstruction_id WHERE v.episode_id=? AND v.revision=?').get(task.episode,task.revision);
+ const parent=db.prepare('SELECT source_dependencies_json FROM process_extractions WHERE id=?').get(JSON.parse(receipt.source_dependencies_json).parents[0].extraction),input=JSON.parse(parent.source_dependencies_json).input;
  db.prepare('UPDATE agent_entries SET active=0 WHERE session_id=? AND entry_id=?').run(input.session,input.evidence[3].entry_id);
- const after=await factory();assert.equal(after.proposals.length,0);assert.equal(after.unavailable,2);
+ const after=await factory();assert.equal(after.proposals.length,2);assert.equal(after.unavailable,0);for(const proposal of after.proposals)await assert.rejects(require('../dist/factory/discovery').readDiscovery(proposal.id,controller.signal));
 });
 test('cancelled matching retains accounting and resumes with cached summaries and candidate selection',async()=>{
  history();await scanSessions();controls({taskDelays:{compare_workflow_identity:1000}});

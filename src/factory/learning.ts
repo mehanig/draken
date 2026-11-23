@@ -1,23 +1,20 @@
+import { saveMissingWorkflowDisplays } from './display-store';
 import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
 import { digest, cleanText } from '../sync/normalize';
 import { CANDIDATE_PROMPT, candidateSelection, CONTRACT_MATCH_PROMPT, validateContractAssessment, decideContractMatch } from '../workflow-learning';
-import { LEARNING_FORMAT, COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, readProcessParent, type ProcessParent } from './learning-store';
+import { COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload } from './learning-store';
+import { reconstructPendingTasks, readLearningParent, readLearningParents, independentTasks, type EpisodeParent } from './episode-store';
 
 type Ask = (payload: unknown, system: string) => Promise<string>;
-interface Episode extends ProcessParent { episode: string }
+type Episode = EpisodeParent;
 /** Owned by the summarization job: no scheduler, provider client or allowance of its own. */
-export async function learnSummaryWorkflows(run: number, model: string, ask: Ask, signal: AbortSignal): Promise<void> {
+export async function learnSummaryWorkflows(run: number, model: string, ask: Ask, signal: AbortSignal, reconstruction = { model, ask }): Promise<void> {
   const db = getDb();
-  const pending = db.prepare(`SELECT e.id episode,l.extraction_id extraction,l.fragment_key fragment FROM work_episodes e
-    JOIN episode_extractions l ON l.episode_id=e.id JOIN process_extractions p ON p.id=l.extraction_id
-    WHERE e.learning_status='pending' AND p.status='completed' AND json_extract(p.source_dependencies_json,'$.format')=? ORDER BY e.rowid`).all(LEARNING_FORMAT) as Episode[];
-  async function load(parents: ProcessParent[]) {
-    const values = [];
-    for (const parent of parents) values.push(await readProcessParent(parent, signal));
-    return values;
-  }
-  async function invoke<T>(parents: ProcessParent[], expectedIdentities: string[], locationKey: string, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T): Promise<T> {
+  await reconstructPendingTasks(run, reconstruction.model, reconstruction.ask, signal);
+  const pending = db.prepare("SELECT id episode,revision FROM work_episodes WHERE assembly='reconciled' AND superseded_by IS NULL AND learning_status='pending' ORDER BY rowid").all() as Episode[];
+  const load = (parents: EpisodeParent[]) => readLearningParents(parents, signal);
+  async function invoke<T>(parents: EpisodeParent[], expectedIdentities: string[], locationKey: string, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T): Promise<T> {
     signal.throwIfAborted();
     const before = await load(parents), identities = before.map(v => v.identity);
     if (JSON.stringify(identities) !== JSON.stringify(expectedIdentities)) throw Error('Workflow inputs changed before inference');
@@ -58,6 +55,7 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       await verify();
       db.prepare("UPDATE process_extractions SET status='completed',output_json=?,completed_at=? WHERE id=?")
         .run(JSON.stringify(repairs.length ? { ...output, validationRepairs: repairs } : output), new Date().toISOString(), id);
+      if (phase === 'match' && (output as { sameWorkflow?: boolean }).sameWorkflow) saveMissingWorkflowDisplays([id]);
       return output;
     } catch (error) {
       db.prepare('UPDATE process_extractions SET status=?,output_json=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed',
@@ -68,15 +66,16 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
   for (const current of pending) {
     signal.throwIfAborted();
     let first;
-    try { first = await readProcessParent(current, signal); }
+    try { first = await readLearningParent(current, signal); }
     catch { signal.throwIfAborted(); db.prepare("UPDATE work_episodes SET learning_status='completed' WHERE id=?").run(current.episode); continue; }
     if (first.location.kind === 'unavailable') continue;
-    const primary = new Set(first.primary), locations = new Map<string, string>();
-    const candidates = db.prepare(`SELECT e.id episode,l.extraction_id extraction,l.fragment_key fragment,
-      json_extract(p.source_dependencies_json,'$.input.workspace') workspace FROM work_episodes e
+    const locations = new Map<string, string>();
+    const candidates = db.prepare(`SELECT e.id episode,e.revision,json_extract(p.source_dependencies_json,'$.input.workspace') workspace FROM work_episodes e
       JOIN episode_extractions l ON l.episode_id=e.id JOIN process_extractions p ON p.id=l.extraction_id
-      WHERE l.extraction_id<>? AND e.rowid<(SELECT rowid FROM work_episodes WHERE id=?) AND p.status='completed' AND json_extract(p.source_dependencies_json,'$.format')=? ORDER BY e.rowid DESC`).iterate(current.extraction, current.episode, LEARNING_FORMAT) as Iterable<Episode & { workspace: string }>;
-    const parents: ProcessParent[] = [{ extraction: current.extraction, fragment: current.fragment }], inputs = [first.input], identities = [first.identity];
+      WHERE e.assembly='reconciled' AND e.superseded_by IS NULL AND e.id<>? AND
+      (e.rowid<(SELECT rowid FROM work_episodes WHERE id=?) OR e.learning_status='completed')
+      GROUP BY e.id ORDER BY e.rowid DESC`).iterate(current.episode, current.episode) as Iterable<Episode & { workspace: string }>;
+    const parents: EpisodeParent[] = [{ episode: current.episode, revision: current.revision }], inputs = [first.input], identities = [first.identity];
     let scanned = 0;
     for (const candidate of candidates) {
       if (parents.length === 25) break;
@@ -84,7 +83,7 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       signal.throwIfAborted();
       if (!locations.has(candidate.workspace)) locations.set(candidate.workspace, workflowLocation(candidate.workspace).key);
       if (locations.get(candidate.workspace) !== first.location.key) continue;
-      try { const value = await readProcessParent(candidate, signal); if (value.location.key !== first.location.key || value.leaf === first.leaf || value.primary.some(ref => primary.has(ref))) continue; parents.push({ extraction: candidate.extraction, fragment: candidate.fragment }); inputs.push(value.input); identities.push(value.identity); }
+      try { const value = await readLearningParent(candidate, signal); if (value.location.key !== first.location.key || !independentTasks(current, candidate)) continue; parents.push({ episode: candidate.episode, revision: candidate.revision }); inputs.push(value.input); identities.push(value.identity); }
       catch { signal.throwIfAborted(); }
     }
     if (parents.length > 1) {

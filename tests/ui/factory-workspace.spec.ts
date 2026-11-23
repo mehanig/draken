@@ -16,10 +16,24 @@ test('workflow inputs replace the prompt box; refresh only reads saved results',
   await page.locator('.factory-workflow-summary').first().click();
   const panel = page.getByRole('region', { name: 'Agent workflow execution', exact: true }); await expect(panel).toHaveCount(1);
   await expect(page.locator('textarea')).toHaveCount(0); await expect(page.getByRole('heading', { name: 'Run workflow', exact: true })).toHaveCount(0); await expect(page.getByText(/Up to 16 execution calls/)).toHaveCount(0); expect(posts).toBe(0);
-  await panel.getByLabel('Release version', { exact: true }).fill('0.10.1'); await panel.getByRole('button', { name: 'Run', exact: true }).click();
+  await panel.getByLabel('Release version', { exact: true }).fill('0.10.1');
+  await page.locator('.factory-workflow-summary').first().click();await page.locator('.factory-workflow-summary').first().click();
+  await expect(panel.getByLabel('Release version', { exact: true })).toHaveValue('0.10.1');await panel.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(panel.getByText('Release version: 0.10.1', { exact: true })).toBeVisible(); await panel.locator('summary').click(); await expect(panel.getByText('6 model calls · Session one-session')).toBeVisible();
   await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await page.reload(); await page.locator('.factory-workflow-summary').first().click(); await expect(panel.getByText('Release version: 0.10.1', { exact: true })).toBeVisible(); expect(posts).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('a consolidated workflow retains execution history from its original IDs without replaying it', async ({ page }) => {
+  const data = state(), old = 'b'.repeat(64), writes: string[] = [];
+  data.runs = [{ id: 'old-run', workflowId: old, ref: 'old-branch', status: 'failed', detail: 'Original failed attempt retained', createdAt: new Date().toISOString(), stages: [], modelCalls: 3, patchBytes: 0 }];
+  page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) writes.push(request.url()); });
+  await page.route('**/api/factory', route => route.fulfill({ json: { proposals: [{ ...proposal, aliases: [old] }], nextCursor: null, learning: 'enabled' } }));
+  await page.route('**/api/factory/workspaces', route => route.fulfill({ json: data }));
+  await page.route('**/api/factory/workspaces/old-run/log', route => route.fulfill({ json: { text: 'Original execution log' } }));
+  await page.goto(`/factory#workflow-${old}`);
+  await expect(page.getByText('Original failed attempt retained')).toBeVisible();await page.getByRole('button', { name: 'View log' }).click();await expect(page.getByText('Original execution log')).toBeVisible();
+  expect(writes).toEqual([]);
 });
 
 test('prepare once, then reuse defined inputs for multiple runs without enrichment calls', async ({ page }) => {

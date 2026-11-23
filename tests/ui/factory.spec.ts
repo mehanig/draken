@@ -28,6 +28,20 @@ test('Factory is read-only, direct-linkable and available in shared navigation',
   expect(mutations).toEqual([]);
 });
 
+test('old workflow links open the consolidated row and show the corrected task count', async ({ page }) => {
+  const old = 'a'.repeat(64), id = 'b'.repeat(64), mutations: string[] = [];
+  page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) mutations.push(request.url()); });
+  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, proposals: [{ ...proposal, id, aliases: [old], decision: null,
+    task: { workflow: proposal.decision.assessment.workflow, reason: 'One task across three chunks.', request: 'Consolidate current workflows.', limitations: [], exampleCount: 1 } }] } }));
+  await page.goto(`/factory#workflow-${old}`);
+  await expect(page.locator('.factory-workflow[open]')).toHaveCount(1);
+  await expect(page.getByText('Derived from one task', { exact: true })).toBeVisible();
+  await expect(page.locator('.factory-workflow')).toHaveCount(1);
+  await page.locator('.factory-workflow-summary').click();await expect(page.locator('.factory-workflow[open]')).toHaveCount(0);
+  await page.evaluate(() => { window.location.hash = ''; });await page.evaluate(id => { window.location.hash = `workflow-${id}`; }, old);
+  await expect(page.locator('.factory-workflow[open]')).toHaveCount(1);expect(mutations).toEqual([]);
+});
+
 test('workflows start as compact numbered rows; keyboard expansion and pagination never start work', async ({ page }) => {
   const mutations: string[] = [];
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
@@ -39,6 +53,7 @@ test('workflows start as compact numbered rows; keyboard expansion and paginatio
   await expect(rows).toHaveCount(2);
   await expect(page.locator('.factory-workflow-number')).toHaveText(['1.', '2.']);
   await expect(page.locator('.factory-workflow[open]')).toHaveCount(0);
+  await expect(page.locator('.factory-workflow-body')).toHaveCount(0);
   await expect(page.getByText('Needs preparation', { exact: true })).toHaveCount(2);
   const summary = rows.first().locator(':scope > summary');
   await summary.focus(); await page.keyboard.press('Enter');

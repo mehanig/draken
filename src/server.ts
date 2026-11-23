@@ -9,6 +9,7 @@ import { configureStartupWindow } from './sources/activity-startup';
 import { ownServerDirectory } from './server-ownership';
 import { activity } from './sync/activity';
 import { getDb, closeDb } from './db/schema';
+import { saveMissingWorkflowDisplays } from './factory/display-store';
 import { authMiddleware, isLoopbackHost, isNoAuthMode, validateAuthConfig } from './auth/middleware';
 import authRouter from './routes/auth';
 import syncRouter from './routes/sync';
@@ -85,6 +86,7 @@ export function startServer(trayOwned = false, options: { historyDays?: number |
     try {
       releaseDirectory = ownServerDirectory(getDataDir());
       const db = getDb();
+      saveMissingWorkflowDisplays();
       if (options.historyDays !== undefined) await configureStartupWindow(db, options.historyDays, options.yes);
       if (stopping) return;
       recoverInterruptedRuns(); recoverLegacyCalls(); recoverLiveCalls();

@@ -7,6 +7,9 @@ const {saveSummaryProcess,readProcessParent,learningInputKey,workflowComparisonP
 const {CONTRACT_MATCH_PROMPT,decideContractMatch}=require('../dist/workflow-learning');
 const {digest}=require('../dist/sync/normalize');
 const {readFactory}=require('../dist/factory/service');
+const {readDiscovery}=require('../dist/factory/discovery');
+const {saveWorkflowDisplay,saveMissingWorkflowDisplays}=require('../dist/factory/display-store');
+async function storedButNotValidEvidence(){const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,1);assert.equal(result.unavailable,0);await assert.rejects(readDiscovery(result.proposals[0].id,signal()));}
 const {createApp}=require('../dist/server');
 let dir,db,prior,server;
 const signal=()=>new AbortController().signal;
@@ -30,12 +33,13 @@ async function seed(locations=[]){
  const model='fake/model',recipe=digest(CONTRACT_MATCH_PROMPT),id=digest('Factory fixture');
  const assessment={relation:'same_workflow_candidate',workflow:{purpose:'Repair a parser defect',method:['Reproduce the defect with a failing regression test','Correct the parser and run the regression and compatibility tests'],appliesWhen:'A parser defect must be fixed without changing the documented format'},stagePairs:[{left:'S1',right:'S1'},{left:'S2',right:'S2'}],reason:'Same purpose and method',limitations:[]};
  const decision=decideContractMatch(assessment,sides.map(s=>s.input));
- const deps={format:COMPARISON_FORMAT,phase:'match',parents,identities:sides.map(s=>s.identity),pair:[0,1]},payload=workflowComparisonPayload(sides.map(s=>s.input));
+ const deps={format:COMPARISON_FORMAT,phase:'match',parents,identities:sides.map(s=>s.identity),pair:[0,1],location:sides[0].location},payload=workflowComparisonPayload(sides.map(s=>s.input));
  db.prepare("INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,created_at) VALUES (?,'comparison',?,?,?,'completed',?,?,?)")
   .run(id,learningInputKey(deps,payload,model),recipe,model,JSON.stringify(deps),JSON.stringify(decision),new Date().toISOString());
+ saveWorkflowDisplay({id,model,createdAt:new Date().toISOString(),location:sides[0].location,decision,evidence:sides.map(s=>s.input)});
  return {id,parents};
 }
-test('Factory reads verified saved proposals without syncs, provider calls or new work',async()=>{
+test('Factory reads stored proposals without syncs, provider calls or new work',async()=>{
  await seed();const before=db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n;
  const result=await readFactory(undefined,signal());assert.equal(result.learning,'enabled');assert.equal(result.proposals.length,1);assert.equal(result.proposals[0].decision.sameWorkflow,true);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n,before);
@@ -43,6 +47,12 @@ test('Factory reads verified saved proposals without syncs, provider calls or ne
  assert.equal(result.proposals[0].location.path,path.join(dir,'work'));
  assert.equal(result.proposals[0].location.kind,'folder');
  assert.ok(!JSON.stringify(result).includes(path.join(dir,'sessions')));
+});
+test('display migration uses stored results and repeated page reads neither read originals nor write data',async()=>{
+ const {id}=await seed();db.prepare('UPDATE workflow_discoveries SET display_json=NULL WHERE id=?').run(id);fs.rmSync(path.join(dir,'sessions'),{recursive:true});saveMissingWorkflowDisplays();
+ const original=fs.readFileSync;let reads=0;fs.readFileSync=(...args)=>{reads++;throw Error('Factory must read the database only')};
+ try{const changes=db.prepare('SELECT total_changes() n').get().n;for(let i=0;i<3;i++)assert.equal((await readFactory(undefined,signal())).proposals.length,1);assert.equal(reads,0);assert.equal(db.prepare('SELECT total_changes() n').get().n,changes);}finally{fs.readFileSync=original;}
+ await assert.rejects(readDiscovery(id,signal()));
 });
 test('enrichment rejects uncited source revocation after its accounted planning callback',async()=>{
  const {readDiscovery}=require('../dist/factory/discovery'),{proposeEnrichment}=require('../dist/factory-enrichment');const {id}=await seed(),d=await readDiscovery(id,signal());let calls=0;
@@ -56,7 +66,7 @@ test('Factory reads pending workflows without inference; preparation persists re
  assert.deepEqual(await prepareEnrichment(id,{table:'background_runs',id:1},'another-model',ask,signal()),saved);assert.equal(calls,1);
  for(const task of ['Fix integers','Fix escaped strings'])assert.deepEqual(sessionPlan(d,task,d.locationKey,await requireEnrichment(id,signal())).enrichment,saved);
  assert.equal(calls,1);assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_enrichments').get().n,1);
- db.prepare("UPDATE workflow_enrichments SET policy_version='old-policy'").run();assert.equal((await readFactory(undefined,signal())).proposals[0].enrichment.status,'pending');await assert.rejects(requireEnrichment(id,signal()),/not ready/);
+ db.prepare("UPDATE workflow_enrichments SET policy_version='old-policy'").run();assert.equal((await readFactory(undefined,signal())).proposals[0].enrichment.status,'ready');await assert.rejects(requireEnrichment(id,signal()),/not ready/);
 });
 test('invalid enrichment retains the paid output and needs explicit retry; background does not retry it',async()=>{
  const {id}=await seed(),{readDiscovery}=require('../dist/factory/discovery'),{prepareEnrichment,prepareDiscoveredEnrichments}=require('../dist/factory/enrichment');let calls=0;
@@ -129,7 +139,7 @@ test('sync-owned enrichment retains invalid paid output and cannot bypass source
  await assert.rejects(prepareEnrichment(id,owner,'fixture',async()=>{
   calls++;db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();return '{}';
  },signal(),true));
- assert.equal(calls,2);assert.equal((await readFactory(undefined,signal())).proposals.length,0);
+ assert.equal(calls,2);await storedButNotValidEvidence();
  assert.equal(db.prepare("SELECT COUNT(*) n FROM workflow_enrichments WHERE status='failed'").get().n,2);
 });
 test('existing enrichment receipts keep their background ownership across the additive migration',async()=>{
@@ -141,50 +151,44 @@ test('existing enrichment receipts keep their background ownership across the ad
  const {initProcessSchema}=require('../dist/db/process-schema');initProcessSchema(db);initProcessSchema(db);
  assert.deepEqual(db.prepare('SELECT * FROM workflow_enrichments').get(),before);
 });
-test('old saved comparisons cannot expose a workflow spanning different folders',async()=>{
- const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);
- const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
+test('preparation rejects cross-folder evidence without hiding a saved workflow',async()=>{
+ const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);await storedButNotValidEvidence();
 });
-test('changing a recorded folder into a repository withholds its old proposal',async()=>{
- await seed();require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);
- const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
+test('changing a recorded folder affects preparation, not the saved display',async()=>{
+ await seed();require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);await storedButNotValidEvidence();
 });
-test('revoking an uncited original withholds the complete proposal',async()=>{
- await seed();db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();
- const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
+test('revoking an uncited original affects preparation, not the saved display',async()=>{
+ await seed();db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();await storedButNotValidEvidence();
 });
-for(const column of ['input_key','recipe_version','model'])test(`Factory rejects changed comparison ${column}`,async()=>{
- const {id}=await seed();db.prepare(`UPDATE process_extractions SET ${column}='changed' WHERE id=?`).run(id);
- const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
+for(const column of ['input_key','recipe_version','model'])test(`preparation rejects changed comparison ${column}`,async()=>{
+ const {id}=await seed();db.prepare(`UPDATE process_extractions SET ${column}='changed' WHERE id=?`).run(id);await storedButNotValidEvidence();
 });
-test('Factory checks the saved comparison input, not just the current validity of its parents',async()=>{
+test('preparation checks comparison inputs without recomputing the saved display',async()=>{
  const {id}=await seed(),row=db.prepare('SELECT source_dependencies_json FROM process_extractions WHERE id=?').get(id),deps=JSON.parse(row.source_dependencies_json);
- deps.parents.reverse();deps.identities.reverse();db.prepare('UPDATE process_extractions SET source_dependencies_json=? WHERE id=?').run(JSON.stringify(deps),id);
- const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
+ deps.parents.reverse();deps.identities.reverse();db.prepare('UPDATE process_extractions SET source_dependencies_json=? WHERE id=?').run(JSON.stringify(deps),id);await storedButNotValidEvidence();
 });
-test('session exclusion withholds derived workflow content',async()=>{
- await seed();db.prepare("UPDATE agent_sessions SET included=0 WHERE id='episode-1'").run();assert.equal((await readFactory(undefined,signal())).proposals.length,0);
+test('session exclusion prevents new evidence use without deleting the saved workflow',async()=>{
+ await seed();db.prepare("UPDATE agent_sessions SET included=0 WHERE id='episode-1'").run();await storedButNotValidEvidence();
 });
-test('changed original bytes withhold the proposal',async()=>{
- await seed();const file=path.join(dir,'sessions','episode-0.jsonl');const text=fs.readFileSync(file,'utf8');fs.writeFileSync(file,text.replace('Uncited dependency','Altered dependency'));
- const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,1);
+test('changed original bytes affect preparation, not the saved workflow',async()=>{
+ await seed();const file=path.join(dir,'sessions','episode-0.jsonl');const text=fs.readFileSync(file,'utf8');fs.writeFileSync(file,text.replace('Uncited dependency','Altered dependency'));await storedButNotValidEvidence();
 });
-test('Factory does not follow legacy external experiment database paths',async()=>{
+test('stored display ignores legacy external paths while preparation rejects them',async()=>{
  const {id}=await seed();db.prepare('UPDATE process_extractions SET source_dependencies_json=? WHERE id=?').run(JSON.stringify({sources:[{kind:'historical',store:'/external.sqlite'}]}),id);
- assert.equal((await readFactory(undefined,signal())).proposals.length,0);
+ await storedButNotValidEvidence();
 });
 test('changed parent output is rejected even when references remain valid',async()=>{
- const {parents}=await seed();const r=db.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(parents[0].extraction),v=JSON.parse(r.output_json);v.fragments[0].goal='Different job';db.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify(v),parents[0].extraction);assert.equal((await readFactory(undefined,signal())).proposals.length,0);
+ const {parents}=await seed();const r=db.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(parents[0].extraction),v=JSON.parse(r.output_json);v.fragments[0].goal='Different job';db.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify(v),parents[0].extraction);await storedButNotValidEvidence();
 });
 test('shared subprocedures are not promoted by a saved identity flag',async()=>{
  const {id}=await seed();const row=db.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(id),v=JSON.parse(row.output_json);v.assessment.relation='shared_subprocedure';v.sameWorkflow=true;db.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify(v),id);
- const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,0);assert.equal(result.unavailable,0);
+ const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,1);assert.equal(result.unavailable,0);await assert.rejects(readDiscovery(id,signal()));
 });
 test('Factory rejects invalid cursors and cancellation without returning content',async()=>{
  for(const cursor of [0,-1,NaN,1.5])await assert.rejects(readFactory(cursor,signal()),/cursor/);
  const c=new AbortController();c.abort();await assert.rejects(readFactory(undefined,c.signal));
 });
-test('agent workspace results and logs require fresh workflow source access, including uncited dependencies',async()=>{
+test('saved workspace results and logs remain readable without revisiting original evidence',async()=>{
  require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);const {id}=await seed();const {readDiscovery}=require('../dist/factory/discovery');const {readWorkspaces,workspaceLog,startWorkspace}=require('../dist/factory/workspace');const discovery=await readDiscovery(id,signal());
  Object.assign(process.env,{DRAKEN_WORKSPACE_REPO:path.join(dir,'work'),DRAKEN_WORKSPACE_ALLOWED_IMAGES:'["approved"]',DRAKEN_DOCKER_BIN:'/not-called',DRAKEN_DOCKER_HOST:'unix:///not-called',DRAKEN_FACTORY_PI_SDK:__filename,DRAKEN_PI_FINAL_MODEL:'fixture/test'});
  await assert.rejects(startWorkspace({requestId:'22345678-1234-4234-8234-123456789abc',ref:'HEAD',workflowId:id,inputs:{}},'fixture-token'),/enrichment is not ready/);
@@ -202,7 +206,7 @@ test('agent workspace results and logs require fresh workflow source access, inc
  await assert.rejects(startWorkspace({requestId,ref:'HEAD',workflowId:id,inputs:{}},'fixture-token'),/already used/);
  require('../dist/factory/workspace').saveExecutionSettings({maxCalls:16});
  await assert.rejects(startWorkspace({requestId,ref:'HEAD',workflowId:id,inputs:{}}),/authenticated/);
- db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();assert.deepEqual((await readWorkspaces()).runs,[]);await assert.rejects(workspaceLog(requestId),/source changed|unavailable/);
+ db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();assert.equal((await readWorkspaces()).runs.length,1);assert.match((await workspaceLog(requestId)).text,/fixture output/);await assert.rejects(readDiscovery(id,signal()));
  for(const table of ['sync_runs','background_runs'])assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0);
 });
 test('execution settings persist and reject invalid call allowances',async()=>{

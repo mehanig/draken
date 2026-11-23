@@ -64,7 +64,7 @@ function cacheIntact(value: string | [string, string][]): boolean {
  * transcript bodies; the preparing owner and explicit sync validate originals. */
 export function summaryPreparationSettings(): SummaryPreparationSettings {
   const enabled = summaryPreparationEnabled(), error = setting('auto_summary_error') || '';
-  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key NOT LIKE 'workflow-enrichment:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
+  const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key NOT LIKE 'workflow-enrichment:%' AND input_key NOT LIKE 'workflow-consolidation:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
   return { enabled, status: !enabled ? 'off' : error ? 'error' : !indexingEnabled() || !idle() || active?.controller.signal.aborted ? 'paused' : active?.working ? 'running' : 'waiting',
     prepared_entries: last?.total_entries || 0, last_completed_at: last?.completed_at || null, error };
 }
@@ -147,7 +147,10 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       if (input.items.length) await tree.build();
       if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
-      await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
+      await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal,
+        { model: input.models.final, ask: (payload, system) => {
+          check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
+        } });
       check();
       await prepareDiscoveredEnrichments(run.id, input.models.final, (payload, system) => {
         check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });

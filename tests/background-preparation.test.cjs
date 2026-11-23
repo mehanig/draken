@@ -87,6 +87,13 @@ test('default-on single-entry tails survive restarts without snapshots; explicit
   assert.equal(getDb().prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
 });
 
+test('consolidation accounting does not replace summary progress or clear an existing preparation error', async () => {
+  await append(1); await warm(); const prior = prep.summaryPreparationSettings(), spent = calls().length;
+  getDb().prepare("INSERT OR REPLACE INTO sync_settings(key,value) VALUES ('auto_summary_error','Existing preparation failure')").run();
+  getDb().prepare("INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,status,input_key,completed_at) VALUES ('fixture/summary','fixture/final',120,25,?,'completed','workflow-consolidation:fixture',?)").run(new Date().toISOString(),new Date().toISOString());
+  const current = prep.summaryPreparationSettings();assert.equal(current.prepared_entries,prior.prepared_entries);assert.equal(current.last_completed_at,prior.last_completed_at);assert.equal(current.error,'Existing preparation failure');await warm();assert.equal(calls().length,spent);
+});
+
 test('equal-count source edits accumulate canonically, while model and recipe changes reprepare without new IDs', async () => {
   background.setAutoSummary(true); await append(128); await warm();
   rows[1].message.content += ' changed'; writeRows(); await scanSessions();

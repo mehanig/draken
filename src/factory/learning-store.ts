@@ -1,72 +1,17 @@
-import type { WorkflowLocation } from './types';
-import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
 import { digest } from '../sync/normalize';
-import { readWorkflowOriginals } from '../evidence-adapter';
-import { SUMMARY_PROCESS_PROMPT, PROCESS_PROMPT, CONTRACT_MATCH_PROMPT, preparedProcess, validateProcess, validateProcessEvidence, contractMatchInput, decideContractMatch, type ProcessExtraction, type ContractMatchInput } from '../workflow-learning';
+import { CONTRACT_MATCH_PROMPT, decideContractMatch } from '../workflow-learning';
+import { LEARNING_FORMAT, COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, type LearningRow } from './process-store';
+import { readLearningParents, independentTasks, type LearningParent } from './episode-store';
 
-export const LEARNING_FORMAT = 'summary-workflows-v1';
-export const COMPARISON_FORMAT = 'workflow-comparison-v1';
-export interface ProcessParent { extraction: string; fragment: string }
-export function workflowComparisonPayload(pair: ContractMatchInput[]) {
-  const wire = pair.map(input => ({ ...input, facts: input.facts.map(({ refs: _refs, ...fact }) => fact) }));
-  return { task: 'compare_workflow_identity', stage: 'workflow_match', left: wire[0], right: wire[1] };
-}
-export function learningInputKey(deps: unknown, payload: unknown, model: string): string {
-  return digest(JSON.stringify([deps, payload, model]));
-}
-export interface LearningRow { id: string; kind: string; status: string; input_key: string; recipe_version: string; model: string; output_json: string; source_dependencies_json: string; created_at: string }
-export function saveSummaryProcess(leaf: string, model: string, run: { table: 'sync_runs' | 'background_runs'; id: number }, input: string, value: unknown, references: string[], roles: string[], options: { sourceError?: string; separateCall?: boolean; location?: WorkflowLocation } = {}): boolean {
-  const db = getDb(), recipe = digest(options.separateCall ? PROCESS_PROMPT : SUMMARY_PROCESS_PROMPT);
-  const base = digest(JSON.stringify([LEARNING_FORMAT, leaf, model, recipe]));
-  const previous = db.prepare('SELECT status FROM process_extractions WHERE id=?').get(base) as { status: string } | undefined;
-  if (previous && (!options.separateCall || previous.status === 'completed')) return previous.status === 'completed';
-  const attempt = (db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE recipe_version=? AND model=? AND json_extract(source_dependencies_json,'$.leaf')=?").get(recipe, model, leaf) as { n: number }).n;
-  const id = previous ? digest(JSON.stringify([base, run, attempt])) : base;
-  const frozen = JSON.parse(input), location = workflowLocation(frozen.workspace);
-  const sourceError = options.sourceError || (options.location && JSON.stringify(options.location) !== JSON.stringify(location) ? 'Repository or folder changed during inference' : undefined);
-  let output: ProcessExtraction | undefined, failure: { stage: string; message: string } | undefined;
-  try {
-    if (sourceError) throw Error(sourceError);
-    if (value === undefined) throw Error('Summary response did not include process');
-    output = preparedProcess(value, references, roles);
-  } catch (error) {
-    failure = { stage: sourceError ? 'source_verification' : 'process_validation', message: error instanceof Error ? error.message.slice(0, 500) : 'Invalid process result' };
-  }
-  const dependencies = JSON.stringify({ format: LEARNING_FORMAT, leaf, input: frozen, location: options.location || location });
-  db.prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,usage_json,created_at,completed_at)
-    VALUES (?,'summary',?,?,?,?,?,?,?,?,?)`).run(id, digest(dependencies), recipe, model, output ? 'completed' : 'failed', dependencies,
-      output ? JSON.stringify(output) : JSON.stringify({ failure, outputHash: digest(JSON.stringify(value) ?? 'missing') }), JSON.stringify({ summaryRun: run, includedInSummaryCall: !options.separateCall }), new Date().toISOString(), new Date().toISOString());
-  if (output) for (const f of output.fragments) {
-    const episode = digest(JSON.stringify([id, f.key]));
-    db.prepare('INSERT INTO work_episodes(id,state,description_json) VALUES (?,?,?)').run(episode, f.state, JSON.stringify(f));
-    db.prepare('INSERT INTO episode_extractions(episode_id,extraction_id,fragment_key) VALUES (?,?,?)').run(episode, id, f.key);
-  }
-  return !!output;
-}
-export async function readProcessParent(parent: ProcessParent, signal: AbortSignal) {
-  signal.throwIfAborted();
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM process_extractions WHERE id=? AND kind='summary' AND status='completed'").get(parent.extraction) as LearningRow | undefined;
-  if (!row) throw Error('Workflow parent unavailable');
-  const deps = JSON.parse(row.source_dependencies_json);
-  if (deps.format !== LEARNING_FORMAT || digest(row.source_dependencies_json) !== row.input_key) throw Error('Invalid workflow source receipt');
-  const records = await readWorkflowOriginals([...deps.input.evidence, ...deps.input.background], signal);
-  const output = validateProcessEvidence(validateProcess(row.output_json, records.map(r => r.ref)), records);
-  const location = workflowLocation(deps.input.workspace);
-  for (const cwd of new Set<string>([...deps.input.evidence, ...deps.input.background].map((pointer: { cwd: string }) => pointer.cwd))) {
-    if (workflowLocation(cwd).key !== location.key) throw Error('Process sources span different locations');
-  }
-  if (deps.location && JSON.stringify(deps.location) !== JSON.stringify(location)) throw Error('Workflow repository or folder changed');
-  const fragment = output.fragments.find(f => f.key === parent.fragment);
-  if (!fragment) throw Error('Workflow fragment unavailable');
-  return { location, input: { ...contractMatchInput(fragment), limitations: output.limitations }, identity: digest(JSON.stringify([parent.extraction, parent.fragment, row.output_json, row.source_dependencies_json, records])), leaf: deps.leaf as string, primary: records.slice(0, deps.input.evidence.length).map(record => record.ref) };
-}
+export { LEARNING_FORMAT, COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, readProcessParent, saveSummaryProcess } from './process-store';
+export type { LearningRow } from './process-store';
+
 export async function readWorkflowComparison(row: LearningRow, signal: AbortSignal) {
   const deps = JSON.parse(row.source_dependencies_json);
   if (deps.format !== COMPARISON_FORMAT || deps.phase !== 'match' || !Array.isArray(deps.parents) || deps.parents.length > 25 || !Array.isArray(deps.pair) || deps.pair.length !== 2 || deps.pair[0] !== 0 || !Number.isSafeInteger(deps.pair[1]) || deps.pair[1] < 1 || deps.pair[1] >= deps.parents.length) throw Error('Invalid workflow comparison');
-  const loaded: Awaited<ReturnType<typeof readProcessParent>>[] = [];
-  for (const parent of deps.parents) loaded.push(await readProcessParent(parent, signal));
+  const loaded = await readLearningParents(deps.parents, signal);
+  if (!independentTasks(deps.parents[deps.pair[0]] as LearningParent, deps.parents[deps.pair[1]] as LearningParent)) throw Error('Workflow examples are not established as independent tasks');
   if (JSON.stringify(loaded.map(p => p.identity)) !== JSON.stringify(deps.identities)) throw Error('Workflow dependencies changed');
   const location = loaded[deps.pair[0]].location;
   if (location.kind === 'unavailable' || loaded[deps.pair[1]].location.key !== location.key) throw Error('Workflow records belong to different or unavailable locations');

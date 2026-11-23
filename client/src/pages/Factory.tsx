@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { factory, prepareFactoryWorkflow } from '../api';
 import { requestId } from '../request-id';
 import { FactoryWorkspace, FactoryExecutionSettings, useFactoryWorkspaces } from '../components/FactoryWorkspace';
@@ -9,6 +9,7 @@ export function Factory() {
   const workspaces = useFactoryWorkspaces();
   const [data, setData] = useState<FactoryPage | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const opened = useRef(new Set<string>());
   const [error, setError] = useState(''), [loading, setLoading] = useState(false);
   const request = useRef<AbortController | null>(null), preparation = useRef<AbortController | null>(null);
   const [preparing, setPreparing] = useState<string | null>(null), [preparationError, setPreparationError] = useState('');
@@ -25,17 +26,22 @@ export function Factory() {
       if (!controller.signal.aborted) { setData(null); setError(cause instanceof Error ? cause.message : 'Could not read workflow proposals.'); }
     } finally { if (!controller.signal.aborted) setLoading(false); }
   }, []);
-  useEffect(() => { void load(); return () => { request.current?.abort(); preparation.current?.abort(); }; }, [load]);
+  useLayoutEffect(() => { void load(); return () => { request.current?.abort(); preparation.current?.abort(); }; }, [load]);
   useEffect(() => {
-    const target = window.location.hash.slice(1);
-    if (!/^workflow-[a-f0-9]{64}$/.test(target) || !data || loading) return;
-    const element = document.getElementById(target);
-    if (element) {
-      const details = element.querySelector<HTMLDetailsElement>(':scope > details');
-      if (details) details.open = true;
-      element.scrollIntoView({ block: 'start' });
-    }
-    else if (data.nextCursor !== null) void load(data.nextCursor);
+    const openTarget = () => {
+      const target = window.location.hash.slice(1);
+      if (!/^workflow-[a-f0-9]{64}$/.test(target) || !data || loading) return;
+      const current = data.proposals.find(proposal => proposal.aliases?.includes(target.slice('workflow-'.length)));
+      const element = document.getElementById(current ? `workflow-${current.id}` : target);
+      if (element) {
+        const details = element.querySelector<HTMLDetailsElement>(':scope > details');
+        if (details) details.open = true;
+        element.scrollIntoView({ block: 'start' });
+      }
+      else if (data.nextCursor !== null) void load(data.nextCursor);
+    };
+    openTarget(); window.addEventListener('hashchange', openTarget);
+    return () => window.removeEventListener('hashchange', openTarget);
   }, [data, loading, load]);
   async function prepare(id: string, retry: boolean) {
     const controller = new AbortController(); preparation.current = controller; setPreparing(id); setPreparationError('');
@@ -73,6 +79,7 @@ export function Factory() {
         return <article className="factory-card" key={proposal.id} id={`workflow-${proposal.id}`}>
           <details className="factory-workflow" open={expanded.has(proposal.id)} onToggle={event => {
             const open = event.currentTarget.open;
+            if (open) opened.current.add(proposal.id);
             setExpanded(previous => {
               if (previous.has(proposal.id) === open) return previous;
               const next = new Set(previous);
@@ -85,9 +92,9 @@ export function Factory() {
             <h3>{workflow.purpose}</h3>
             <span className="factory-workflow-status muted">{preparing === proposal.id || proposal.enrichment?.status === 'running' ? 'Preparing' : proposal.enrichment?.status === 'ready' ? 'Ready' : proposal.enrichment?.status === 'failed' ? 'Preparation failed' : 'Needs preparation'}</span>
           </summary>
-          <div className="factory-workflow-body"><p className="muted">{workflow.appliesWhen}</p>
+          {opened.current.has(proposal.id) && <div className="factory-workflow-body"><p className="muted">{workflow.appliesWhen}</p>
           <ol>{workflow.method.map((step, i) => <li key={i}>{step}</li>)}</ol>
-          {proposal.task && <p className="muted small">Derived from one task</p>}
+          {proposal.task && <p className="muted small">{proposal.task.exampleCount === null ? 'Recurrence unconfirmed' : (proposal.task.exampleCount || 1) === 1 ? 'Derived from one task' : `Derived from ${proposal.task.exampleCount} tasks`}</p>}
           {!!limitations.length && <><h3>Limitations</h3><ul>{limitations.map((text, i) => <li key={i}>{text}</li>)}</ul></>}
           {proposal.enrichment?.status === 'ready' && proposal.enrichment.value ? <>
             <h3>Execution guidance</h3><p className="muted small">Draken additions, separate from historical observations.</p>
@@ -96,7 +103,7 @@ export function Factory() {
             <h3>Completion</h3><ul>{proposal.enrichment.value.guidance.completion.map((item, i) => <li key={i}>{item}</li>)}</ul>
             {!!proposal.enrichment.value.guidance.risks.length && <><h3>Execution risks</h3><ul>{proposal.enrichment.value.guidance.risks.map((item, i) => <li key={i}>{item}</li>)}</ul></>}
             <details><summary>Host requirements</summary><ul>{proposal.enrichment.value.requirements.map((item, i) => <li key={i}>{item}</li>)}</ul></details>
-            <FactoryWorkspace state={workspaces} workflowId={proposal.id} locationKey={group.location.key} inputs={proposal.enrichment.value.guidance.inputs} />
+            <FactoryWorkspace state={workspaces} workflowId={proposal.id} aliases={proposal.aliases} locationKey={group.location.key} inputs={proposal.enrichment.value.guidance.inputs} />
           </> : <section aria-label="Workflow preparation"><p role="status">{preparing === proposal.id || proposal.enrichment?.status === 'running' ? 'Preparing workflow…' : proposal.enrichment?.status === 'failed' ? 'Enrichment failed. The attempt is retained.' : 'Awaiting enrichment — not ready to run.'}</p>
             <button type="button" disabled={!!preparing || proposal.enrichment?.status === 'running'} onClick={() => void prepare(proposal.id, proposal.enrichment?.status === 'failed')}>{proposal.enrichment?.status === 'failed' ? 'Retry enrichment' : 'Enrich workflow'}</button>
             <p className="muted small">One preparation call. Saved guidance is reused across tasks.</p>
@@ -113,7 +120,7 @@ export function Factory() {
             </section>)}
             <p className="muted small">Model: {proposal.model} · Saved {new Date(proposal.createdAt).toLocaleString()}</p>
           </details>
-          </div></details>
+          </div>}</details>
         </article>;
       })}</section>)}
       {data.nextCursor !== null && <button type="button" disabled={loading} onClick={() => void load(data.nextCursor!)}>Load more</button>}
