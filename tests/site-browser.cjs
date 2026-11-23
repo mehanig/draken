@@ -50,6 +50,9 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
+  assert.match(notes,/Preparation status names the failed step, known cause and model-call allowance/);
+  assert.match(notes,/Local indexing is separate from model-backed summaries and workflow preparation/);
+  assert.match(notes,/Retrying can make model calls and incur costs; upgrading does not retry preparation/);
   assert.match(notes,/opens saved workflows directly from the database, without rereading their historical sources/);
   assert.match(notes,/Details load when you open a row, and old workflow links keep working/);
   assert.match(notes,/Task reconstruction separates continued work from independent tasks/);

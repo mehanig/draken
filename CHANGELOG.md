@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.1
+
+- Preparation failures now identify the actual step, known cause and model-call allowance instead of blaming summarization for every failure. Unknown causes are stated as unknown.
+- Settings and Factory explain older failures from saved database records without reopening historical files or starting model work.
+- Local indexing and model preparation have separate status and errors. Running model preparation shows its current step, and retry messaging explicitly states that further model calls can incur costs.
+- Preparation usage includes workflow costs explicitly. The misleading “Completed batches” counter is now “Briefings prepared”; runtime and sign-in labels cover all configured models, not just summarization.
+- Saved workflows, execution history, caches, failure pauses and accounting are preserved. Upgrading does not retry paid preparation or execute workflows.
+
 ## 0.15.0
 
 ### Saved workflows without repeated verification
