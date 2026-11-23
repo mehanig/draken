@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.0
+
+### Saved workflows without repeated verification
+
+- Read Factory's saved workflows and enrichment directly from the database. Opening or refreshing the page no longer reopens transcripts, walks source dependencies, revalidates historical evidence or regenerates enrichment. Saved execution history and logs also remain readable without renewed access to their historical sources.
+- Persist presentation during preparation. Convert existing saved records once at startup using database contents only, without inference. Excluding or changing original history does not hide already saved workflows; preparation of new evidence-derived work still respects source permissions and original bytes.
+- Render workflow details only when first opened, preserving entered values when collapsed. Fix old workflow links when navigating within an already-open Factory page.
+- On the tested seven-workflow dataset, live API requests took 9–24 ms and desktop/mobile navigation to painted rows took 37–58 ms. Cold whole-app startup, including JavaScript and authentication, remained about 250 ms; this is not a universal sub-100-ms startup claim.
+
+### Task reconstruction and explicit consolidation
+
+- Reconstruct historical tasks before matching workflows, joining continuation fragments across chunks and sessions without inventing independent examples. Use the configured final model and the existing preparation allowance, with explicit source excerpts and input limits.
+- Retain immutable task revisions and failed responses. Conflicting assignments stop for explicit review; a saved partition review can split or join assignments without erasing their history or resetting paid-call accounting.
+- Support explicitly prepared workflow consolidation with saved enrichment, corrected task labels, transitive old-ID links and linked execution history. Preserve different endpoints, such as publishing a release versus verifying one already published, and creating a PR versus merging it.
+- A selected local consolidation reduced 23 saved workflows to seven ready replacements. This was an explicit operation, not an automatic cleanup performed by upgrading. Automatic reuse of existing canonical workflow identities remains separate work.
+- Preserve history, caches, discoveries, enrichments, execution receipts and failed attempts. Upgrading neither retries stopped preparation nor executes workflows.
+
 ## 0.14.0
 
 ### Compact Factory workflow list
