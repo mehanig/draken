@@ -8,6 +8,7 @@ import { reconstructPendingTasks, readLearningParent, readLearningParents, indep
 
 type Ask = (payload: unknown, system: string) => Promise<string>;
 type Episode = EpisodeParent;
+class RecordedComparisonFailure extends Error {}
 /** Owned by the summarization job: no scheduler, provider client or allowance of its own. */
 export async function learnSummaryWorkflows(run: number, model: string, ask: Ask, signal: AbortSignal, reconstruction = { model, ask }): Promise<void> {
   const db = getDb();
@@ -23,6 +24,18 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
     const key = learningInputKey(deps, payload, model), recipe = digest(prompt);
     const previous = db.prepare('SELECT id,status,output_json,usage_json FROM process_extractions WHERE input_key=? AND recipe_version=? AND model=? ORDER BY rowid DESC LIMIT 1').get(key, recipe, model) as { id: string; status: string; output_json: string; usage_json: string } | undefined;
     if (previous?.status === 'completed') return validate(previous.output_json);
+    if (phase === 'match' && pair) {
+      // Candidate-list changes are not permission to repeat a failed comparison of the same two inputs.
+      const [left, right] = pair.map(index => identities[index]);
+      const priorPair = db.prepare(`SELECT id,status,output_json FROM process_extractions WHERE kind='comparison' AND recipe_version=? AND model=?
+        AND json_extract(source_dependencies_json,'$.phase')='match'
+        AND json_extract(source_dependencies_json,'$.identities[' || json_extract(source_dependencies_json,'$.pair[0]') || ']') IN (?,?)
+        AND json_extract(source_dependencies_json,'$.identities[' || json_extract(source_dependencies_json,'$.pair[1]') || ']') IN (?,?)
+        ORDER BY rowid DESC LIMIT 1`).get(recipe, model, left, right, left, right) as { id: string; status: string; output_json: string } | undefined;
+      if (priorPair?.status === 'failed' && JSON.parse(priorPair.output_json)?.failure?.stage === 'validation') {
+        throw new RecordedComparisonFailure(`Comparison ${priorPair.id} previously failed validation; retained without automatic retry`);
+      }
+    }
     if (previous && previous.status !== 'cancelled' && JSON.parse(previous.usage_json).backgroundRun === run) throw Error('Workflow attempt failed or was interrupted; explicit retry is required');
     const attempt = (db.prepare('SELECT COUNT(*) n FROM process_extractions WHERE input_key=?').get(key) as { n: number }).n;
     const id = digest(JSON.stringify([key, recipe, run, attempt]));
@@ -60,6 +73,14 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
     } catch (error) {
       db.prepare('UPDATE process_extractions SET status=?,output_json=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed',
         JSON.stringify({ failure: { stage, message: cleanText(error instanceof Error ? error.message : 'Workflow learning failed', 1500) }, raw_output: raw, validationRepairs: repairs }), new Date().toISOString(), id);
+      if (!signal.aborted && phase === 'match' && stage === 'validation') {
+        db.prepare(`UPDATE background_runs SET failure_events_json=json_insert(failure_events_json,'$[#]',json(?)) WHERE id=?`).run(JSON.stringify({
+          status: 'failed', at: new Date().toISOString(), scope: 'workflow_comparison', operation: 'Workflow comparison', operation_id: id,
+          reason: 'Comparison output failed validation. The error and both responses are retained in the comparison record.',
+        }), run);
+        console.warn(`Workflow comparison ${id} failed validation. Error and responses retained; continuing other comparisons.`);
+        throw new RecordedComparisonFailure(`Comparison ${id} failed validation`);
+      }
       throw error;
     }
   }
@@ -94,8 +115,12 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
         raw => ({ selected: candidateSelection(raw, ids) }));
       for (const id of selected.selected) {
         const index = ids.indexOf(id) + 1, pair = [inputs[0], inputs[index]];
-        await invoke(parents, identities, first.location.key, 'match', [0, index], workflowComparisonPayload(pair), CONTRACT_MATCH_PROMPT,
-          raw => { const value = JSON.parse(raw); const assessment = validateContractAssessment(JSON.stringify(value.assessment ?? value), pair); return decideContractMatch(assessment, pair); });
+        try {
+          await invoke(parents, identities, first.location.key, 'match', [0, index], workflowComparisonPayload(pair), CONTRACT_MATCH_PROMPT,
+            raw => { const value = JSON.parse(raw); const assessment = validateContractAssessment(JSON.stringify(value.assessment ?? value), pair); return decideContractMatch(assessment, pair); });
+        } catch (error) {
+          if (!(error instanceof RecordedComparisonFailure)) throw error;
+        }
       }
     }
     signal.throwIfAborted();

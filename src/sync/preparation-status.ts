@@ -44,6 +44,21 @@ export function preparationFailure(runId: number | undefined, task: string, erro
   return { operation, reason, message: `${operation} stopped. ${reason}${calls} Saved summaries and workflows are retained.` };
 }
 
+/** Only a terminal comparison validation error can release the old whole-run pause.
+ * Provider, source, cancellation and later run-level failures still stop their owner. */
+export function nonblockingComparisonFailure(): number | undefined {
+  const row = getDb().prepare(`SELECT r.id FROM background_runs r JOIN sync_settings s ON s.key='auto_summary_error' AND s.value=r.error
+    WHERE r.status='failed' AND r.error<>''
+      AND json_extract(r.metrics_json,'$[#-1].task')='compare_workflow_identity'
+      AND json_extract(r.metrics_json,'$[#-1].status')='completed'
+      AND NOT EXISTS (SELECT 1 FROM json_each(r.failure_events_json) WHERE json_extract(value,'$.scope')='workflow_comparison')
+      AND EXISTS (SELECT 1 FROM process_extractions p WHERE p.status='failed' AND p.kind='comparison'
+        AND json_extract(p.usage_json,'$.backgroundRun')=r.id AND json_extract(p.source_dependencies_json,'$.phase')='match'
+        AND json_extract(p.output_json,'$.failure.stage')='validation')
+    ORDER BY r.id DESC LIMIT 1`).get() as { id: number } | undefined;
+  return row?.id;
+}
+
 export function savedPreparationError(): string {
   const db = getDb();
   const error = (db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get() as { value: string } | undefined)?.value || '';

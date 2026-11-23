@@ -2,7 +2,7 @@ require('./fixtures/fake-memory.cjs');
 const {test,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {getDb,closeDb}=require('../dist/db/schema');
-const {preparationFailure,savedPreparationError}=require('../dist/sync/preparation-status');
+const {preparationFailure,savedPreparationError,nonblockingComparisonFailure}=require('../dist/sync/preparation-status');
 const {summaryPreparationSettings}=require('../dist/sync/summary-preparation');
 const {readFactory}=require('../dist/factory/service');
 const legacy='Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
@@ -15,7 +15,7 @@ function run(error=legacy,task='compare_workflow_identity',calls=9,requestStatus
 }
 function failure(id,message='Pair must cite supplied main stages',stage='validation'){
  getDb().prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,usage_json,created_at,completed_at)
- VALUES (?,'comparison','input','recipe','fixture/model','failed','{}',?,?,?,?)`).run('failure-'+id,JSON.stringify({failure:{stage,message}}),JSON.stringify({backgroundRun:id}),new Date().toISOString(),new Date().toISOString());
+ VALUES (?,'comparison','input','recipe','fixture/model','failed','{"phase":"match"}',?,?,?,?)`).run('failure-'+id,JSON.stringify({failure:{stage,message}}),JSON.stringify({backgroundRun:id}),new Date().toISOString(),new Date().toISOString());
 }
 function save(error){getDb().prepare("INSERT OR REPLACE INTO sync_settings(key,value) VALUES ('auto_summary_error',?)").run(error);}
 
@@ -29,6 +29,19 @@ test('legacy comparison failure is explained from its own saved attempt, not lat
   assert.equal(summaryPreparationSettings().error,text);assert.equal((await readFactory(undefined,new AbortController().signal)).learningError,text);
   assert.equal(db.prepare('SELECT total_changes() n').get().n,before);assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,legacy);
  }finally{fs.readFileSync=original;}
+});
+test('legacy comparison validation pause is identified without clearing it on a status read',()=>{
+ const id=run();failure(id);save(legacy);const db=getDb(),before=db.prepare('SELECT total_changes() n').get().n;
+ assert.equal(nonblockingComparisonFailure(),id);assert.equal(db.prepare('SELECT total_changes() n').get().n,before);
+ assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,legacy);
+});
+for(const stage of ['provider','sources'])test(`${stage} failure still blocks the owner`,()=>{
+ const id=run();failure(id,'A failure',stage);save(legacy);assert.equal(nonblockingComparisonFailure(),undefined);
+});
+test('a later run-level error cannot be dismissed because that run also logged a local comparison failure',()=>{
+ const id=run();failure(id);save(legacy);
+ getDb().prepare('UPDATE background_runs SET failure_events_json=? WHERE id=?').run(JSON.stringify([{status:'failed',at:new Date().toISOString(),scope:'workflow_comparison'}]),id);
+ assert.equal(nonblockingComparisonFailure(),undefined);
 });
 test('reaching the last allowed call does not turn an invalid response into a quota failure',()=>{
  const id=run('new','compare_workflow_identity',120);failure(id);

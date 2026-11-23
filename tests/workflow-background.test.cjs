@@ -159,11 +159,45 @@ test('a comparison without main stages can correct an unsupported match without 
  fs.writeFileSync(controlFile,JSON.stringify({workflowProcess:process,workflowAssessment:{relation:'same_workflow_candidate',workflow:{purpose:'Parser work',method:['Repair parsing'],appliesWhen:'Parser changes'},stagePairs:[],reason:'Unsupported identity',limitations:[]},workflowRepairAssessment:{...nonMatch,relation:'insufficient',reason:'No supplied main stages support identity'}}));
  await warm();assert.equal(getDb().prepare('SELECT status FROM background_runs').get().status,'completed');assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,2);assert.equal((await factory()).proposals.length,0);
 });
-test('two invalid comparison responses retain the exact error and outputs, then stop without a retry loop',async()=>{
+test('two invalid comparison responses remain failed in the log without pausing preparation or retrying',async()=>{
  history();await scanSessions();controls({workflowAssessment:'not JSON'});await warm();
  const db=getDb(),row=db.prepare("SELECT * FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get(),output=JSON.parse(row.output_json);
  assert.equal(row.status,'failed');assert.equal(output.failure.stage,'validation');assert.match(output.failure.message,/JSON|Unexpected/);assert.equal(output.raw_output,'not JSON');assert.equal(output.validationRepairs[0].raw,'not JSON');
+ const run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'completed');assert.equal(run.stage,'Cached; failed comparisons retained');
+ assert.equal(JSON.parse(run.failure_events_json)[0].operation_id,row.id);assert.equal((await factory()).learning,'enabled');assert.equal((await factory()).learningError,'');
  assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,2);const count=calls().length;await warm();assert.equal(calls().length,count);
+});
+test('a failed comparison does not prevent another task from matching and receiving enrichment',async()=>{
+ history(3);await scanSessions();controls({workflowAssessment:'not JSON',taskDelays:{compare_workflow_identity:400}});
+ const done=warm();await waitFor(()=>calls().filter(c=>c.task==='compare_workflow_identity').length===2);controls({});await done;
+ const db=getDb();assert.equal(db.prepare("SELECT count(*) n FROM process_extractions WHERE kind='comparison' AND status='failed'").get().n,1);
+ assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');
+ const page=await factory();assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].enrichment.status,'ready');assert.equal(page.learning,'enabled');
+ const count=calls().length;await warm();assert.equal(calls().length,count);
+ // Revisit after another candidate completed. Selection can change, but the failed pair must not replay.
+ const failed=db.prepare("SELECT * FROM process_extractions WHERE kind='comparison' AND status='failed'").get();
+ const parent=JSON.parse(failed.source_dependencies_json).parents[0];db.prepare("UPDATE work_episodes SET learning_status='pending' WHERE id=?").run(parent.episode);
+ controls({workflowSelection:['C2']});await warm();assert.equal(calls().length,count+1);assert.equal(calls().at(-1).task,'select_workflow_candidates');
+ assert.equal(db.prepare('SELECT status FROM process_extractions WHERE id=?').get(failed.id).status,'failed');
+ const tree=require('../dist/sync/tree'),key=tree.summaryPreparationKey;
+ try {
+  tree.summaryPreparationKey=input=>'new-owner-'+key(input);
+  db.prepare("UPDATE work_episodes SET learning_status='pending' WHERE id=?").run(parent.episode);
+  await warm();assert.equal(db.prepare('SELECT count(*) n FROM background_runs').get().n,2);assert.equal(calls().length,count+1,'a new owner cannot automatically replay the same failed comparison');
+ } finally {tree.summaryPreparationKey=key;}
+ noSync();
+});
+test('legacy comparison-only pause is released by preparation, retaining the owner allowance and failed response',async()=>{
+ history();await scanSessions();controls({workflowAssessment:'not JSON'});await warm();const db=getDb(),before=db.prepare('SELECT * FROM background_runs').get();
+ const legacy='Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
+ db.prepare("UPDATE background_runs SET status='failed',error=?,failure_events_json=? WHERE id=?").run(legacy,JSON.stringify([{status:'failed',at:before.completed_at}]),before.id);
+ db.prepare("INSERT OR REPLACE INTO sync_settings VALUES ('auto_summary_error',?)").run(legacy);
+ const failed=db.prepare("SELECT * FROM process_extractions WHERE kind='comparison' AND status='failed'").get(),parent=JSON.parse(failed.source_dependencies_json).parents[0];
+ db.prepare("UPDATE work_episodes SET learning_status='pending' WHERE id=?").run(parent.episode);
+ const count=calls().length;await warm();const after=db.prepare('SELECT * FROM background_runs').get();
+ assert.equal(calls().length,count);assert.equal(after.id,before.id);assert.equal(after.invocations,before.invocations);assert.equal(after.max_invocations,before.max_invocations);
+ assert.equal(after.status,'completed');assert.equal(JSON.parse(after.failure_events_json).length,1);assert.equal((await factory()).learning,'enabled');
+ assert.equal(db.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(failed.id).output_json,failed.output_json);
 });
 test('comparison correction cannot obtain a new invocation allowance',async()=>{
  history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='6';controls({workflowAssessment:'not JSON',workflowRepairAssessment:nonMatch});await warm();

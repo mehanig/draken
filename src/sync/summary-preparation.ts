@@ -13,7 +13,7 @@ import { prepareCachedProcesses } from '../factory/prepare';
 import { prepareEnrichment, prepareDiscoveredEnrichments, requireEnrichment } from '../factory/enrichment';
 import { modelCall } from './model-call';
 
-import { preparationFailure, preparationOperation, savedPreparationError } from './preparation-status';
+import { preparationFailure, preparationOperation, savedPreparationError, nonblockingComparisonFailure } from './preparation-status';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
 function save(key: string, value: string) {
   getDb().prepare('INSERT INTO sync_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
@@ -97,11 +97,14 @@ export async function prepareWorkflowEnrichment(id: string, body: unknown, signa
 
 /** Prepare reusable summaries and workflows. No sync identity, snapshot, briefing or verdict.
  * A successful receipt suppresses repeated work; a failure blocks all automatic
- * paid retries until explicit consent/retry. Cancellation retains its allowance. */
+ * paid retries until explicit consent/retry. Invalid comparisons are retained and skipped
+ * without stopping unrelated work. Cancellation retains its allowance. */
 export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void, processLeaves?: readonly string[]): Promise<void> {
   if (processLeaves && (!processLeaves.length || processLeaves.length > 6 || new Set(processLeaves).size !== processLeaves.length || processLeaves.some(key => !/^[a-f0-9]{64}$/.test(key)))) throw Error('Select one to six distinct saved summary keys');
-  if (signal.aborted || !summaryPreparationEnabled() || !indexingEnabled() || !idle() || setting('auto_summary_error')) return;
+  if (signal.aborted || !summaryPreparationEnabled() || !indexingEnabled() || !idle()) return;
   if (active) return active.done;
+  const comparisonFailure = nonblockingComparisonFailure();
+  if (setting('auto_summary_error') && comparisonFailure === undefined) return;
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener('abort', abort, { once: true });
@@ -122,6 +125,10 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       const db = getDb();
       const orphan = db.prepare("SELECT id,invocations,max_invocations FROM background_runs WHERE status='running' LIMIT 1").get() as Run | undefined;
       if (orphan) { run = orphan; throw new Error('Background ownership was not recovered'); }
+      if (comparisonFailure !== undefined) {
+        save('auto_summary_error', '');
+        console.warn(`Preparation attempt ${comparisonFailure}: recorded comparison validation failure no longer pauses unrelated work. Failed comparison will not be automatically retried.`);
+      }
       step('sources');
       const input = processLeaves ? { items: [], context: [], models: defaultModels() } : previewSummaryInput(); assertEvidenceAvailable(input);
       const key = summaryPreparationKey(input) + (processLeaves ? digest(JSON.stringify(processLeaves)) : input.items.length ? '' : digest(JSON.stringify(db.prepare("SELECT id FROM process_extractions WHERE kind='summary' AND status='completed' AND json_extract(source_dependencies_json,'$.format')='summary-workflows-v1' ORDER BY id").all())));
@@ -131,7 +138,7 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       if (!processLeaves && !input.items.length && !pendingWorkflows()) return;
       check();
       run = db.prepare(`SELECT id,invocations,max_invocations FROM background_runs WHERE input_key=?
-        AND (status IN ('cancelled','interrupted') OR (?=1 AND status='completed')) ORDER BY id DESC LIMIT 1`).get(key, Number(summariesReady)) as Run | undefined;
+        AND (status IN ('cancelled','interrupted') OR (?=1 AND status='completed') OR (status='failed' AND id=?)) ORDER BY id DESC LIMIT 1`).get(key, Number(summariesReady), comparisonFailure ?? -1) as Run | undefined;
       const latest = db.prepare('SELECT id FROM background_runs WHERE input_key=? ORDER BY id DESC LIMIT 1').get(key) as { id: number } | undefined;
       if (run && latest?.id !== run.id) run = undefined;
       if (run) {
@@ -172,8 +179,10 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       if (JSON.stringify(defaultModels()) !== JSON.stringify(input.models)) { controller.abort(); throw new Error('Models changed'); }
       const cacheReceipt = tree.cacheReceipt();
       if (input.items.length && !cacheIntact(cacheReceipt)) throw new Error('Summary cache changed before completion');
-      db.prepare("UPDATE background_runs SET status='completed',stage='Cached',error='',completed_at=?,cache_receipt_json=? WHERE id=?")
-        .run(new Date().toISOString(), JSON.stringify(cacheReceipt), run.id);
+      const failedComparison = db.prepare(`SELECT 1 FROM process_extractions WHERE status='failed' AND kind='comparison'
+        AND json_extract(usage_json,'$.backgroundRun')=? AND json_extract(source_dependencies_json,'$.phase')='match' LIMIT 1`).get(run.id);
+      db.prepare("UPDATE background_runs SET status='completed',stage=?,error='',completed_at=?,cache_receipt_json=? WHERE id=?")
+        .run(failedComparison ? 'Cached; failed comparisons retained' : 'Cached', new Date().toISOString(), JSON.stringify(cacheReceipt), run.id);
     } catch (error) {
       const db = getDb();
       const counters = run && db.prepare('SELECT invocations,max_invocations FROM background_runs WHERE id=?').get(run.id) as Run | undefined;
