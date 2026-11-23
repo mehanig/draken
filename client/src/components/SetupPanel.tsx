@@ -27,14 +27,14 @@ export function SetupPanel({ active = true, firstRun = false, always = false, on
   return <section className="setup-panel" aria-label="Draken setup">
     <h2>{firstRun ? 'First-time setup' : 'Runtime & sign-in'}</h2>
     <InfoDisclosure label="About setup">
-      <p>Summaries and text chat use pi. Voice uses a separate ChatGPT sign-in. Setup and login run in the server terminal.</p>
-      <p>Automatic preparation is managed in Settings and uses your configured provider’s quota or API billing. Configured credentials do not guarantee model access or available quota.</p>
+      <p>Summaries, workflow preparation and text chat use pi. Voice uses a separate ChatGPT sign-in. Setup and login run in the server terminal.</p>
+      <p>Model-backed preparation is managed in Settings and uses your configured provider’s quota or API billing. Local indexing uses no model API. Configured credentials do not guarantee model access or available quota.</p>
       {pi && <><ul>{pi.models.map(model => <li key={model.model}>{model.model} · {model.state.replace(/_/g, ' ')}</li>)}</ul><p className="source-path">Pi credential directory: {pi.agent_dir}</p></>}
       {value && <p className="source-path">Draken data: {value.data_dir}</p>}
     </InfoDisclosure>
     {!value && !error && <p className="small" role="status">Checking setup…</p>}
     {pi && <>
-      <p><strong>Summarization: {pi.state === 'configured' ? 'credentials configured' : pi.state === 'missing' ? 'pi not found' : pi.state === 'needs_login' ? 'sign-in needed' : 'needs attention'}</strong><span className="small muted"> · {pi.source === 'managed' ? 'Draken-private pi' : 'Existing / external pi'}{pi.version && ` ${pi.version}`}</span></p>
+      <p><strong>Models: {pi.state === 'configured' ? 'credentials configured' : pi.state === 'missing' ? 'pi not found' : pi.state === 'needs_login' ? 'sign-in needed' : pi.state === 'incompatible' ? 'unsupported pi version' : 'runtime check failed'}</strong><span className="small muted"> · {pi.source === 'managed' ? 'Draken-private pi' : 'Existing / external pi'}{pi.version && ` ${pi.version}`}</span></p>
       <p className="small">{pi.message}</p>
       {pi.state !== 'configured' && <div className="setup-commands">
         {['missing', 'incompatible'].includes(pi.state) && <p><code>draken setup</code> — install a pinned, private pi after confirmation. An explicit <code>DRAKEN_PI_BIN</code> must be fixed or unset first.</p>}

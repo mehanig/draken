@@ -101,7 +101,7 @@ test('settings inventory shows recorded sources; scan, selection and missing-sou
     await expect(dialog).toContainText('Directory presence is not an installation check');
     await expect(dialog.locator('.source-settings')).toContainText('Automatic local indexing');
     await expect(dialog.locator('.source-settings')).toContainText('does not create syncs or generate briefings');
-    await expect(dialog.getByRole('region', { name: 'Preparation usage', exact: true })).toContainText('including past automatic work');
+    await expect(dialog.getByRole('region', { name: 'Preparation usage', exact: true })).toContainText('Model usage for summaries, workflow preparation and briefings');
     await scan.click(); await expect(row).toBeVisible();
     await expect(row).toContainText('Inventory fixture'); await expect(row).toContainText(file);
     await expect(row).toContainText('/synthetic/settings-inventory/project-with-a-long-workspace-name');

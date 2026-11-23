@@ -19,8 +19,8 @@ test('first-run instructions explain private pi and separate voice login; readin
   await expect(panel.getByText('draken voice login', { exact: true })).toBeVisible();
   await expect(panel.getByText('Pi credential directory:', { exact: false })).not.toBeVisible();
   await panel.getByLabel('About setup', { exact: true }).click();
-  await expect(panel.getByText('Summaries and text chat use pi.', { exact: false })).toBeVisible();
-  await expect(panel.getByText('Automatic preparation is managed in Settings', { exact: false })).toBeVisible();
+  await expect(panel.getByText('Summaries, workflow preparation and text chat use pi.', { exact: false })).toBeVisible();
+  await expect(panel.getByText('Model-backed preparation is managed in Settings', { exact: false })).toBeVisible();
   await expect(panel).toContainText('quota or API billing');
   await expect(panel).toContainText('draken setup'); await expect(panel).toContainText('draken login'); await expect(panel).toContainText('/login');
   await expect(panel).toContainText('draken voice setup'); await expect(panel).toContainText('draken voice login'); await expect(panel).toContainText('same environment');

@@ -13,7 +13,7 @@ import { prepareCachedProcesses } from '../factory/prepare';
 import { prepareEnrichment, prepareDiscoveredEnrichments, requireEnrichment } from '../factory/enrichment';
 import { modelCall } from './model-call';
 
-const FAILURE = 'Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
+import { preparationFailure, preparationOperation, savedPreparationError } from './preparation-status';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
 function save(key: string, value: string) {
   getDb().prepare('INSERT INTO sync_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
@@ -24,7 +24,7 @@ const idle = () => activity.backgroundIdle && !historyProgress().active && !hist
 interface Receipt { cache_receipt_json: string; total_entries: number; completed_at: string | null }
 interface Run { id: number; invocations: number; max_invocations: number }
 let consentRevision = 0;
-let active: { controller: AbortController; done: Promise<void>; working: boolean } | undefined;
+let active: { controller: AbortController; done: Promise<void>; working: boolean; operation?: string } | undefined;
 
 /** Cancellation is irrevocable for this job even if consent is immediately re-enabled. */
 export function cancelSummaryPreparation(): Promise<void> {
@@ -36,7 +36,7 @@ export function cancelSummaryPreparation(): Promise<void> {
 /** Called by the scheduler's lifecycle owner; reads never start the scheduler. */
 export function configureAutoSummary(value: unknown): void {
   if (typeof value !== 'boolean') throw new HttpError(400, 'enabled must be a boolean');
-  if (value && !indexingEnabled()) throw new HttpError(409, 'Enable automatic indexing before enabling paid background summaries.');
+  if (value && !indexingEnabled()) throw new HttpError(409, 'Enable local indexing before enabling model-backed summary and workflow preparation.');
   consentRevision++;
   active?.controller.abort();
   getDb().transaction(() => {
@@ -63,10 +63,10 @@ function cacheIntact(value: string | [string, string][]): boolean {
 /** Historical progress, not a live readiness claim. Polling must not reopen
  * transcript bodies; the preparing owner and explicit sync validate originals. */
 export function summaryPreparationSettings(): SummaryPreparationSettings {
-  const enabled = summaryPreparationEnabled(), error = setting('auto_summary_error') || '';
+  const enabled = summaryPreparationEnabled(), error = savedPreparationError();
   const last = getDb().prepare("SELECT total_entries,completed_at FROM background_runs WHERE status='completed' AND input_key NOT LIKE 'workflow-enrichment:%' AND input_key NOT LIKE 'workflow-consolidation:%' ORDER BY id DESC LIMIT 1").get() as Pick<Receipt, 'total_entries' | 'completed_at'> | undefined;
   return { enabled, status: !enabled ? 'off' : error ? 'error' : !indexingEnabled() || !idle() || active?.controller.signal.aborted ? 'paused' : active?.working ? 'running' : 'waiting',
-    prepared_entries: last?.total_entries || 0, last_completed_at: last?.completed_at || null, error };
+    prepared_entries: last?.total_entries || 0, last_completed_at: last?.completed_at || null, error, operation: active?.operation };
 }
 
 /** Explicit preparation/retry of an older workflow. Shares the background owner, not its error/reset state. */
@@ -95,7 +95,7 @@ export async function prepareWorkflowEnrichment(id: string, body: unknown, signa
   return requireEnrichment(id, signal);
 }
 
-/** Prepare only reusable summaries. No sync identity, snapshot, briefing or verdict.
+/** Prepare reusable summaries and workflows. No sync identity, snapshot, briefing or verdict.
  * A successful receipt suppresses repeated work; a failure blocks all automatic
  * paid retries until explicit consent/retry. Cancellation retains its allowance. */
 export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void, processLeaves?: readonly string[]): Promise<void> {
@@ -106,10 +106,15 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
   const abort = () => controller.abort();
   signal.addEventListener('abort', abort, { once: true });
   const revision = consentRevision;
-  const owner = { controller, done: Promise.resolve(), working: false };
+  const owner = { controller, done: Promise.resolve(), working: false, operation: 'History preparation' };
   active = owner;
   owner.done = Promise.resolve().then(async () => {
     let run: Run | undefined;
+    let task = 'planning';
+    const step = (next: string) => {
+      task = next; owner.operation = preparationOperation(next);
+      if (run) getDb().prepare('UPDATE background_runs SET stage=? WHERE id=?').run(owner.operation, run.id);
+    };
     const admitted = () => !controller.signal.aborted && summaryPreparationEnabled() && indexingEnabled() && idle();
     const check = () => { if (!admitted()) { controller.abort(); throw new HttpError(409, 'Background preparation paused'); } };
     try {
@@ -117,6 +122,7 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       const db = getDb();
       const orphan = db.prepare("SELECT id,invocations,max_invocations FROM background_runs WHERE status='running' LIMIT 1").get() as Run | undefined;
       if (orphan) { run = orphan; throw new Error('Background ownership was not recovered'); }
+      step('sources');
       const input = processLeaves ? { items: [], context: [], models: defaultModels() } : previewSummaryInput(); assertEvidenceAvailable(input);
       const key = summaryPreparationKey(input) + (processLeaves ? digest(JSON.stringify(processLeaves)) : input.items.length ? '' : digest(JSON.stringify(db.prepare("SELECT id FROM process_extractions WHERE kind='summary' AND status='completed' AND json_extract(source_dependencies_json,'$.format')='summary-workflows-v1' ORDER BY id").all())));
       const receipt = matching(key);
@@ -142,37 +148,44 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       tree.call = async (payload, system, final = false) => {
         check();
         if (final) throw new Error('Background preparation cannot request a verdict');
+        step((payload as { task?: string }).task || 'summarize');
         return call(payload, system, false);
       };
+      step('summarize');
       if (input.items.length) await tree.build();
       if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
+      step('select_workflow_candidates');
       await learnSummaryWorkflows(run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal,
         { model: input.models.final, ask: (payload, system) => {
-          check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
+          check(); step((payload as { task?: string }).task || 'reconstruct_task');
+          return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
         } });
       check();
+      step('enrich_workflow');
       await prepareDiscoveredEnrichments(run.id, input.models.final, (payload, system) => {
         check(); return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
       }, controller.signal);
       check();
+      step('finalization');
       tree.verifyFinal();
       if (JSON.stringify(defaultModels()) !== JSON.stringify(input.models)) { controller.abort(); throw new Error('Models changed'); }
       const cacheReceipt = tree.cacheReceipt();
       if (input.items.length && !cacheIntact(cacheReceipt)) throw new Error('Summary cache changed before completion');
       db.prepare("UPDATE background_runs SET status='completed',stage='Cached',error='',completed_at=?,cache_receipt_json=? WHERE id=?")
         .run(new Date().toISOString(), JSON.stringify(cacheReceipt), run.id);
-    } catch {
+    } catch (error) {
       const db = getDb();
       const counters = run && db.prepare('SELECT invocations,max_invocations FROM background_runs WHERE id=?').get(run.id) as Run | undefined;
       const cancelled = controller.signal.aborted;
       const exhausted = Boolean(counters && counters.invocations >= counters.max_invocations);
       const status = cancelled && !exhausted ? 'cancelled' : 'failed', at = new Date().toISOString();
+      const failure = preparationFailure(run?.id, task, error);
       db.transaction(() => {
         if (run) db.prepare(`UPDATE background_runs SET status=?,error=?,completed_at=?,
           failure_events_json=json_insert(failure_events_json,'$[#]',json(?)) WHERE id=?`)
-          .run(status, cancelled && !exhausted ? '' : FAILURE, at, JSON.stringify({ status, at }), run.id);
-        if (revision === consentRevision && (!cancelled || exhausted)) save('auto_summary_error', FAILURE);
+          .run(status, cancelled && !exhausted ? '' : failure.message, at, JSON.stringify({ status, at, operation: failure.operation, reason: failure.reason }), run.id);
+        if (revision === consentRevision && (!cancelled || exhausted)) save('auto_summary_error', failure.message);
       })();
     }
   }).finally(() => {

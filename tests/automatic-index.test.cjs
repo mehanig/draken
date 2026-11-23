@@ -32,6 +32,14 @@ test('zero-delta receipt/link recovery is local and bounded without an active co
  f.now=300000;f.ops.prepare=async()=>{attempts++;stale=false;};await f.worker.tick();assert.equal(attempts,2);assert.equal(f.worker.state.phase,'waiting');
  f.now=360000;await f.worker.tick();assert.equal(attempts,2,'successful recovery is not a timed rewrite');
 });
+test('discovery, local indexing and escaped model-preparation failures keep distinct labels',async()=>{
+ for(const [operation,expected] of [['scan','History discovery'],['prepare','Local indexing'],['prepareSummaries','Model preparation']]){
+  const f=fixture(1);f.ops[operation]=async()=>{throw Error('PRIVATE_SOURCE /private/session.jsonl');};
+  await f.worker.tick();assert.equal(f.worker.state.error_operation,expected);assert.ok(f.worker.state.error.startsWith(expected+' did not finish.'));
+  assert.doesNotMatch(f.worker.state.error,/PRIVATE_SOURCE|private\/session|Check provider/);
+  f.worker.retry();assert.equal(f.worker.state.error_operation,undefined);
+ }
+});
 test('expiry runs even with indexing disabled, foreground admission blocked, or an owned job running',async()=>{
  const f=fixture(1),expired=[];f.ops.expire=now=>expired.push(now);f.on=false;
  await f.worker.tick();f.on=true;f.idle=false;f.now=60000;await f.worker.tick();assert.equal(f.scans,0);

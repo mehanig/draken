@@ -55,7 +55,7 @@ export function Home({ navigate }: { navigate: Navigate }) {
       <p>New entries have not been included in an earlier sync. Starting a chat or call prepares a briefing; completed preparation is reused.</p>
       <div className="home-counts" aria-label="Sync tracking"><span><strong>{home?.new_entries === undefined ? '—' : home.available - home.new_entries}</strong> carried forward, unreviewed</span><span><strong>{home?.available ?? '—'}</strong> available for a new sync</span><span><strong>{home?.included_unreviewed ?? '—'}</strong> reserved, not reviewed</span><span><strong>{home?.covered ?? '—'}</strong> reviewed</span></div>
       <p>Review is manual. Ending a conversation does not mark its entries reviewed.</p>
-      <p>Automatic preparation uses your configured provider and its quota or API billing. Manage it in Settings; Preparation usage shows estimates, not invoices or total chat and voice spending.</p>
+      <p>Summaries and workflow preparation use your configured models and their quota or API billing. Local indexing uses no model API. Manage it in Settings; Preparation usage shows estimates, not invoices or total chat and voice spending.</p>
     </InfoDisclosure>
     <AutomaticPreparation />
     {work && <p role="status" className="working"><span className="spinner" />{work}</p>}

@@ -41,11 +41,13 @@ export interface AutoIndexSettings {
   phase: 'off' | 'waiting' | 'scanning' | 'indexing' | 'summarizing' | 'paused' | 'stopping' | 'error';
   pending_records: number; last_completed_at: string | null; error: string;
   pending_entries: number;
+  indexing_error?: string;
+  error_operation?: string;
 }
 export interface SummaryPreparationSettings {
   enabled: boolean;
   status: 'off' | 'waiting' | 'running' | 'paused' | 'error';
-  prepared_entries: number; last_completed_at: string | null; error: string;
+  prepared_entries: number; last_completed_at: string | null; error: string; operation?: string;
 }
 export interface SyncCost { usd: number | null; complete: boolean }
 export type UsageRange = '6h' | '1d' | '7d' | '14d';

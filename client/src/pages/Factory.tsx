@@ -63,8 +63,8 @@ export function Factory() {
     {workspaces.error && <p role="alert">{workspaces.error}</p>}
     {loading && <p role="status">Loading…</p>}
     {data && <>
-      {data.learning === 'paused' && <p className="muted small" role="status">Learning paused</p>}
-      {data.learning === 'error' && <p role="status">Learning stopped. <a href="/settings">Retry in Settings</a>.</p>}
+      {data.learning === 'paused' && <p className="muted small" role="status">Automatic workflow preparation is off. Saved workflows remain visible.</p>}
+      {data.learning === 'error' && <div role="status"><p>{data.learningError || 'Automatic workflow preparation stopped after a failed attempt.'}</p><p className="small muted">This failure does not stop local indexing. <a href="/settings">View preparation settings</a>.</p></div>}
       {data.unavailable > 0 && <p className="muted small" role="status">{data.unavailable} saved {data.unavailable === 1 ? 'result' : 'results'} unavailable</p>}
       {!data.proposals.length && <section className="factory-card"><h2>No workflows yet</h2></section>}
       {[...groups.values()].map(group => <section className="factory-group" key={group.location.key} aria-label={group.location.path}>

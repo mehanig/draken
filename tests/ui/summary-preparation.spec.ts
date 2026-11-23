@@ -3,8 +3,8 @@ import { nativePeer } from './native-fixture';
 
 test('one preparation control preserves old opt-outs, exposes paid failures and retries both stages without creating a sync', async ({ page }) => {
   await nativePeer(page);
-  let indexing = true, fail = false;
-  let summary = { enabled: false, status: 'off', prepared_entries: 0, last_completed_at: null as string | null, error: '' };
+  let indexing = true, fail = false, indexingError = '';
+  let summary = { enabled: false, status: 'off', prepared_entries: 0, last_completed_at: null as string | null, error: '', operation: undefined as string | undefined };
   const mutations: unknown[] = [];
   page.on('request', request => {
     if (request.method() !== 'GET') mutations.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() });
@@ -15,11 +15,11 @@ test('one preparation control preserves old opt-outs, exposes paid failures and 
         summary = { ...summary, prepared_entries: 64, last_completed_at: '2026-01-01T00:00:00Z' };
         return route.fulfill({ status: 503, json: { error: 'Synthetic consent write failure' } });
       }
-      indexing = route.request().postDataJSON().enabled;
+      indexing = route.request().postDataJSON().enabled; indexingError = '';
       summary = { ...summary, enabled: indexing, status: indexing ? 'waiting' : 'off', error: '' };
     }
     return route.fulfill({ json: { enabled: indexing, summary_enabled: summary.enabled, summary,
-      check_seconds: 60, batch_records: 1, phase: summary.error ? 'error' : indexing ? 'waiting' : 'off',
+      check_seconds: 60, batch_records: 1, phase: summary.error ? 'error' : summary.status === 'running' ? 'summarizing' : indexing ? 'waiting' : 'off', indexing_error: indexingError,
       pending_records: 7, pending_entries: 200, last_completed_at: null, error: summary.error } });
   });
   const open = async () => {
@@ -30,18 +30,26 @@ test('one preparation control preserves old opt-outs, exposes paid failures and 
   let toggle = dialog.getByRole('switch', { name: /Automatically prepare history/ });
   await expect(toggle).toBeEnabled(); await expect(toggle).not.toBeChecked();
   await expect(dialog).toContainText('quota or API billing');
-  await expect(dialog).toContainText('Indexing only: summary preparation is off');
+  await expect(dialog).toContainText('Model preparation: off');
   expect(mutations).toEqual([]);
   fail = true; await toggle.click();
-  await expect(dialog).toContainText('Last successful summary pass: 64 entries');
+  await expect(dialog).toContainText('Last completed automatic preparation attempt: 64 entries');
   await expect(dialog.getByRole('alert')).toHaveText('Synthetic consent write failure');
   await expect(toggle).not.toBeChecked();
   fail = false; await toggle.check(); await expect(toggle).toBeEnabled(); await expect(toggle).toBeChecked();
-  summary = { ...summary, status: 'error', error: 'Paid work paused; retry explicitly.' };
+  summary = { ...summary, status: 'running', operation: 'Workflow comparison' };
+  await page.reload(); await expect(page.getByRole('status').filter({ hasText: 'Workflow comparison…' })).toBeVisible();
+  summary = { ...summary, status: 'error', error: 'Workflow comparison stopped. The model returned an invalid comparison. Attempt #427 used 9 of 120 allowed model calls.' };
   await page.reload();
   await expect(page.getByRole('region', { name: 'Automatic preparation', exact: true }).getByRole('alert')).toHaveText(summary.error);
   dialog = await open(); toggle = dialog.getByRole('switch', { name: /Automatically prepare history/ });
   await expect(toggle).toBeChecked();
+  await expect(dialog).toContainText('Local indexing: enabled (no model API). Model preparation: paused after a failure.');
+  await expect(dialog).toContainText('Retrying can make model calls and incur costs. It does not execute saved workflows.');
+  indexingError = 'Local indexing did not finish. Completed indexing work is retained.';
+  await page.reload();
+  await expect(dialog.getByRole('alert')).toHaveText([summary.error, indexingError]);
+  await expect(dialog).toContainText('Local indexing: failed; see error below');
   await dialog.getByRole('button', { name: 'Retry automatic preparation' }).click();
   await expect(dialog.getByRole('alert')).toHaveCount(0);
   await toggle.uncheck(); await expect(toggle).toBeEnabled(); await expect(toggle).not.toBeChecked();

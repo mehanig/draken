@@ -22,9 +22,9 @@ test('Settings usage offers every range and bucket, honest partial costs and a w
     await expect(panel.getByRole('img')).toHaveAttribute('aria-label', new RegExp(`by ${bucket} bucket`));
     await expect(panel.locator('.usage-totals')).toContainText('$1.25');
   }
-  await panel.getByRole('combobox', { name: 'Chart', exact: true }).selectOption('batches'); await expect(panel.getByRole('img')).toHaveAttribute('aria-label', /Completed batches/);
+  await panel.getByRole('combobox', { name: 'Chart', exact: true }).selectOption('batches'); await expect(panel.getByRole('img')).toHaveAttribute('aria-label', /Briefings prepared/);
   await expect(panel.locator('.usage-y-axis span')).toHaveText(['0', '1', '2', '3']);
-  await expect(panel.locator('.usage-axis-unit')).toHaveText('Batches');
+  await expect(panel.locator('.usage-axis-unit')).toHaveText('Briefings');
   await panel.getByRole('combobox', { name: 'Chart', exact: true }).selectOption('cost');
   await page.screenshot({ path: '.test-artifacts/usage-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });

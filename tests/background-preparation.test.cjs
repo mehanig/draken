@@ -55,7 +55,7 @@ test('saved opt-outs survive upgrades; explicit automatic preparation controls b
   background.setAutoSummary(false); initSchema(getDb()); assert.equal(prep.summaryPreparationSettings().enabled, false);
   await warm(); assert.equal(calls().length, 0); assert.equal(runs().length, 0);
   for (const value of ['true', 1, null, {}, []]) assert.throws(() => background.setAutoSummary(value), /boolean/);
-  background.setAutoIndex(false); assert.throws(() => background.setAutoSummary(true), /automatic indexing/);
+  background.setAutoIndex(false); assert.throws(() => background.setAutoSummary(true), /local indexing/);
   getDb().prepare("DELETE FROM sync_settings WHERE key='auto_summary'").run();
   initSchema(getDb()); assert.equal(prep.summaryPreparationSettings().enabled, true);
   const on = background.setAutoIndex(true); assert.equal(on.summary.enabled, true);
