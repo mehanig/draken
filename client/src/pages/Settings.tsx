@@ -26,17 +26,17 @@ export function Settings() {
         setSettings(current => current ? { ...current, enabled, summary_enabled: enabled } : current);
         try { setSettings(await setAutoIndex(enabled)); } catch (error) { setSettings(previous); setError(error instanceof Error ? error.message : 'Could not save settings'); }
         finally { setSaving(false); }
-      }} /><span><strong>Automatically prepare history</strong><span className="small muted">Index locally, then cache summaries and prepare workflows using your configured models and their quota or API billing.</span></span></label>
+      }} /><span><strong>Automatically prepare history</strong><span className="small muted">Local indexing uses no model API. Summaries and workflow preparation use your configured models and their quota or API billing.</span></span></label>
     <InfoDisclosure label="About automatic preparation">
-      <p>Preparation runs while Draken is idle. Turning it off keeps completed work. Provider failures pause summaries until you explicitly retry.</p>
+      <p>Preparation runs while Draken is idle. Turning it off keeps completed work. A failed model-preparation attempt pauses further model preparation until you explicitly retry. Local indexing continues separately.</p>
       <p>Local search uses CPU, memory and disk, and may download about 136 MB on first use. Starting a chat or call creates its briefing. Preparation never starts a call or marks work reviewed.</p>
     </InfoDisclosure>
     {saving && <p role="status">Saving…</p>}
     {(error || readError) && <p className="small" role="alert">{error || readError}</p>}
     {settings && <AutomaticProgress settings={settings} />}
-    {settings?.enabled && settings.phase === 'error' && <button type="button" className="btn btn-secondary" disabled={saving} onClick={async () => {
+    {settings?.enabled && settings.phase === 'error' && <><p className="small muted">Retrying can make model calls and incur costs. It does not execute saved workflows.</p><button type="button" className="btn btn-secondary" disabled={saving} onClick={async () => {
       setSaving(true); setError(''); try { setSettings(await setAutoIndex(true)); } catch (error) { setError(error instanceof Error ? error.message : 'Could not retry preparation'); } finally { setSaving(false); }
-    }}>Retry automatic preparation</button>}
+    }}>Retry automatic preparation</button></>}
     <AgentSources open />
     <SetupPanel always />
   </main>;

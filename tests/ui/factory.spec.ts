@@ -125,28 +125,29 @@ test('a task workflow link loads its older page without fabricating recurrence o
 
 test('Factory explains paused learning and preparation errors without starting work', async ({ page }) => {
   let learning = 'paused'; const mutations: string[] = [];
+  const learningError = 'Workflow comparison stopped. The model compared steps outside the main task steps supplied for comparison. Attempt #427 used 9 of 120 allowed model calls. Saved summaries and workflows are retained.';
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
-  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, proposals: [proposal], failedExtractions: learning === 'error' ? 1 : 0 } }));
+  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, learningError: learning === 'error' ? learningError : '', proposals: [proposal], failedExtractions: learning === 'error' ? 1 : 0 } }));
   await page.goto('/factory');
-  await expect(page.getByText('Learning paused', { exact: true })).toBeVisible();
+  await expect(page.getByText('Automatic workflow preparation is off. Saved workflows remain visible.', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
   learning = 'error'; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Learning stopped.' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Retry in Settings' })).toHaveAttribute('href', '/settings');
+  await expect(page.getByRole('status').filter({ hasText: learningError })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'View preparation settings' })).toHaveAttribute('href', '/settings');
   await expect(page.getByText('1 failed attempt', { exact: true })).toHaveCount(0);
   expect(mutations).toEqual([]);
 });
 
-test('refresh removes old proposal content when sources become unavailable or the request fails', async ({ page }) => {
+test('refresh reports saved-data loading failures without leaving stale rows on screen', async ({ page }) => {
   let phase = 0;
   await page.route('**/api/factory', route => phase === 2
-    ? route.fulfill({ status: 503, json: { error: 'Source verification unavailable' } })
+    ? route.fulfill({ status: 503, json: { error: 'Saved workflow data could not be loaded' } })
     : route.fulfill({ json: phase === 0 ? { ...empty, proposals: [proposal] } : { ...empty, unavailable: 1 } }));
   await page.goto('/factory'); await expect(page.getByText('Verify a database backup', { exact: true })).toBeVisible();
   phase = 1; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByText('Verify a database backup', { exact: true })).toHaveCount(0);
   await expect(page.getByText('1 saved result unavailable', { exact: true })).toBeVisible();
   phase = 2; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Source verification unavailable');
+  await expect(page.getByRole('alert')).toHaveText('Saved workflow data could not be loaded');
   await expect(page.getByText('Verify a database backup', { exact: true })).toHaveCount(0);
 });

@@ -280,7 +280,10 @@ test('original-byte changes during leaf inference prevent retaining procedural c
 });
 test('failed matching is not automatically retried; explicit preparation retry retains earlier receipts',async()=>{
  history();await scanSessions();controls({failStage:'workflow_match'});await warm();
- const db=getDb();assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'failed');const count=calls().length;await warm();assert.equal(calls().length,count);
+ const db=getDb(),run=db.prepare('SELECT status,error,failure_events_json FROM background_runs').get();assert.equal(run.status,'failed');
+ assert.match(run.error,/Workflow comparison stopped/);assert.match(run.error,/model request did not complete/);assert.doesNotMatch(run.error,/summaries could not finish/);
+ assert.equal(JSON.parse(run.failure_events_json)[0].operation,'Workflow comparison');assert.equal((await factory()).learningError,run.error);
+ const count=calls().length;await warm();assert.equal(calls().length,count);
  controls({});setAutoSummary(true);await warm();assert.equal((await factory()).proposals.length,1);
  assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE status='failed'").get().n,1);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,2);

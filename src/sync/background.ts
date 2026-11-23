@@ -12,7 +12,7 @@ import type { AutoIndexSettings } from '../types';
 import { cancelSummaryPreparation, configureAutoSummary, summaryPreparationSettings, warmSummaryCache } from './summary-preparation';
 
 const CHECK_MS = 60_000, RETRY_MS = 5 * 60_000, BATCH = 1;
-type State = Pick<AutoIndexSettings, 'phase' | 'pending_records' | 'last_completed_at' | 'error'>;
+type State = Pick<AutoIndexSettings, 'phase' | 'pending_records' | 'last_completed_at' | 'error' | 'error_operation'>;
 interface Operations {
   enabled(): boolean; idle(): boolean; now(): number;
   expire?(now: number): void;
@@ -49,10 +49,10 @@ class AutoIndexer {
     this.life?.abort(); this.state.phase = this.life ? 'stopping' : this.ops.enabled() ? 'paused' : 'off';
   }
   async stop() { this.pause(); await this.job; }
-  retry() { this.retryAt = 0; this.state.error = ''; if (!this.job) this.state.phase = this.ops.enabled() ? 'waiting' : 'off'; }
+  retry() { this.retryAt = 0; this.state.error = ''; this.state.error_operation = undefined; if (!this.job) this.state.phase = this.ops.enabled() ? 'waiting' : 'off'; }
   private async run(signal: AbortSignal) {
     try {
-      this.state.phase = 'scanning'; this.state.error = '';
+      this.state.phase = 'scanning'; this.state.error = ''; this.state.error_operation = undefined;
       const scanned = await this.ops.scan(signal);
       if (signal.aborted || !this.ops.enabled()) return;
       if (scanned.warnings.length) throw new Error('Scan incomplete');
@@ -81,8 +81,10 @@ class AutoIndexer {
       if (!signal.aborted && error instanceof HttpError && error.status === 409) {
         this.state.phase = 'paused'; this.retryAt = this.ops.now() + CHECK_MS;
       } else if (!signal.aborted) {
-        this.state.phase = 'error';
-        this.state.error = 'Background preparation could not finish. Check session sources, storage and local model availability. Completed work is retained; local preparation retries in five minutes.';
+        const operation = this.state.phase === 'scanning' ? 'History discovery' : this.state.phase === 'indexing' ? 'Local indexing' : 'Model preparation';
+        this.state.phase = 'error'; this.state.error_operation = operation;
+        const reason = error instanceof Error && error.message === 'Scan incomplete' ? 'One or more session sources could not be scanned completely.' : 'The cause could not be identified.';
+        this.state.error = `${operation} did not finish. ${reason} The scheduler will check again in five minutes. Completed work and any saved model-preparation failure pause are retained.`;
         this.retryAt = this.ops.now() + RETRY_MS;
       }
     } finally {
@@ -106,7 +108,7 @@ export function startBackgroundIndexing() {
   const owner = worker;
   unregisterStatus = registerUpdateStatus(() => owner.state);
   timer = setInterval(() => { void worker?.tick().catch(() => {
-    if (worker) { worker.state.phase = 'error'; worker.state.error = 'Background indexing is unavailable. Check server storage and settings.'; }
+    if (worker) { worker.state.phase = 'error'; worker.state.error_operation = 'Background scheduling'; worker.state.error = 'Background scheduling failed. The cause could not be identified.'; }
   }); }, CHECK_MS); timer.unref();
 }
 export async function stopBackgroundIndexing() {
@@ -119,7 +121,7 @@ export async function stopBackgroundIndexing() {
 }
 export function refreshBackgroundPreparation() {
   startBackgroundIndexing(); worker!.retry();
-  void worker!.tick().catch(() => { if (worker) { worker.state.phase = 'error'; worker.state.error = 'Could not apply the activity window to background preparation. Check server storage and retry.'; } });
+  void worker!.tick().catch(() => { if (worker) { worker.state.phase = 'error'; worker.state.error_operation = 'Background scheduling'; worker.state.error = 'Background scheduling failed. The cause could not be identified.'; } });
 }
 export async function yieldBackgroundIndexing() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }
 export function autoIndexSettings(): AutoIndexSettings {
@@ -129,6 +131,7 @@ export function autoIndexSettings(): AutoIndexSettings {
   return { enabled: on, summary_enabled: summary.enabled, summary, check_seconds: CHECK_MS / 1000, batch_records: BATCH, pending_entries: availableCount(),
     ...(worker?.state || initial()), last_completed_at: worker?.state.last_completed_at || last?.value || null, ...(!on && worker?.state.phase !== 'stopping' ? { phase: 'off' as const }
       : on && (!worker || worker.state.phase === 'off') ? { phase: 'waiting' as const } : {}),
+    indexing_error: ['History discovery', 'Local indexing'].includes(worker?.state.error_operation || '') ? worker?.state.error || '' : '',
     ...(failure ? { phase: 'error' as const, error: failure } : {}) };
 }
 export function setAutoIndex(value: unknown, withSummaries = true): AutoIndexSettings {

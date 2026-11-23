@@ -24,5 +24,6 @@ export interface FactoryPage {
   nextCursor: number | null;
   unavailable: number;
   learning: 'enabled' | 'paused' | 'error';
+  learningError?: string;
   failedExtractions: number;
 }
