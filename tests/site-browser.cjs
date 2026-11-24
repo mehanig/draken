@@ -50,12 +50,12 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/Learn reusable workflow definitions with requirements supplied for each run/);
-  assert.match(notes,/Workflow preparation uses your configured final model; summaries keep their own model/);
-  assert.match(notes,/Filter preparation costs and requests by model and operation/);
-  assert.match(notes,/Enrichment no longer rejects valid guidance because of arbitrary text-length or list-size limits/);
+  assert.match(notes,/Workflow matching now explicitly distinguishes partial observations from a different intended endpoint/);
+  assert.match(notes,/reuse a compatible saved definition or leave identity uncertain/);
+  assert.match(notes,/Real-model evaluation of these instructions remains outstanding/);
+  assert.match(notes,/Old workflow links survive updates to saved presentation/);
+  assert.match(notes,/Earlier comparison receipts remain readable without regenerating guidance/);
   assert.match(notes,/Existing failed attempts remain recorded and are not automatically retried/);
-  assert.match(notes,/Similar workflows can still be discovered separately when historical coverage differs/);
   assert.match(notes,/Session storage remains pointer-only/);
   assert.match(notes,/Saved workflows, history and accounting remain intact/);
   assert.match(notes,/Enabled automatic preparation may continue within its existing allowance/);

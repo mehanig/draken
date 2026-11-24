@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.4
+
+- Clarify workflow matching: missing later steps in partial history are observation gaps, not evidence of an edits-only endpoint. Prefer compatible saved definitions; leave identity uncertain rather than inventing a competing workflow when the intended endpoint is unclear. Preserve explicit endpoint differences and specialized methods.
+- Preserve existing workflow aliases when preparation refreshes saved presentation. Older comparison receipts remain readable without regenerating their guidance.
+- Keep pointer-only session storage, historical failures, spending and execution receipts unchanged. Upgrading does not automatically consolidate existing catalogs, retry failed preparation or execute workflows. The local catalog correction was a separate, explicitly requested operation.
+- Qualification covers 910 unit tests and the Factory browser tests. Real-model evaluation of the revised matching instructions remains outstanding; this release does not claim duplicate discovery is eliminated.
+
 ## 0.15.3
 
 - Learn reusable workflow definitions with run-specific requirements and acceptance criteria. Matching can reuse a supplied saved definition without duplicating its enrichment or changing earlier receipts. Similar workflows can still be discovered separately when historical coverage differs; this release does not resolve every duplicate.
