@@ -7,6 +7,8 @@ type Proposal = FactoryPage['proposals'][number];
 
 export function saveWorkflowDisplay(proposal: Proposal): void {
   const { enrichment: _enrichment, ...saved } = proposal;
+  const previous = getDb().prepare("SELECT json_extract(display_json,'$.aliases') aliases FROM workflow_discoveries WHERE id=?").get(proposal.id) as { aliases: string | null } | undefined;
+  if (previous?.aliases) saved.aliases = [...new Set([...JSON.parse(previous.aliases), ...(saved.aliases || [])])];
   getDb().prepare('UPDATE workflow_discoveries SET display_json=? WHERE id=?').run(JSON.stringify(saved), proposal.id);
 }
 

@@ -31,8 +31,8 @@ export async function readWorkflowComparison(row: LearningRow, signal: AbortSign
   const evidence = deps.pair.map((i: number) => loaded[i].input);
   const saved: WorkflowCandidate[] = deps.savedWorkflows || [];
   const payload = workflowComparisonPayload(evidence, saved);
-  // 0.15.2 comparison receipts remain verifiable after the prompt changes.
-  const supportedRecipes = [digest(CONTRACT_MATCH_PROMPT), 'a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9'];
+  // Keep earlier comparison receipts readable when matching instructions change.
+  const supportedRecipes = [digest(CONTRACT_MATCH_PROMPT), 'eb8bb04aa3d16078f02612f95bd00782ce9374f9f5f98d0d5e0bf8183c76b71f', 'a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9'];
   if (learningInputKey(deps, payload, row.model) !== row.input_key || !supportedRecipes.includes(row.recipe_version)) throw Error('Workflow comparison input changed');
   const decision = decideContractMatch(JSON.parse(row.output_json).assessment, evidence, saved);
   return { decision, evidence, location };

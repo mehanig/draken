@@ -11,4 +11,11 @@ function examples(){
  return [{name:'different-features-same-local-implementation-procedure',expected:{sameWorkflow:true,relations:['same_workflow_candidate']},left:filter,right:sort},{name:'same-feature-local-preview-versus-pr',expected:{sameWorkflow:false,relations:['different','shared_subprocedure']},left:sort,right:submitted},{name:'feature-explanation-is-not-implementation',expected:{sameWorkflow:false,relations:['different','common_practice','shared_subprocedure']},left:filter,right:discussion}];
 }
 const guidance={inputs:[{name:'desired_behavior',label:'Desired behavior',description:'The requested list interactions and behavior to implement',required:true},{name:'acceptance_criteria',label:'Acceptance criteria',description:'Observable outcomes and cases that this run must satisfy',required:true}],steps:workflow.method.map((approach,i)=>({step:i+1,approach:approach+' using desired_behavior and acceptance_criteria',checks:['Check the supplied acceptance_criteria against observed results']})),review:['Review scope, behavior and regression evidence'],completion:['The supplied desired_behavior and acceptance_criteria are verified in the local preview; no submission or release'],risks:['Missing requirements must be clarified rather than copied from a historical feature']};
-module.exports={examples,workflow,guidance};
+function partialExample(){
+ const side=example('workflow-list filtering');
+ side.records[2].text='The list state and rendering were edited. The excerpt ends before validation.';
+ side.fragment.state='partial';side.fragment.coverage.outcomeRefs=[];side.fragment.coverage.gaps=['The excerpt ends after edits; later checks and completion are not shown'];
+ side.fragment.stages=side.fragment.stages.slice(0,2);side.fragment.stages[1].claims[0].description=side.records[2].text;
+ return side;
+}
+module.exports={examples,partialExample,workflow,guidance};
