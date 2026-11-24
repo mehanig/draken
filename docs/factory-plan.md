@@ -12,7 +12,9 @@ Discover repository-specific workflows from permitted history, enrich them into 
 
 PR creation, pushing, merging, reviewing, publishing, deploying, checking CI and inspecting a live website are ordinary workflow steps when included in the authorized task. They are not separate Factory features that each need a new executor, service, tool binding or host-side action adapter. The agent uses ordinary installed tools and APIs to perform them.
 
-For example, a discovered workflow ending in a review-ready PR must not be silently reduced to a local patch. A workflow ending in local preview must not be expanded into publication. Preserve the requested endpoint in both directions.
+For example, a run requesting a review-ready PR must not be silently reduced to a local patch. A run requesting local preview must not be expanded into publication. Preserve the requested endpoint in both directions.
+
+A workflow may express supported conditional steps in ordinary instructions: implement and validate; if local deployment is requested, back up, deploy and verify; otherwise stop after validation. Keep one saved workflow, its existing input definitions and one Pi session—no variant objects, branch schema, special UI or additional executor. Enrichment uses an ordinary required `delivery_scope` input when needed, and the agent follows only the applicable, authorized steps. Different delivery choices alone need not create separate workflows; genuinely different jobs or entry conditions still do. Existing fixed-endpoint definitions are not silently widened; consolidating them remains an explicit preparation operation.
 
 ## 2. Required lifecycle
 
