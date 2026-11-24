@@ -13,8 +13,15 @@ import { prepareCachedProcesses } from '../factory/prepare';
 import { prepareEnrichment, prepareDiscoveredEnrichments, requireEnrichment } from '../factory/enrichment';
 import { modelCall } from './model-call';
 
-import { preparationOperation as operationName } from './preparation-status';
 import { preparationOperation, preparationErrorCount, preparationRetryPending, retryPreparationErrors, isPreparationLimit, recordPreparationError, failedPreparationOperations, finishPreparationRetries } from './preparation-errors';
+const operations: Record<string, string> = {
+  planning: 'History preparation', summarize: 'Summarization', group_topics: 'Summary grouping',
+  select_workflow_candidates: 'Workflow selection', compare_workflow_identity: 'Workflow comparison',
+  reconstruct_task: 'Task reconstruction', review_task_reconstruction: 'Task reconstruction review',
+  prepare_workflow_process: 'Workflow extraction', enrich_workflow: 'Workflow preparation',
+  sources: 'Original history check', finalization: 'Completing preparation',
+};
+const operationName = (task: string) => operations[task] || 'Model preparation';
 const setting = (key: string) => (getDb().prepare('SELECT value FROM sync_settings WHERE key=?').get(key) as { value: string } | undefined)?.value;
 function save(key: string, value: string) {
   getDb().prepare('INSERT INTO sync_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const empty = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', failedExtractions: 0 };
+const empty = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', preparationErrors: 0 };
 const proposal = {
   location: { kind: 'repository', key: 'repo-a', path: '/projects/backup', name: 'backup' },
   id: 'proposal-1', model: 'test/model', createdAt: '2026-01-01T00:00:00.000Z',
@@ -127,7 +127,7 @@ test('Factory explains paused learning and preparation errors without starting w
   let learning = 'paused'; const mutations: string[] = [];
   let preparationErrors = 0;
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
-  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, preparationErrors, proposals: [proposal], failedExtractions: 0 } }));
+  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, preparationErrors, proposals: [proposal] } }));
   await page.goto('/factory');
   await expect(page.getByText('Automatic workflow preparation is off. Saved workflows remain visible.', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();

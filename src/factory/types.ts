@@ -23,8 +23,6 @@ export interface FactoryPage {
   proposals: FactoryProposal[];
   nextCursor: number | null;
   unavailable: number;
-  learning: 'enabled' | 'paused' | 'error';
-  learningError?: string;
+  learning: 'enabled' | 'paused';
   preparationErrors?: number;
-  failedExtractions: number;
 }
