@@ -88,7 +88,7 @@ test('model and operation filters combine, preserve unknown costs, handle empty 
   await expect(chart.locator('option[value="batches"]')).toHaveAttribute('disabled', '');
   await operation.selectOption('compare_workflow_identity'); await expect(panel.locator('.usage-totals')).toContainText('$0.25');
   expect(queries.at(-1)?.get('model')).toBe('openai/gpt-6-astra'); expect(queries.at(-1)?.get('operation')).toBe('compare_workflow_identity');
-  await expect(panel).toContainText('Briefings prepared (all preparation)'); await expect(panel).toContainText('Filters apply to costs and requests');
+  await expect(panel).toContainText('Briefings prepared (all preparation)'); await expect(panel).toContainText('Costs and requests match the selected model and operation');
   await panel.getByText('Bucket details', { exact: true }).click(); await expect(panel.getByRole('columnheader', { name: 'Briefings', exact: true })).toHaveCount(0);
   for (const width of [320, 1440]) { await page.setViewportSize({ width, height: 1000 }); expect(await panel.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true); }
   await model.selectOption('openai/gpt-6-luna'); await expect(panel).toContainText('No model requests match these filters'); await expect(panel.getByRole('img')).toHaveCount(0);

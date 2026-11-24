@@ -9,11 +9,10 @@ import { getSourceRoots } from '../sources/registry';
 import { activityMetadata } from '../sources/activity-metadata';
 import { activityDays, withinActivityWindow } from '../sources/activity-window';
 import { identifySource, normalizeSource } from '../sources/adapters';
-import { saveSessionRecord } from '../db/session-records';
 
 interface Source {
   id: string; agent: AgentKind; external_id: string; path: string; cwd: string; name: string; byte_offset: number;
-  file_identity: string;
+  file_identity: string; boundary_hash: string; prefix_hash: string;
   modified_at: string; leaf_id: string | null; scanned_bytes: number;
   activity_stamp: string; last_message_at: string | null; included: number;
 }
@@ -38,6 +37,12 @@ async function discover(root: string, warnings: string[]): Promise<string[]> {
   };
   await visit(root, 0);
   return files.sort();
+}
+
+async function hashRegion(file: fs.promises.FileHandle, start: number, length: number): Promise<string> {
+  const buffer = Buffer.alloc(length);
+  const { bytesRead } = await file.read(buffer, 0, length, start);
+  return digest(buffer.subarray(0, bytesRead));
 }
 
 async function readRecords(handle: fs.promises.FileHandle, file: string, offset: number, size: number, warnings: string[], signal?: AbortSignal) {
@@ -93,6 +98,17 @@ function updateProjection(sessionId: string, leaf: string | null, agent: AgentKi
   }
 }
 
+async function pointersMatch(file: fs.promises.FileHandle, sessionId: string): Promise<boolean> {
+  const pointers = getDb().prepare('SELECT record_offset,record_bytes,record_hash FROM agent_entries WHERE session_id=? AND present=1').all(sessionId) as RecordPointer[];
+  for (const pointer of pointers) {
+    if (!Number.isSafeInteger(pointer.record_offset) || pointer.record_offset < 0 || !Number.isSafeInteger(pointer.record_bytes) || pointer.record_bytes < 1 || pointer.record_bytes > RECORD_BYTES || !pointer.record_hash) return false;
+    const bytes = Buffer.alloc(pointer.record_bytes);
+    const read = await file.read(bytes, 0, bytes.length, pointer.record_offset);
+    if (read.bytesRead !== bytes.length || digest(bytes) !== pointer.record_hash) return false;
+  }
+  return true;
+}
+
 async function indexFile(filePath: string, agent: AgentKind, root: string, warnings: string[], signal?: AbortSignal): Promise<{ id?: string; added: number }> {
   const db = getDb();
   let previous = db.prepare('SELECT * FROM agent_sessions WHERE path = ?').get(filePath) as Source | undefined;
@@ -128,11 +144,12 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     }
     if (!previous.included || !withinActivityWindow(previous.last_message_at, activityDays(db))) return { id: header.id, added: 0 };
     let reset = !previous || previous.id !== header.id || previous.file_identity !== identity || stat.size < previous.byte_offset || previous.scanned_bytes < 0 || (previous.scanned_bytes === 0 && stat.size === previous.byte_offset);
-    // Older databases contain pointers only. Import their content once during ingestion.
-    if (previous && db.prepare('SELECT 1 FROM agent_entries WHERE session_id=? LIMIT 1').get(previous.id)
-      && !db.prepare('SELECT 1 FROM session_records WHERE session_id=? LIMIT 1').get(previous.id)) reset = true;
     if (previous && !reset) {
-      reset = stat.size === previous.byte_offset && modified !== previous.modified_at;
+      const boundary = await hashRegion(file, Math.max(0, previous.byte_offset - 256), Math.min(256, previous.byte_offset));
+      const prefix = await hashRegion(file, 0, Math.min(512, previous.byte_offset));
+      reset = boundary !== previous.boundary_hash || prefix !== previous.prefix_hash ||
+        (stat.size === previous.byte_offset && modified !== previous.modified_at);
+      if (!reset && modified !== previous.modified_at) reset = !await pointersMatch(file, previous.id);
       if (!reset && previous.scanned_bytes > 0 && stat.size === previous.byte_offset && modified === previous.modified_at) {
         db.prepare('UPDATE agent_sessions SET scanned_bytes=? WHERE id=? AND scanned_bytes!=?').run(stat.size, previous.id, stat.size);
         return { id: previous.id, added: 0 };
@@ -175,16 +192,18 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
     if (agent === 'codex' && !entries.some(entry => entry.is_activity) && (!previous || reset) && result.records.some(record => record.value?.type === 'event_msg' && ['user_message', 'agent_message'].includes(record.value?.payload?.type))) {
       throw new Error('Codex event-only transcript layout is unsupported or not yet complete; response_item evidence is required');
     }
+    const boundary = await hashRegion(file, Math.max(0, result.offset - 256), Math.min(256, result.offset));
+    const prefix = await hashRegion(file, 0, Math.min(512, result.offset));
     const committed = db.transaction(() => {
       if (previous && previous.id !== header.id) {
         db.prepare('UPDATE agent_sessions SET path = ?, missing = 1 WHERE id = ?').run(`${filePath}#replaced:${previous.id}`, previous.id);
       }
-      db.prepare(`INSERT INTO agent_sessions(id, path, cwd, name, modified_at, file_identity, byte_offset, leaf_id, agent, external_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      db.prepare(`INSERT INTO agent_sessions(id, path, cwd, name, modified_at, file_identity, byte_offset, boundary_hash, prefix_hash, leaf_id, agent, external_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET path=excluded.path, cwd=excluded.cwd, name=excluded.name,
         modified_at=excluded.modified_at, file_identity=excluded.file_identity, byte_offset=excluded.byte_offset,
-        leaf_id=excluded.leaf_id, missing=0`).run(
-        header.id, filePath, header.cwd, name, modified, identity, result.offset, leaf, agent, header.external_id,
+        boundary_hash=excluded.boundary_hash, prefix_hash=excluded.prefix_hash, leaf_id=excluded.leaf_id, missing=0`).run(
+        header.id, filePath, header.cwd, name, modified, identity, result.offset, boundary, prefix, leaf, agent, header.external_id,
       );
       db.prepare('UPDATE agent_sessions SET scanned_bytes=0 WHERE id=?').run(header.id);
       if (reset) db.prepare('UPDATE agent_entries SET present = 0, active = 0 WHERE session_id = ?').run(header.id);
@@ -196,16 +215,6 @@ async function indexFile(filePath: string, agent: AgentKind, root: string, warni
         record_offset=excluded.record_offset,record_bytes=excluded.record_bytes,record_hash=excluded.record_hash,
         text_length=excluded.text_length,replacement_length=excluded.replacement_length,effective_length=excluded.text_length,
         effective_id=NULL,normalization=2,present=1`);
-      for (const entry of entries) {
-        const { record_offset, record_bytes, record_hash, ...normalized } = entry;
-        saveSessionRecord(db, header, { record_offset, record_bytes, record_hash }, 2, normalized);
-      }
-      // Frozen pre-v2 excerpts retain their historical normalization.
-      for (const record of result.records) {
-        if (agent === 'pi' && record.value?.type === 'session') continue;
-        const normalized = normalizeSource(header, record, 1);
-        if (normalized) saveSessionRecord(db, header, record, 1, normalized);
-      }
       let added = 0;
       const exists = db.prepare('SELECT 1 FROM agent_entries WHERE session_id = ? AND entry_id = ?');
       for (const entry of entries) {

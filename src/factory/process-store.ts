@@ -2,8 +2,8 @@ import type { WorkflowLocation } from './types';
 import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
 import { digest } from '../sync/normalize';
-import { readWorkflowRecords, assertWorkflowSources } from '../evidence-adapter';
-import { SUMMARY_PROCESS_PROMPT, PROCESS_PROMPT, preparedProcess, contractMatchInput, type ProcessExtraction, type ContractMatchInput, type WorkflowCandidate } from '../workflow-learning';
+import { readWorkflowOriginals } from '../evidence-adapter';
+import { SUMMARY_PROCESS_PROMPT, PROCESS_PROMPT, preparedProcess, validateProcess, validateProcessEvidence, contractMatchInput, type ProcessExtraction, type ContractMatchInput, type WorkflowCandidate } from '../workflow-learning';
 
 export const LEARNING_FORMAT = 'summary-workflows-v1';
 export const COMPARISON_FORMAT = 'workflow-comparison-v1';
@@ -44,36 +44,20 @@ export function saveSummaryProcess(leaf: string, model: string, run: { table: 's
   }
   return !!output;
 }
-export function assertProcessParents(parents: ProcessParent[], signal: AbortSignal): void {
-  const db = getDb(), locations = new Map<string, WorkflowLocation>(), pointers: Record<string, unknown>[] = [];
-  const source = db.prepare("SELECT source_dependencies_json FROM process_extractions WHERE id=? AND status='completed'");
-  for (const id of new Set(parents.map(parent => parent.extraction))) {
-    signal.throwIfAborted();
-    const row = source.get(id) as { source_dependencies_json: string } | undefined;
-    if (!row) throw Error('Workflow parent unavailable');
-    const { input, location } = JSON.parse(row.source_dependencies_json);
-    pointers.push(...input.evidence, ...input.background);
-    if (location) {
-      if (!locations.has(input.workspace)) locations.set(input.workspace, workflowLocation(input.workspace));
-      if (JSON.stringify(locations.get(input.workspace)) !== JSON.stringify(location)) throw Error('Workflow repository or folder changed');
-    }
-  }
-  assertWorkflowSources(pointers, signal);
-}
 export async function readProcessParents(parents: ProcessParent[], signal: AbortSignal) {
   signal.throwIfAborted();
   const inputs = parents.map(parent => {
     const row = getDb().prepare("SELECT * FROM process_extractions WHERE id=? AND kind='summary' AND status='completed'").get(parent.extraction) as LearningRow | undefined;
     if (!row) throw Error('Workflow parent unavailable');
     const deps = JSON.parse(row.source_dependencies_json);
-    if (deps.format !== LEARNING_FORMAT) throw Error('Unknown workflow source format');
+    if (deps.format !== LEARNING_FORMAT || digest(row.source_dependencies_json) !== row.input_key) throw Error('Invalid workflow source receipt');
     return { parent, row, deps, pointers: [...deps.input.evidence, ...deps.input.background] as Record<string, unknown>[] };
   });
-  const originals = await readWorkflowRecords(inputs.flatMap(input => input.pointers), signal);
+  const originals = await readWorkflowOriginals(inputs.flatMap(input => input.pointers), signal);
   let offset = 0;
   return inputs.map(({ parent, row, deps, pointers }) => {
     const records = originals.slice(offset, offset += pointers.length);
-    const output = JSON.parse(row.output_json) as ProcessExtraction;
+    const output = validateProcessEvidence(validateProcess(row.output_json, records.map(r => r.ref)), records);
     const location = workflowLocation(deps.input.workspace);
     for (const cwd of new Set(pointers.map(pointer => pointer.cwd as string))) {
       if (workflowLocation(cwd).key !== location.key) throw Error('Process sources span different locations');

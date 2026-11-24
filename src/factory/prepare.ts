@@ -2,7 +2,7 @@ import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
 import { preparationOperation } from '../sync/preparation-errors';
 import { digest } from '../sync/normalize';
-import { readWorkflowRecords, assertWorkflowSources } from '../evidence-adapter';
+import { readWorkflowOriginals } from '../evidence-adapter';
 import { PROCESS_PROMPT } from '../workflow-learning';
 import { LEARNING_FORMAT, saveSummaryProcess } from './learning-store';
 
@@ -17,21 +17,20 @@ export async function prepareCachedProcesses(keys: readonly string[], run: numbe
     const input = JSON.parse(row.input_json), pointers = [...input.evidence, ...input.background];
     const location = workflowLocation(input.workspace);
     if (location.kind === 'unavailable') throw Error('Working folder is unavailable');
+    const records = await readWorkflowOriginals(pointers, signal);
     if (db.prepare("SELECT 1 FROM process_extractions WHERE kind='summary' AND status='completed' AND json_extract(source_dependencies_json,'$.format')=? AND json_extract(source_dependencies_json,'$.leaf')=?").get(LEARNING_FORMAT, key)) return;
-    const records = await readWorkflowRecords(pointers, signal);
     const unique = [...new Map(records.map(record => [record.ref, record])).values()];
     const references = unique.map(record => record.ref), roles = unique.map(record => record.role);
     let repair: { validation_error: string; previous_output: string } | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
-      assertWorkflowSources(pointers, signal);
-      if (workflowLocation(input.workspace).key !== location.key) throw Error('Process location changed before inference');
+      if (JSON.stringify(await readWorkflowOriginals(pointers, signal)) !== JSON.stringify(records) || workflowLocation(input.workspace).key !== location.key) throw Error('Process originals or location changed before inference');
       const raw = await ask({ task: 'prepare_workflow_process', stage: 'workflow_process',
         records: unique.map((record, i) => ({ ...record, ref: `S${i + 1}` })), ...(repair ? { repair } : {}) }, PROCESS_PROMPT);
       signal.throwIfAborted();
       let sourceError: string | undefined;
       try {
-        assertWorkflowSources(pointers, signal);
-      } catch (error) { signal.throwIfAborted(); sourceError = error instanceof Error ? error.message : 'Source access changed'; }
+        if (JSON.stringify(await readWorkflowOriginals(pointers, signal)) !== JSON.stringify(records)) throw Error('Process originals changed during inference');
+      } catch (error) { signal.throwIfAborted(); sourceError = error instanceof Error ? error.message : 'Original verification failed'; }
       let value: unknown;
       try { value = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')); }
       catch { value = undefined; }

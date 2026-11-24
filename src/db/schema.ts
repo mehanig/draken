@@ -35,12 +35,6 @@ export function initSchema(database: Database.Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS session_records (
-      key TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      record_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS session_records_session ON session_records(session_id);
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id TEXT PRIMARY KEY,
       path TEXT NOT NULL UNIQUE,
@@ -51,6 +45,8 @@ export function initSchema(database: Database.Database): void {
       modified_at TEXT NOT NULL,
       file_identity TEXT NOT NULL DEFAULT '',
       byte_offset INTEGER NOT NULL DEFAULT 0,
+      boundary_hash TEXT NOT NULL DEFAULT '',
+      prefix_hash TEXT NOT NULL DEFAULT '',
       leaf_id TEXT
     );
     ${pointerOnly ? '' : 'CREATE TABLE IF NOT EXISTS retained_text (key TEXT PRIMARY KEY, text TEXT NOT NULL);'}

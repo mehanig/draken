@@ -2,12 +2,13 @@ import type Database from 'better-sqlite3';
 import { RecordReader, type NormalizationCache } from './jsonl';
 import { getSourceRoots, type RootInput } from '../sources/registry';
 
-/** Current branch projection from ingested session records. */
+/** Current branch projection from verified originals; historical copied-text
+ * formats are handled exclusively by migration readers. */
 export class EntryReader {
   private reader: RecordReader;
   private row;
   constructor(db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache) {
-    this.reader = new RecordReader(root, cache, db);
+    this.reader = new RecordReader(root, cache);
     this.row = db.prepare(`SELECT e.*,s.path,s.file_identity,s.agent,s.external_id FROM agent_entries e JOIN agent_sessions s ON s.id=e.session_id WHERE e.id=?`);
   }
   private normalized(row: any) {

@@ -12,7 +12,7 @@ Discovery checks the first and last messages before importing the transcript. Un
 
 Widening requires confirmation before saving or scheduling work, even when discovery is incomplete. The preview counts additional discovered, selected sessions; it is not a cost estimate. Narrowing immediately changes eligibility. Foreground work or a call must finish or be explicitly stopped first; changing the window drains background work before applying it. Automatic preparation then checks the new scope immediately if enabled, without enabling saved opt-outs or clearing paid failure pauses. Manual exclusions remain in effect.
 
-Older originals, cached summaries, vectors, saved notes, conversations and review state are retained. New preparation and ordinary archive search omit inactive sessions; explicitly opened saved citations reuse their ingested content with current source permissions. Widening can reuse compatible cached work. An unfinished snapshot containing inactive sessions requires widening the window before preparation; its membership is never silently shortened.
+Older originals, cached summaries, vectors, saved notes, conversations and review state are retained. New preparation and ordinary archive search omit inactive sessions; explicitly opened saved citations still verify their originals and source permissions. Widening can reuse compatible cached work. An unfinished snapshot containing inactive sessions requires widening the window before preparation; its membership is never silently shortened.
 
 ## Settings and discovery
 
@@ -63,20 +63,19 @@ The canonical schema uses:
 
 - `agent_sources`: persistent per-agent enablement, separate from automatic indexing.
 - `agent_sessions`: stable Draken ID, agent kind, native `external_id`, source path, workspace, selection, missing status, file identity, offsets and current branch.
-- `agent_entries`: stable numeric IDs, session/entry identities, chronological/branch metadata, versioned parser and normalization recipes, source pointers and projected lengths.
-- `session_records`: normalized content captured during ingestion, including the older normalization used by saved snapshots. Later reads use this content without reopening or rehashing session files.
+- `agent_entries`: stable numeric IDs, session/entry identities, chronological/branch metadata, versioned parser and normalization recipes, verified raw-record pointers and projected lengths. No copied original transcript bodies.
 
 `source_schema=agents-v1` accompanies the existing source-only storage marker. Startup performs the old-table rename and any necessary pointer conversion **inside one SQLite transaction**. `pi_sessions` and `pi_entries` become `agent_sessions` and `agent_entries`; there are no duplicate tables or writable compatibility aliases. Existing pi IDs, numeric sequences, snapshots, discussions, notes, review coverage and summary caches remain intact. A failure rolls back, not partially converts or guesses.
 
 New non-pi session IDs are namespaced (`codex:<id>`, `claude:<id>`, `claude:<id>:<subagent>`). Agent-domain event hashes prevent equal native IDs in different agents from sharing review coverage. Legacy pi IDs remain unchanged for compatibility.
 
-Existing pi frozen pointers retain their v1 recipe. Foreign-source v2 pointers additionally pin agent, native identity and parser version. Reads use ingested content. Older pointer-only records still need their original files until the next scan imports them; first-time reads check those originals. Current mutable branch state cannot redirect an older snapshot.
+Existing pi frozen pointers retain their v1 recipe. Foreign-source v2 pointers additionally pin agent, native identity and parser version. Reads reconstruct from the authoritative original file, verify its original hash, role, timestamp and projected text, and reject changed/missing originals. Current mutable branch state cannot redirect an older snapshot.
 
-The separate contentless FTS/vector schema and pinned embedding fingerprint are unchanged. Migration does not re-embed existing pi history. Adding genuinely new admitted Codex/Claude text creates normal delta work; unchanged compatible vectors remain reusable. Automatic indexing includes small changes on its regular checks; it does not wait for a 64-record backlog.
+The separate contentless FTS/vector schema and pinned embedding fingerprint are unchanged. Migration does not re-embed existing pi history. Adding genuinely new admitted Codex/Claude text creates normal delta work; unchanged compatible vectors remain reusable. The background threshold remains **64 changed source records, with no timed small-batch flush**.
 
 ## Durability and qualification
 
-Back up **all enabled agents' original logs and Draken's private state**. Draken's database now contains normalized session content and must be treated as private history. Agent retention commands do not erase content already ingested into Draken. Older pointer-only records still need their originals for the one-time import. Current source permissions continue to control new evidence use.
+Back up **all enabled agents' original logs and Draken's private state**. Agent retention/purge commands can remove the originals that frozen evidence still needs; Draken does not override those policies or retain a hidden text copy. Conversations and explicit notes remain available if originals disappear, but affected evidence, generation, calls and review fail visibly.
 
 Tests use synthetic JSONL, synthetic pi responses and isolated databases. Migration qualification compares a private copy of current pi data and its references/vectors; it does not add foreign transcripts to production or make provider calls. No real local Codex/Claude history was available on the qualification host, so unsupported vendor layouts must be surfaced and investigated rather than claimed compatible.
 

@@ -170,16 +170,12 @@ test('initial E and original planning C retain selected views through edit, cata
   assert.deepEqual(store.getSync(syncId).context, before.context); assert.equal(finalCalls, 1);
 });
 for (const initial of [false, true]) for (const revocation of ['session', 'agent', 'missing', 'changed'])
-  test(`live preserves ingested content but applies permission changes: ${revocation} (initial C=${initial})`, async () => {
+  test(`live denies ${revocation} even with readable frozen attribution (initial C=${initial})`, async () => {
     await prepared(initial);
     if (revocation === 'session') store.setIncluded('scope', false);
     if (revocation === 'agent') getDb().prepare("UPDATE agent_sources SET enabled=0 WHERE id='pi'").run();
     if (revocation === 'missing') fs.unlinkSync(file);
     if (revocation === 'changed') fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('deployment NOT verified', 'deployment WAS verified'));
-    if (revocation === 'session' || revocation === 'agent') {
-      await assert.rejects(live.createLiveCall(syncId, signal()), /unavailable|changed|excluded/);
-      assert.deepEqual(requests, []); assert.equal(activity.callActive, false);
-    } else {
-      const call = await live.createLiveCall(syncId, signal()); assert.ok(call.id);
-    }
+    await assert.rejects(live.createLiveCall(syncId, signal()), /unavailable|changed|excluded/);
+    assert.deepEqual(requests, []); assert.equal(activity.callActive, false);
   });

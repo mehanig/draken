@@ -11,13 +11,29 @@ import { modelFilesPresent } from './model-assets';
 const KEY = 'call-history-ready-v1';
 const VERSION = 2;
 export interface HistoryReadiness { ready: boolean; before: string | null }
+interface RequiredFile {
+  id: string; path: string; file_identity: string; byte_offset: number; scanned_bytes: number; modified_at: string; end: number;
+}
 interface CachedStamp {
   revision: string; roots: string; before?: string; from: number; until: number; stamp: string;
+  files: RequiredFile[]; metadata: string;
 }
 const cached = new WeakMap<Database.Database, { current?: CachedStamp; captured?: CachedStamp }>();
 
-/** A scheduling/readiness hint over ingested records, not a session-file check.
- * Identity covers admitted records, not mutable
+function fileMetadata(files: RequiredFile[]): string {
+  const metadata = createHash('sha256');
+  for (const row of files) {
+    const stat = fs.lstatSync(row.path);
+    if (!stat.isFile() || `${stat.dev}:${stat.ino}` !== row.file_identity || stat.size < row.scanned_bytes) throw new Error('Original session file is unavailable.');
+    if (stat.size === row.scanned_bytes && stat.mtime.toISOString() !== row.modified_at) throw new Error('Original session file is unavailable or changed. Prepare history again.');
+    if (row.scanned_bytes <= 0 || row.scanned_bytes < row.byte_offset || row.byte_offset < row.end) throw new Error('Finish importing history before calling.');
+    metadata.update(JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]));
+  }
+  return metadata.digest('hex');
+}
+
+/** A scheduling/readiness hint, not evidence. Original bytes are still verified
+ * when preparing and retrieving. Identity covers admitted records, not mutable
  * import cursors: an append followed by a scan must preserve a prepared prefix.
  * Frozen aliases need their own links even when sourceStamps coalesces them. */
 export function historyStamp(source: Database.Database, before?: string, roots?: RootInput, capturedOnly = false): string {
@@ -31,15 +47,17 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
   delete slots[slot];
   if (prior?.revision === revision && prior.before === before && prior.roots === rootKey
     && now < prior.until && (before !== undefined || now >= prior.from)) {
-    slots[slot] = prior;
-    return prior.stamp;
+    if (fileMetadata(prior.files) === prior.metadata) {
+      slots[slot] = prior;
+      return prior.stamp;
+    }
   }
   let until = Infinity;
   const since = (source.prepare("SELECT value FROM sync_settings WHERE key='history_since'").get() as { value: string } | undefined)?.value || '';
-  const sessions = new Map((source.prepare(`SELECT s.id,s.path,s.file_identity,s.byte_offset,s.scanned_bytes,s.last_message_at
+  const sessions = new Map((source.prepare(`SELECT s.id,s.path,s.file_identity,s.byte_offset,s.scanned_bytes,s.modified_at,s.last_message_at
     FROM agent_sessions s JOIN agent_sources a ON a.id=s.agent
     WHERE s.included=1 AND s.missing=0 AND a.enabled=1 AND ${recentSession('s')} ORDER BY s.id`).all() as {
-      id: string; path: string; file_identity: string; byte_offset: number; scanned_bytes: number; last_message_at: string | null;
+      id: string; path: string; file_identity: string; byte_offset: number; scanned_bytes: number; modified_at: string; last_message_at: string | null;
     }[]).map(row => [row.id, row]));
   const days = activityDays(source);
   if (days !== null) for (const row of sessions.values()) if (row.last_message_at) until = Math.min(until, Date.parse(row.last_message_at) + days * 86400000);
@@ -83,11 +101,13 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
     for (const item of JSON.parse(row.context_json)) frozen(row.id, item);
   }
   const files = createHash('sha256').update(rootKey).update(aliases.digest('hex'));
+  const descriptors: RequiredFile[] = [];
   for (const [id, row] of sessions) {
     const end = required.get(id); if (end === undefined) continue;
-    if (row.scanned_bytes <= 0 || row.scanned_bytes < row.byte_offset || row.byte_offset < end) throw new Error('Finish importing history before calling.');
+    descriptors.push({ ...row, end });
     files.update(JSON.stringify([id, row.path, row.file_identity]));
   }
+  const metadata = fileMetadata(descriptors);
   const fileStamp = files.digest('hex');
   const stamp = createHash('sha256').update(fileStamp).update(JSON.stringify([...sourceStamps(source, cutoff)])).digest('hex');
   if (before === undefined) {
@@ -97,7 +117,7 @@ export function historyStamp(source: Database.Database, before?: string, roots?:
       UNION ALL SELECT completed_at FROM syncs WHERE completed_at>?)`).get(cutoff, cutoff, cutoff) as { at: string | null };
     until = Math.min(until, next.at ? Date.parse(next.at) : Infinity);
   }
-  slots[slot] = { revision, roots: rootKey, before, from: now, until, stamp };
+  slots[slot] = { revision, roots: rootKey, before, from: now, until, stamp, files: descriptors, metadata };
   return stamp;
 }
 

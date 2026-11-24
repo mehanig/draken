@@ -85,7 +85,7 @@ Provide the authorized repository identity, remote, base/ref and sufficient Git 
 
 ## 5. Existing responsibilities that remain
 
-Session history is append-only. Ingest and verify new records once, then reuse their stored content for matching, consolidation, enrichment, retrieval and display. Do not repeatedly reopen session files, check original bytes or reconstruct source proof for already processed records. Keep current source consent and revocation checks separate, using database metadata. Preserve accounting including failed paid attempts and unknown usage, explicit cancellation, run identity, retained patches/results, and ownership checks when cleanup is uncertain. Keep the host checkout unchanged and tools inside the container. Retain the current explicit runtime/resource limits rather than quietly changing them during unrelated work.
+Preserve source consent and revocation checks and verification of original evidence when preparing new evidence-derived work—not when displaying already saved workflows. Preserve accounting including failed paid attempts and unknown usage, explicit cancellation, run identity, retained patches/results, and ownership checks when cleanup is uncertain. Keep the host checkout unchanged and tools inside the container. Retain the current explicit runtime/resource limits rather than quietly changing them during unrelated work.
 
 Keep discovery and enrichment modules independent of host services. Integrate through their public contracts and retain standalone tests. Learning from execution must distinguish recorded outcomes from the agent's claims; do not retroactively turn incomplete historical evidence into proof of success.
 

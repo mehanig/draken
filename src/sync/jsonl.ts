@@ -1,6 +1,4 @@
 import fs from 'fs';
-import type Database from 'better-sqlite3';
-import { sessionRecordKey } from '../db/session-records';
 import path from 'path';
 import { digest, type NormalizedEntry, type NormalizationVersion } from './normalize';
 import { identifySource, normalizeSource } from '../sources/adapters';
@@ -72,25 +70,15 @@ export class NormalizationCache {
   }
 }
 
-/** Read ingested content from storage; original files are only for records not yet imported. */
+/** One read batch; bounded descriptors, no writes/discovery or stale-text fallback. */
 export class RecordReader {
   private files = new Map<string, number>();
   private entries = new Map<string, NormalizedEntry>();
   private roots;
-  private stored?: Database.Statement;
-  constructor(root: RootInput = getSourceRoots(), private cache?: NormalizationCache, db?: Database.Database) {
-    this.roots = sourceRoots(root);
-    if (db?.prepare("SELECT 1 FROM sqlite_schema WHERE name='session_records'").get()) this.stored = db.prepare('SELECT record_json FROM session_records WHERE key=?');
-  }
+  constructor(root: RootInput = getSourceRoots(), private cache?: NormalizationCache) { this.roots = sourceRoots(root); }
   read(session: string, file: string, pointer: RecordPointer, entryId: string, eventKey: string, version: NormalizationVersion = 2, identity?: string,
     source: SourceIdentity = { agent: 'pi', external_id: session, parser_version: 1 }): NormalizedEntry {
     if (!Number.isSafeInteger(pointer.record_offset) || pointer.record_offset < 0 || !Number.isSafeInteger(pointer.record_bytes) || pointer.record_bytes < 1 || pointer.record_bytes > RECORD_BYTES || !/^[a-f0-9]{64}$/.test(pointer.record_hash)) throw new Error('Invalid source pointer');
-    const stored = this.stored?.get(sessionRecordKey(source, pointer, version)) as { record_json: string } | undefined;
-    if (stored) {
-      const entry: NormalizedEntry = JSON.parse(stored.record_json);
-      if (entry.entry_id !== entryId || entry.event_key !== eventKey) throw new Error('Stored source identity does not match the requested record');
-      return entry;
-    }
     const fileKey = JSON.stringify([session, file, identity, source]), key = JSON.stringify([fileKey, pointer.record_offset, pointer.record_bytes, pointer.record_hash, entryId, eventKey, version]);
     const prior = this.entries.get(key); if (prior) return prior;
     let fd = this.files.get(fileKey);

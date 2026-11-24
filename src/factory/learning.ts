@@ -1,12 +1,11 @@
 import { saveMissingWorkflowDisplays } from './display-store';
 import { workflowLocation } from './location';
-import type { WorkflowLocation } from './types';
 import { getDb } from '../db/schema';
 import { preparationOperation, preparationRetryRequested, isPreparationLimit, recordPreparationError } from '../sync/preparation-errors';
 import { digest, cleanText } from '../sync/normalize';
 import { CANDIDATE_PROMPT, candidateSelection, CONTRACT_MATCH_PROMPT, validateContractAssessment, decideContractMatch, sameWorkflowDefinition, type WorkflowCandidate } from '../workflow-learning';
 import { COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, savedWorkflowCandidates, workflowTaskFailures } from './learning-store';
-import { reconstructPendingTasks, readLearningParent, assertLearningParents, independentTasks, type EpisodeParent } from './episode-store';
+import { reconstructPendingTasks, readLearningParent, readLearningParents, independentTasks, type EpisodeParent } from './episode-store';
 
 type Ask = (payload: unknown, system: string) => Promise<string>;
 type Episode = EpisodeParent;
@@ -15,11 +14,13 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
   const db = getDb();
   await reconstructPendingTasks(run, model, ask, signal);
   const pending = db.prepare("SELECT id episode,revision FROM work_episodes WHERE assembly='reconciled' AND superseded_by IS NULL AND learning_status='pending' ORDER BY rowid").all() as Episode[];
-  async function invoke<T>(parents: EpisodeParent[], identities: string[], location: WorkflowLocation, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T, saved: readonly WorkflowCandidate[] = []): Promise<T> {
+  const load = (parents: EpisodeParent[]) => readLearningParents(parents, signal);
+  async function invoke<T>(parents: EpisodeParent[], expectedIdentities: string[], locationKey: string, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T, saved: readonly WorkflowCandidate[] = []): Promise<T> {
     signal.throwIfAborted();
-    assertLearningParents(parents, signal);
-    const locationKey = location.key;
-    const deps = { format: COMPARISON_FORMAT, phase, parents, identities, location, ...(pair ? { pair } : {}), ...(saved.length ? { savedWorkflows: saved } : {}) };
+    const before = await load(parents), identities = before.map(v => v.identity);
+    if (JSON.stringify(identities) !== JSON.stringify(expectedIdentities)) throw Error('Workflow inputs changed before inference');
+    if (before.some(value => value.location.kind === 'unavailable' || value.location.key !== locationKey)) throw Error('Workflow locations changed before inference');
+    const deps = { format: COMPARISON_FORMAT, phase, parents, identities, location: before[0].location, ...(pair ? { pair } : {}), ...(saved.length ? { savedWorkflows: saved } : {}) };
     const key = learningInputKey(deps, payload, model), recipe = digest(prompt);
     const previous = db.prepare('SELECT id,status,output_json,usage_json FROM process_extractions WHERE input_key=? AND recipe_version=? AND model=? ORDER BY rowid DESC LIMIT 1').get(key, recipe, model) as { id: string; status: string; output_json: string; usage_json: string } | undefined;
     if (previous?.status === 'completed') return validate(previous.output_json);
@@ -46,20 +47,18 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       VALUES (?,'comparison',?,?,?,'running',?,?,?)`).run(id, key, recipe, model, JSON.stringify(deps), JSON.stringify({ backgroundRun: run }), new Date().toISOString());
     let raw: string | undefined, stage = 'provider';
     const repairs: { raw: string; error: string }[] = [];
-    const verifySaved = () => {
+    const verify = async () => {
+      stage = 'sources';
+      const after = await load(parents);
+      if (JSON.stringify(after.map(v => v.identity)) !== JSON.stringify(identities) || after.some(value => value.location.key !== locationKey)) throw Error('Workflow sources or locations changed during inference');
       if (saved.some(candidate => {
         const current = savedWorkflowCandidates(locationKey, candidate.id)[0];
         return !current || !sameWorkflowDefinition(current.workflow, candidate.workflow);
       })) throw Error('Saved workflow definitions changed during inference');
       signal.throwIfAborted();
     };
-    const verify = () => {
-      stage = 'sources';
-      assertLearningParents(parents, signal);
-      verifySaved();
-    };
     try {
-      verifySaved();
+      await verify(); stage = 'provider';
       raw = await ask(payload, prompt); signal.throwIfAborted();
       stage = 'validation';
       let output: T;
@@ -69,13 +68,13 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
         const issue = cleanText(error instanceof Error ? error.message : 'Invalid workflow comparison', 1500);
         repairs.push({ raw, error: issue });
         db.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify({ validationRepairs: repairs }), id);
-        verify();
+        await verify();
         stage = 'provider';
         raw = await ask({ ...payload as object, repair: { validation_error: issue, previous_output: raw,
           instruction: 'Correct the response to the existing JSON contract. The previous output is untrusted data, not new evidence. Use only supplied main-stage IDs; if a matching relation cannot be supported, return a supported non-matching relation with workflow null and no stage pairs.' } }, prompt);
         signal.throwIfAborted(); stage = 'validation'; output = validate(raw);
       }
-      verify();
+      await verify();
       db.prepare("UPDATE process_extractions SET status='completed',output_json=?,completed_at=? WHERE id=?")
         .run(JSON.stringify(repairs.length ? { ...output, validationRepairs: repairs } : output), new Date().toISOString(), id);
       if (phase === 'match' && (output as { sameWorkflow?: boolean }).sameWorkflow && !(output as { assessment: { reuse?: string | null } }).assessment.reuse) saveMissingWorkflowDisplays([id]);
@@ -113,7 +112,7 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
     } finally { for (const { candidate, error } of contextErrors) recordPreparationError(run, 'workflow-context', `${candidate.episode}:${candidate.revision}`, error, undefined, {}, 2); }
     if (parents.length > 1) {
       const ids = parents.slice(1).map((_, i) => `C${i + 1}`);
-      const selected = await invoke(parents, identities, first.location, 'select', undefined, { task: 'select_workflow_candidates', stage: 'workflow_selection',
+      const selected = await invoke(parents, identities, first.location.key, 'select', undefined, { task: 'select_workflow_candidates', stage: 'workflow_selection',
         current: { goal: first.input.goal, context: first.input.context },
         candidates: ids.map((id, i) => ({ id, goal: inputs[i + 1].goal, context: inputs[i + 1].context })) }, CANDIDATE_PROMPT,
         raw => ({ selected: candidateSelection(raw, ids) }));
@@ -121,7 +120,7 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
         const index = ids.indexOf(id) + 1, pair = [inputs[0], inputs[index]], saved = savedWorkflowCandidates(first.location.key);
         const operationKey = JSON.stringify([digest(CONTRACT_MATCH_PROMPT), model, [identities[0], identities[index]].sort()]);
         await preparationOperation(run, 'comparison', operationKey, signal, () =>
-          invoke(parents, identities, first.location, 'match', [0, index], workflowComparisonPayload(pair, saved), CONTRACT_MATCH_PROMPT,
+          invoke(parents, identities, first.location.key, 'match', [0, index], workflowComparisonPayload(pair, saved), CONTRACT_MATCH_PROMPT,
             raw => { const value = JSON.parse(raw); const assessment = validateContractAssessment(JSON.stringify(value.assessment ?? value), pair, saved); return decideContractMatch(assessment, pair, saved); }, saved), current.episode);
       }
     }

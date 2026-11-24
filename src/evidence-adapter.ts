@@ -19,41 +19,35 @@ export const evidenceDependencies: EvidenceDependencies = {
   cleanText,
 };
 
-/** Check current permissions for frozen inputs without reading session content. */
-export function assertWorkflowSources(pointers: Record<string, unknown>[], signal: AbortSignal): void {
-  signal.throwIfAborted();
-  const db = getDb(), scope = new EvidenceScope(db, []);
+/** Revalidate every frozen summary input, including uncited context, without a transcript archive. */
+export async function readWorkflowOriginals(pointers: Record<string, unknown>[], signal: AbortSignal): Promise<ProcedureRecord[]> {
+  const db = getDb(), reader = new EvidenceReader(db), scope = new EvidenceScope(db, []);
   const since = (db.prepare("SELECT value FROM sync_settings WHERE key='history_since'").get() as { value: string } | undefined)?.value || '';
-  for (const pointer of pointers) {
-    scope.assert(pointer);
-    if (typeof pointer.timestamp !== 'string' || pointer.timestamp < since) throw Error('Workflow source is outside the history baseline');
-  }
-  assertRecentSessions(db, [...new Set(pointers.map(p => p.session_id as string))]);
-}
-
-/** Reuse ingested records; legacy pointers use originals until ingestion imports them. */
-export async function readWorkflowRecords(pointers: Record<string, unknown>[], signal: AbortSignal): Promise<ProcedureRecord[]> {
-  assertWorkflowSources(pointers, signal);
-  const db = getDb(), reader = new EvidenceReader(db);
   const records: ProcedureRecord[] = [];
   let count = 0;
   try {
     for (const pointer of pointers) {
       if (++count % 32 === 0) await new Promise<void>(resolve => setImmediate(resolve));
-      signal.throwIfAborted();
+      signal.throwIfAborted(); scope.assert(pointer);
       const item = reader.read(pointer);
+      assertRecentSessions(db, [item.session_id]);
+      if (item.timestamp < since) throw Error('Workflow source is outside the history baseline');
       const ref = sourceKey(item);
       const sequence = (db.prepare('SELECT id FROM agent_entries WHERE session_id=? AND entry_id=?').get(item.session_id, item.entry_id) as { id: number }).id;
       const packet = await prepareProcedureEvidence({ sessionId: item.session_id, before: item.timestamp, refs: [ref], signal }, {
         cleanText,
         read: async () => {
-          signal.throwIfAborted();
+          signal.throwIfAborted(); scope.assert(pointer);
           return { ref, sessionId: item.session_id, sequence, at: item.timestamp, role: item.role, text: item.text };
         },
       });
       records.push(...packet.records);
     }
-    assertWorkflowSources(pointers, signal);
+    signal.throwIfAborted();
+    const currentSince = (db.prepare("SELECT value FROM sync_settings WHERE key='history_since'").get() as { value: string } | undefined)?.value || '';
+    assertRecentSessions(db, [...new Set(records.map(record => record.sessionId))]);
+    for (const pointer of pointers) scope.assert(pointer);
+    if (records.some(record => record.at < currentSince)) throw Error('Workflow history baseline changed');
     return records;
   } finally { reader.close(); }
 }

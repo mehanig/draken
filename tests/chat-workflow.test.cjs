@@ -81,18 +81,7 @@ test('revoking an uncited original blocks new evidence use but leaves the saved 
  db.prepare("UPDATE agent_sessions SET included=0 WHERE id='parser-finish'").run();
  assert.equal((await readFactory(undefined,signal())).proposals.length,1);await assert.rejects(readDiscovery(id,signal()));
 });
-test('legacy requested-workflow permission scopes migrate once without changing saved receipts or paying again',async()=>{
- await chat();const row=db.prepare('SELECT * FROM workflow_discoveries').get(),count=calls().length;assert.ok(JSON.parse(row.source_refs_json).length);
- db.prepare('UPDATE workflow_discoveries SET source_refs_json=NULL,display_json=NULL WHERE id=?').run(row.id);
- const restored=await require('../dist/factory/discovery').readProposal(row.id,signal());
- require('../dist/factory/display-store').saveWorkflowDisplay(restored);
- const saved=await readDiscovery(row.id,signal());assert.equal(db.prepare('SELECT source_refs_json FROM workflow_discoveries').get().source_refs_json,row.source_refs_json);
- const receipt=db.prepare('SELECT source_json,output_json,request_json FROM workflow_discoveries').get();
- const changes=db.prepare('SELECT total_changes() n').get().n;
- assert.deepEqual(await readDiscovery(row.id,signal()),saved);assert.equal(db.prepare('SELECT total_changes() n').get().n,changes);
- assert.deepEqual(db.prepare('SELECT source_json,output_json,request_json FROM workflow_discoveries').get(),receipt);assert.equal(calls().length,count);
-});
-test('unimported legacy task records still require their original content',async()=>{
+test('changed original bytes invalidate the task receipt without inference',async()=>{
  await chat();const beforeCalls=calls().length;
  const files=fs.readdirSync(process.env.DRAKEN_PI_SESSIONS_DIR);for(const file of files){const p=path.join(process.env.DRAKEN_PI_SESSIONS_DIR,file);if(fs.statSync(p).isFile())fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace('Uncited task context','Changed task context'));}
  const page=await readFactory(undefined,signal());assert.equal(page.proposals.length,1);await assert.rejects(readDiscovery(page.proposals[0].id,signal()));assert.equal(calls().length,beforeCalls);

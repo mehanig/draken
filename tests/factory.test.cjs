@@ -18,14 +18,14 @@ beforeEach(()=>{
  Object.assign(process.env,{DRAKEN_DATA_DIR:dir,DRAKEN_PI_SESSIONS_DIR:path.join(dir,'sessions'),DRAKEN_NO_AUTH:'true',DRAKEN_HOST:'127.0.0.1',DRAKEN_PI_BIN:'/no-provider',DRAKEN_USERNAME:'test',DRAKEN_PASSWORD:'test-password',DRAKEN_JWT_SECRET:'factory-test-secret'});db=getDb();fs.mkdirSync(path.join(dir,'work'));
 });
 afterEach(async()=>{if(server){await new Promise(r=>server.close(r));server=undefined;}closeDb();for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(dir,{recursive:true,force:true});});
-async function seed(){
+async function seed(locations=[]){
  const c=examples()[0],parents=[];
  for(const [i,side] of [c.left,c.right].entries()){
   const session='episode-'+i,records=[...side.records,{ref:'X',role:'toolResult',text:'Uncited dependency'}];
-  const pointers=records.map(r=>frozenEvidence(db,path.join(dir,'sessions'),r.text,{ref:r.ref,session,cwd:path.join(dir,'work'),role:r.role,timestamp:'2020-01-02T00:00:00.000Z'}));
+  const pointers=records.map(r=>frozenEvidence(db,path.join(dir,'sessions'),r.text,{ref:r.ref,session,cwd:locations[i]||path.join(dir,'work'),role:r.role,timestamp:'2020-01-02T00:00:00.000Z'}));
   const refs={U:'S1',I:'S2',O:'S3'};
   function remap(v,key){if(Array.isArray(v))return v.map(x=>typeof x==='string'&&['refs','triggerRefs','outcomeRefs'].includes(key)?refs[x]:remap(x,key));if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,remap(x,k)]));return v;}
-  saveSummaryProcess('parent-'+i,'fake/model',{table:'sync_runs',id:1},JSON.stringify({session,workspace:path.join(dir,'work'),evidence:pointers,background:[]}),{summary:'Saved process',fragments:[remap(side.fragment,'')],limitations:[]},pointers.map(p=>p.source_key),records.map(r=>r.role));
+  saveSummaryProcess('parent-'+i,'fake/model',{table:'sync_runs',id:1},JSON.stringify({session,workspace:locations[i]||path.join(dir,'work'),evidence:pointers,background:[]}),{summary:'Saved process',fragments:[remap(side.fragment,'')],limitations:[]},pointers.map(p=>p.source_key),records.map(r=>r.role));
   const row=db.prepare("SELECT id FROM process_extractions WHERE json_extract(source_dependencies_json,'$.leaf')=?").get('parent-'+i);
   parents.push({extraction:row.id,fragment:'example'});
  }
@@ -37,7 +37,7 @@ async function seed(){
  db.prepare("INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,output_json,created_at) VALUES (?,'comparison',?,?,?,'completed',?,?,?)")
   .run(id,learningInputKey(deps,payload,model),recipe,model,JSON.stringify(deps),JSON.stringify(decision),new Date().toISOString());
  saveWorkflowDisplay({id,model,createdAt:new Date().toISOString(),location:sides[0].location,decision,evidence:sides.map(s=>s.input)});
- return {id};
+ return {id,parents};
 }
 test('Factory reads stored proposals without syncs, provider calls or new work',async()=>{
  await seed();const before=db.prepare('SELECT COUNT(*) n FROM process_extractions').get().n;
@@ -52,7 +52,7 @@ test('display migration uses stored results and repeated page reads neither read
  const {id}=await seed();db.prepare('UPDATE workflow_discoveries SET display_json=NULL WHERE id=?').run(id);fs.rmSync(path.join(dir,'sessions'),{recursive:true});saveMissingWorkflowDisplays();
  const original=fs.readFileSync;let reads=0;fs.readFileSync=(...args)=>{reads++;throw Error('Factory must read the database only')};
  try{const changes=db.prepare('SELECT total_changes() n').get().n;for(let i=0;i<3;i++)assert.equal((await readFactory(undefined,signal())).proposals.length,1);assert.equal(reads,0);assert.equal(db.prepare('SELECT total_changes() n').get().n,changes);}finally{fs.readFileSync=original;}
- assert.equal((await readDiscovery(id,signal())).id,id,'preparation also reuses the stored definition');
+ await assert.rejects(readDiscovery(id,signal()));
 });
 test('enrichment rejects uncited source revocation after its accounted planning callback',async()=>{
  const {readDiscovery}=require('../dist/factory/discovery'),{proposeEnrichment}=require('../dist/factory-enrichment');const {id}=await seed(),d=await readDiscovery(id,signal());let calls=0;
@@ -151,22 +151,38 @@ test('existing enrichment receipts keep their background ownership across the ad
  const {initProcessSchema}=require('../dist/db/process-schema');initProcessSchema(db);initProcessSchema(db);
  assert.deepEqual(db.prepare('SELECT * FROM workflow_enrichments').get(),before);
 });
+test('preparation rejects cross-folder evidence without hiding a saved workflow',async()=>{
+ const a=path.join(dir,'one'),b=path.join(dir,'two');fs.mkdirSync(a);fs.mkdirSync(b);await seed([a,b]);await storedButNotValidEvidence();
+});
 test('changing a recorded folder affects preparation, not the saved display',async()=>{
  await seed();require('node:child_process').execFileSync('git',['init','-q',path.join(dir,'work')]);await storedButNotValidEvidence();
 });
 test('revoking an uncited original affects preparation, not the saved display',async()=>{
  await seed();db.prepare("UPDATE agent_entries SET active=0 WHERE session_id='episode-0' AND entry_id='4'").run();await storedButNotValidEvidence();
 });
+for(const column of ['input_key','recipe_version','model'])test(`preparation rejects changed comparison ${column}`,async()=>{
+ const {id}=await seed();db.prepare(`UPDATE process_extractions SET ${column}='changed' WHERE id=?`).run(id);await storedButNotValidEvidence();
+});
+test('preparation checks comparison inputs without recomputing the saved display',async()=>{
+ const {id}=await seed(),row=db.prepare('SELECT source_dependencies_json FROM process_extractions WHERE id=?').get(id),deps=JSON.parse(row.source_dependencies_json);
+ deps.parents.reverse();deps.identities.reverse();db.prepare('UPDATE process_extractions SET source_dependencies_json=? WHERE id=?').run(JSON.stringify(deps),id);await storedButNotValidEvidence();
+});
 test('session exclusion prevents new evidence use without deleting the saved workflow',async()=>{
  await seed();db.prepare("UPDATE agent_sessions SET included=0 WHERE id='episode-1'").run();await storedButNotValidEvidence();
 });
-test('physical source changes do not cause saved workflow preparation to recheck its content',async()=>{
- const {id}=await seed(),saved=await readDiscovery(id,signal());const file=path.join(dir,'sessions','episode-0.jsonl');fs.writeFileSync(file,'Original file is no longer needed');
- assert.deepEqual(await readDiscovery(id,signal()),saved);
+test('changed original bytes affect preparation, not the saved workflow',async()=>{
+ await seed();const file=path.join(dir,'sessions','episode-0.jsonl');const text=fs.readFileSync(file,'utf8');fs.writeFileSync(file,text.replace('Uncited dependency','Altered dependency'));await storedButNotValidEvidence();
 });
 test('stored display ignores legacy external paths while preparation rejects them',async()=>{
  const {id}=await seed();db.prepare('UPDATE process_extractions SET source_dependencies_json=? WHERE id=?').run(JSON.stringify({sources:[{kind:'historical',store:'/external.sqlite'}]}),id);
  await storedButNotValidEvidence();
+});
+test('changed parent output is rejected even when references remain valid',async()=>{
+ const {parents}=await seed();const r=db.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(parents[0].extraction),v=JSON.parse(r.output_json);v.fragments[0].goal='Different job';db.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify(v),parents[0].extraction);await storedButNotValidEvidence();
+});
+test('shared subprocedures are not promoted by a saved identity flag',async()=>{
+ const {id}=await seed();const row=db.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(id),v=JSON.parse(row.output_json);v.assessment.relation='shared_subprocedure';v.sameWorkflow=true;db.prepare('UPDATE process_extractions SET output_json=? WHERE id=?').run(JSON.stringify(v),id);
+ const result=await readFactory(undefined,signal());assert.equal(result.proposals.length,1);assert.equal(result.unavailable,0);await assert.rejects(readDiscovery(id,signal()));
 });
 test('Factory rejects invalid cursors and cancellation without returning content',async()=>{
  for(const cursor of [0,-1,NaN,1.5])await assert.rejects(readFactory(cursor,signal()),/cursor/);

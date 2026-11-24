@@ -96,9 +96,8 @@ test('failed or cancelled preparation preserves its snapshot and never captures 
   expect((await (await page.request.get(`/api/syncs/${id}`)).json()).status).toBe('open');
 });
 
-test('ingested evidence remains readable without its physical file and reading it starts no call', async ({ page }) => {
+test('missing pi originals remain inspectable as unavailable; notes survive and restore needs no new call', async ({ page }) => {
   await microphone(page);const { sessions,control }=await fixtures(page);addActivity(sessions);fs.writeFileSync(control,JSON.stringify({delay:20}));
-  await page.request.patch('/api/settings/auto-index',{data:{enabled:false}});
   const {sync}=await(await page.request.post('/api/syncs/start-call',{data:{request_id:randomUUID()}})).json();
   await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${sync.id}/progress`)).json()).run?.status,{timeout:30000}).toBe('completed');
   const { briefing }=await(await page.request.get(`/api/syncs/${sync.id}`)).json(),reference=briefing.match(/\[([EC]\d+)\]/)[1];
@@ -107,11 +106,11 @@ test('ingested evidence remains readable without its physical file and reading i
   try {
     await page.goto(`/syncs/${sync.id}`);await expect(page.getByRole('heading',{name:`Sync #${sync.id}`,exact:true})).toBeVisible();
     await page.getByRole('button',{name:`Inspect evidence ${reference}`,exact:true}).first().click();
-    await expect(page.locator('.evidence-body')).toContainText(original.item.text.slice(0,80));
+    await expect(page.locator('.evidence-body').filter({hasText:'Draken does not keep a text copy'})).toBeVisible();
     await page.getByText('Decisions & carry-forward',{exact:true}).click();await page.getByLabel('Decisions',{exact:true}).fill('Explicit note while source is offline.');await page.getByRole('button',{name:'Save notes',exact:true}).click();
     await expect.poll(async()=>(await(await page.request.get(`/api/syncs/${sync.id}`)).json()).decisions).toBe('Explicit note while source is offline.');
-    await expect(page.getByRole('button',{name:'Call Draken',exact:true})).toBeEnabled();
-    expect((await(await page.request.get(`/api/syncs/${sync.id}/evidence?ref=${reference}`)).json()).item).toEqual(original.item);
+    expect((await page.request.post(`/api/syncs/${sync.id}/briefing`)).status()).toBe(409);
+    expect((await page.request.post('/api/voice/live/calls',{data:{syncId:sync.id}})).status()).toBe(409);
     expect(await page.evaluate(()=>(window as any).__captures)).toBe(0);
   } finally { fs.renameSync(file+'.hidden',file); }
   await page.reload();
