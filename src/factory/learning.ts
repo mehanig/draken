@@ -45,20 +45,23 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
     const id = digest(JSON.stringify([key, recipe, run, attempt]));
     db.prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,usage_json,created_at)
       VALUES (?,'comparison',?,?,?,'running',?,?,?)`).run(id, key, recipe, model, JSON.stringify(deps), JSON.stringify({ backgroundRun: run }), new Date().toISOString());
-    let raw: string | undefined, stage = 'provider';
+    let raw: string | undefined, stage = 'sources';
     const repairs: { raw: string; error: string }[] = [];
-    const verify = async () => {
-      stage = 'sources';
-      const after = await load(parents);
-      if (JSON.stringify(after.map(v => v.identity)) !== JSON.stringify(identities) || after.some(value => value.location.key !== locationKey)) throw Error('Workflow sources or locations changed during inference');
+    const verifySaved = () => {
       if (saved.some(candidate => {
         const current = savedWorkflowCandidates(locationKey, candidate.id)[0];
         return !current || !sameWorkflowDefinition(current.workflow, candidate.workflow);
       })) throw Error('Saved workflow definitions changed during inference');
       signal.throwIfAborted();
     };
+    const verify = async () => {
+      stage = 'sources';
+      const after = await load(parents);
+      if (JSON.stringify(after.map(v => v.identity)) !== JSON.stringify(identities) || after.some(value => value.location.key !== locationKey)) throw Error('Workflow sources or locations changed during inference');
+      verifySaved();
+    };
     try {
-      await verify(); stage = 'provider';
+      verifySaved(); stage = 'provider';
       raw = await ask(payload, prompt); signal.throwIfAborted();
       stage = 'validation';
       let output: T;

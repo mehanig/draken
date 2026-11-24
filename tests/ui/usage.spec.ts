@@ -76,19 +76,22 @@ test('model and operation filters combine, preserve unknown costs, handle empty 
     const q = new URL(route.request().url()).searchParams; queries.push(q);
     const model = q.get('model'), operation = q.get('operation');
     const data = usage(q.get('range')!, q.get('bucket')!, model === 'unknown' ? null : operation ? .25 : model ? .8 : 1.25, model, operation);
+    if (model === 'openai/gpt-6-astra') data.totals.approximate_timing = 0;
     if (model === 'openai/gpt-6-luna' && operation === 'compare_workflow_identity') { data.totals.requests = 0; data.totals.cost = { usd: 0, complete: true }; data.totals.incomplete_pricing = 0; }
     return route.fulfill({ json: data });
   });
   await page.goto('/settings'); const panel = page.getByRole('region', { name: 'Preparation usage', exact: true });
   await expect(panel.locator('.usage-totals')).toContainText('$1.25');
   const chart = panel.getByRole('combobox', { name: 'Chart', exact: true }), model = panel.getByRole('combobox', { name: 'Model', exact: true }), operation = panel.getByRole('combobox', { name: 'Operation', exact: true });
+  await expect(panel).toContainText('2 requests use approximate timing from the preparation run’s start.');
   await chart.selectOption('batches');
   await model.selectOption('openai/gpt-6-astra'); await expect(panel.locator('.usage-totals')).toContainText('$0.80');
+  await expect(panel).not.toContainText('approximate timing');
   await expect(chart).toHaveValue('cost');
   await expect(chart.locator('option[value="batches"]')).toHaveAttribute('disabled', '');
   await operation.selectOption('compare_workflow_identity'); await expect(panel.locator('.usage-totals')).toContainText('$0.25');
   expect(queries.at(-1)?.get('model')).toBe('openai/gpt-6-astra'); expect(queries.at(-1)?.get('operation')).toBe('compare_workflow_identity');
-  await expect(panel).toContainText('Briefings prepared (all preparation)'); await expect(panel).toContainText('Costs and requests match the selected model and operation');
+  await expect(panel).toContainText('Briefings prepared (all preparation)'); await expect(panel).toContainText('Filters apply to costs and requests');
   await panel.getByText('Bucket details', { exact: true }).click(); await expect(panel.getByRole('columnheader', { name: 'Briefings', exact: true })).toHaveCount(0);
   for (const width of [320, 1440]) { await page.setViewportSize({ width, height: 1000 }); expect(await panel.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true); }
   await model.selectOption('openai/gpt-6-luna'); await expect(panel).toContainText('No model requests match these filters'); await expect(panel.getByRole('img')).toHaveCount(0);

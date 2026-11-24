@@ -75,6 +75,18 @@ test('a legacy reconstruction pause resumes independent work in the same remaini
  const failed=db.prepare('SELECT * FROM episode_reconstructions WHERE id=?').get(id),before=db.prepare('SELECT * FROM background_runs WHERE id=?').get(run);db.prepare("UPDATE background_runs SET status='failed',stage='Task reconstruction',error='Legacy reconstruction failure' WHERE id=?").run(run);db.prepare("INSERT OR REPLACE INTO sync_settings VALUES('auto_summary_error','Legacy reconstruction failure')").run();
  await warm();const after=db.prepare('SELECT * FROM background_runs WHERE id=?').get(run);assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,1);assert.equal(after.max_invocations,before.max_invocations);assert.equal(after.invocations,before.invocations+5);assert.equal(after.status,'completed');assert.equal(after.error,'Legacy reconstruction failure');assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,2);assert.equal((await factory()).proposals[0].enrichment.status,'ready');assert.deepEqual(db.prepare('SELECT * FROM episode_reconstructions WHERE id=?').get(id),failed);assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'');
 });
+test('selection and matching do not reload their just-read inputs before inference',async t=>{
+ history();await scanSessions();const db=getDb(),episodes=require('../dist/factory/episode-store'),read=episodes.readLearningParents,checks=[];
+ t.mock.method(episodes,'readLearningParents',async(...args)=>{
+  const running=db.prepare("SELECT json_extract(source_dependencies_json,'$.phase') phase FROM process_extractions WHERE kind='comparison' AND status='running'").get();
+  const task=running?.phase==='select'?'select_workflow_candidates':'compare_workflow_identity';
+  if(running&&!calls().some(call=>call.task===task))checks.push(running.phase);
+  return read(...args);
+ });
+ await warm();assert.deepEqual(checks,[],'inputs must not be reloaded between the initial read and starting inference');
+ assert.equal((await factory()).proposals[0].enrichment.status,'ready');
+ assert.equal(db.prepare('SELECT invocations FROM background_runs').get().invocations,calls().length);
+});
 test('normal background tick saves process records with summaries and detects a Factory proposal without a sync or page visit',async()=>{
  history();await scanSessions();
  const worker=createAutoIndexer({enabled:()=>true,idle:()=>true,now:Date.now,scan:scanSessions,stamp:()=>new Map(),baseline:()=>new Map(),prepare:async()=>assert.fail('No new indexing is needed'),completed:()=>{},prepareSummaries:warmSummaryCache});
