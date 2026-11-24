@@ -50,11 +50,12 @@ for(const width of [320,390,768,1440])test(`public page at ${width}px: readable 
   assert.equal(await page.getByRole('link',{name:'Release notes',exact:true}).getAttribute('href'),'#release-notes');
   const notes=await page.locator('#release-notes').innerText();
   assert.ok(notes.includes(version));assert.doesNotMatch(notes,/upcoming|not published|unreleased|current npm release/i);
-  assert.match(notes,/Workflow matching now explicitly distinguishes partial observations from a different intended endpoint/);
-  assert.match(notes,/reuse a compatible saved definition or leave identity uncertain/);
-  assert.match(notes,/Real-model evaluation of these instructions remains outstanding/);
-  assert.match(notes,/Old workflow links survive updates to saved presentation/);
-  assert.match(notes,/Earlier comparison receipts remain readable without regenerating guidance/);
+  assert.match(notes,/Conditional delivery stays inside ordinary workflow steps/);
+  assert.match(notes,/implement and validate, then deploy locally only when requested/);
+  assert.match(notes,/Existing inputs supply delivery scope/);
+  assert.match(notes,/No separate variants, branch schema or new executor; the workflow still runs in one Pi session/);
+  assert.match(notes,/Earlier comparison receipts and saved guidance remain usable without regeneration/);
+  assert.match(notes,/Real-model recognition and conditional execution remain unverified/);
   assert.match(notes,/Existing failed attempts remain recorded and are not automatically retried/);
   assert.match(notes,/Session storage remains pointer-only/);
   assert.match(notes,/Saved workflows, history and accounting remain intact/);

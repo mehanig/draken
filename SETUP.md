@@ -2,7 +2,7 @@
 
 Draken uses **pi for summaries, preparation recaps and text discussion**, regardless of which coding agent produced the imported history. It does not implement provider OAuth, translate another agent's credentials, or run Claude/Codex to summarize.
 
-> This guide is for **Draken 0.15.4**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#0154).
+> This guide is for **Draken 0.15.5**. Versions **0.1.6 and earlier** are the old task dashboard. Before upgrading, back up your original agent logs and Draken data; see [what changed](CHANGELOG.md#0155).
 
 ## Install and start
 
@@ -30,7 +30,11 @@ Foreground work cancels and awaits owned background provider work. Valid cache s
 
 Loopback (`http://127.0.0.1:40333`) needs no dashboard login by default. LAN exposure still requires configured dashboard authentication and trusted HTTPS for microphone access. There is no automatic firewall change or certificate trust installation.
 
-## Upgrade to 0.15.4
+## Upgrade to 0.15.5
+
+<a id="upgrade-to-0154"></a><!-- Preserve previous upgrade links. -->
+
+Version 0.15.5 describes conditional delivery in ordinary workflow steps and uses the existing workflow-input mechanism for delivery scope. No branch schema, UI or executor is added. Existing workflows are not rewritten or consolidated automatically. Saved guidance and failures remain usable without regeneration or paid retry. Real-model recognition and conditional execution remain unverified.
 
 <a id="upgrade-to-0153"></a><!-- Preserve previous upgrade links. -->
 
@@ -51,7 +55,7 @@ Version 0.15.3 adds reusable workflow identity, final-model workflow preparation
 <a id="upgrade-to-070"></a><!-- Preserve links from historical release notes. -->
 
 1. Back up original agent logs and the private Draken data directory. Preserve existing histories, conversations, notes, review coverage and frozen snapshots; do not replace them with an old database.
-2. Finish active calls/preparation, stop the server, and quit any tray that owns it. Install the released version with `npm install -g draken@0.15.4`, then restart using the same user, environment and `DRAKEN_DATA_DIR`.
+2. Finish active calls/preparation, stop the server, and quit any tray that owns it. Install the released version with `npm install -g draken@0.15.5`, then restart using the same user, environment and `DRAKEN_DATA_DIR`.
 3. Check **Settings → Runtime & sign-in**. Existing pi/voice accounts and selected runtimes are unchanged; upgrading does not silently install or sign into a replacement runtime.
 4. Open **Settings** in the header (or visit `/settings`). The page supports direct links, reload and browser Back. In **Settings → Agents & sessions**, review the **7-day session activity window**. Widening it requires confirmation before additional sessions can be prepared. Ignored sessions are hidden by default; use **Show ignored sessions** below each agent list to inspect their dates, previews and inclusion settings. Lists scroll with the page. Showing ignored sessions does not enable them; cached work and saved history are kept. Review **Automatically prepare history** in Settings. Enabling it starts both local indexing (no model API) and model-backed summary/workflow preparation using configured quota/API billing. Saved opt-outs and failure pauses survive upgrades. Status identifies the active or failed model step separately from local indexing. Failures show the saved cause and attempt call count when available; missing causes are stated as unknown, not guessed. Old failures are explained from saved database records without reopening original history. **Retry automatic preparation** can make further model calls; it does not execute saved workflows.
 5. Reload the browser to load the new client. Sync pages no longer download the evidence archive: citation inspection reads one bounded excerpt. The bulk evidence browser is removed. Start a sync/chat explicitly for the initial briefing and history preparation. Active conversations then adopt newly prepared H history between turns. Their initial snapshot, E/C references, briefing, existing transcript and notes are not rewritten. Updates neither interrupt replies nor disable already-prepared chat; damaged captured originals still fail closed, and unavailable extra archive context must be disclosed.
@@ -67,7 +71,7 @@ Production dependencies in the app, client and private runtime must pass the str
 
 For a source release, build and test sequentially once the backend/client changes are ready. Run conversation lifecycle and append-safe readiness tests (`tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs`), voice live-update/activity coverage (`tests/voice-live-updates.test.cjs` and existing activity tests), and the existing local-indexing/paid-cache suites against the new server build. Run `tests/ui/live-conversation.spec.ts` after the complete build, then `node --test tests/site-browser.cjs` and `node tests/package-smoke.cjs` with the complete package build. The site check serves static files and needs Playwright/Chromium, not an application build or provider. The package smoke requires built `dist/` and `public/` and installs an isolated production-only tarball; it must observe metadata-only settings GETs and no background runs/provider activity in the isolated empty-home installation. Synthetic tests do not establish provider latency, quality or account billing.
 
-Publish npm only through the separately authorized release process. The existing website workflow checks `scripts/site-release.cjs`: copy must match the package version and npm `latest` must be 0.15.4 before the site is deployed. Do not bypass this gate to publish release copy early. Updating docs/version/site files is not a merge, npm publication or live deployment.
+Publish npm only through the separately authorized release process. The existing website workflow checks `scripts/site-release.cjs`: copy must match the package version and npm `latest` must be 0.15.5 before the site is deployed. Do not bypass this gate to publish release copy early. Updating docs/version/site files is not a merge, npm publication or live deployment.
 
 ## When pi is not installed
 

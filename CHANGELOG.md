@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.5
+
+- Represent supported conditional delivery in ordinary workflow instructions: implement and validate; deploy locally only when requested. Matching and explicit consolidation can retain one shared procedure rather than separate delivery variants. Different jobs and entry conditions remain separate.
+- Enrichment uses the existing concrete-input mechanism for delivery scope. No new branch schema, UI, executor or session lifecycle is introduced.
+- Preserve previous comparison receipts, saved guidance and failed attempts without regeneration or automatic paid retry. Upgrading does not rewrite or consolidate existing workflows, execute them, or change pointer-only session storage.
+- Contract tests cover validation-only and local-deployment inputs through the same saved workflow and session-plan path. Real-model recognition and conditional execution remain unverified; synthetic tests do not establish those outcomes.
+
 ## 0.15.4
 
 - Clarify workflow matching: missing later steps in partial history are observation gaps, not evidence of an edits-only endpoint. Prefer compatible saved definitions; leave identity uncertain rather than inventing a competing workflow when the intended endpoint is unclear. Preserve explicit endpoint differences and specialized methods.
