@@ -25,14 +25,12 @@ const requirements = [
   'Review the work, repair and retest within the run allowance. This session is not an independent reviewer.',
   'Record evidence of the requested endpoint and report specific missing tools, credentials or other blockers. A local patch or unrelated passing tests are not completion of a delivery workflow.',
 ] as const;
-const text = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && v.length <= 1600;
-const strings = (v: unknown, minimum = 0): v is string[] => Array.isArray(v) && v.length >= minimum && v.length <= 12 && v.every(text);
+const text = (v: unknown): v is string => typeof v === 'string' && !!v.trim();
+const strings = (v: unknown, minimum = 0): v is string[] => Array.isArray(v) && v.length >= minimum && v.every(text);
 const keys = (v: unknown, allowed: string[]): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every(k => allowed.includes(k));
 function checkedWorkflow(workflow: Discovery): Discovery {
-  const field = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && v.length <= 4000;
-  if (!workflow || ![workflow.id, workflow.revision, workflow.locationKey, workflow.purpose, workflow.appliesWhen].every(field)
-    || !Array.isArray(workflow.method) || !workflow.method.length || workflow.method.length > 32 || !workflow.method.every(field)
-    || !Array.isArray(workflow.limitations) || workflow.limitations.length > 64 || !workflow.limitations.every(field)) throw Error('Invalid workflow');
+  if (!workflow || ![workflow.id, workflow.revision, workflow.locationKey, workflow.purpose, workflow.appliesWhen].every(text)
+    || !strings(workflow.method, 1) || !strings(workflow.limitations)) throw Error('Invalid workflow');
   return structuredClone(workflow);
 }
 /** Reusable workflow guidance: no task, model client or execution session belongs here. */
@@ -40,10 +38,10 @@ export function enrich(workflow: Discovery, value: unknown): Enrichment {
   const frozen = checkedWorkflow(workflow);
   if (!keys(value, ['inputs', 'steps', 'review', 'completion', 'risks']) || !Array.isArray(value.steps)
     || value.steps.length !== frozen.method.length || !strings(value.review, 1) || !strings(value.completion, 1) || !strings(value.risks)) throw Error('Incomplete workflow enrichment');
-  if (!Array.isArray(value.inputs) || value.inputs.length > 8) throw Error('Invalid workflow inputs');
+  if (!Array.isArray(value.inputs)) throw Error('Invalid workflow inputs');
   const names = new Set<string>();
   for (const input of value.inputs) {
-    if (!keys(input, ['name', 'label', 'description', 'required']) || typeof input.name !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(input.name)
+    if (!keys(input, ['name', 'label', 'description', 'required']) || typeof input.name !== 'string' || !/^[a-z][a-z0-9_]*$/.test(input.name)
       || names.has(input.name) || !text(input.label) || !text(input.description) || typeof input.required !== 'boolean') throw Error('Invalid workflow input');
     names.add(input.name);
   }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.3
+
+- Learn reusable workflow definitions with run-specific requirements and acceptance criteria. Matching can reuse a supplied saved definition without duplicating its enrichment or changing earlier receipts. Similar workflows can still be discovered separately when historical coverage differs; this release does not resolve every duplicate.
+- Route workflow reconstruction, selection, matching and enrichment through the configured final model; summaries retain the summary model. Both use existing accounting and allowances. Changing models does not retry failed operations.
+- Filter preparation costs and requests by recorded model and operation. Run and briefing counters remain period-wide and are labelled accordingly.
+- Remove the immediately duplicated workflow input read before inference and shorten preparation-usage copy.
+- Remove arbitrary enrichment limits on input-name length, prose length, input count and list sizes. Keep structural validation and complete step coverage. Existing failed attempts remain recorded and are not automatically retried or rewritten.
+- Preserve pointer-only session storage, saved workflows, aliases, execution receipts, settings and spending. No transcript-copy table or content migration is introduced. Enabled automatic preparation may continue within its existing allowance; upgrading does not execute workflows.
+
 ## 0.15.2
 
 - Preparation errors no longer pause the whole pipeline. Failed summaries, task reconstruction, candidate selection, comparisons and enrichment keep their diagnostics and returned model output while independent work continues.
