@@ -48,7 +48,7 @@ function downgrade() {
   db.exec('DELETE FROM retained_text'); return values;
 }
 
-test('live entries and frozen evidence contain only verified pointers; unavailable sources are explicit', async () => {
+test('snapshots share ingested content without copying text into each snapshot or reopening session files', async () => {
   const s = source([event('one', null, 'Unicode 🐉: deployment NOT checked.')]); await scanSessions();
   const row = db.prepare('SELECT * FROM agent_entries').get(), bytes = fs.readFileSync(s.file);
   assert.equal(row.text, undefined); assert.equal(row.effective_text, undefined); assert.equal(row.replacement, undefined);
@@ -57,37 +57,39 @@ test('live entries and frozen evidence contain only verified pointers; unavailab
   const first = store.startSync(), frozen = first.items;
   store.discardSync(first.id); const second = store.startSync();
   assert.deepEqual(second.items, frozen);
-  assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE name='retained_text'").get().n, 0, 'repeat snapshots do not store any pi bodies');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE name='retained_text'").get().n, 0, 'repeat snapshots do not recreate the retired text table');
   assert.ok(db.prepare('SELECT evidence_json FROM sync_items').all().every(row => !('text' in JSON.parse(row.evidence_json))));
   fs.unlinkSync(s.file);
-  assert.ok(store.getSync(first.id).items[0].unavailable); assert.equal(store.getSync(second.id).items[0].text, '');
-  assert.throws(() => read(row.id), /unavailable/);
-  assert.throws(() => store.completeSync(second.id, '', '', true), /Original session evidence/);
+  assert.deepEqual(store.getSync(first.id).items, frozen); assert.deepEqual(store.getSync(second.id).items, frozen);
+  assert.equal(read(row.id), frozen[0].text);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM session_records').get().n, 2);
   store.saveNotes(second.id, 'Explicit note still editable', ''); assert.equal(store.getSync(second.id).decisions, 'Explicit note still editable');
   assert.equal(require('../dist/sync/normalize').sourceKey(store.getSync(second.id).items[0]), require('../dist/sync/normalize').sourceKey(frozen[0]));
   fs.writeFileSync(s.file, bytes); assert.deepEqual(store.getSync(first.id).items, frozen);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
 });
 
-test('rewritten/truncated/replaced pointers fail closed; a middle rewrite plus append is recovered by scanning', async () => {
+test('ingested content stays stable until a new scan; frozen snapshots retain their original content', async () => {
   const records = Array.from({ length: 8 }, (_, i) => event(String(i), i ? String(i - 1) : null, `${i}: ` + 'x'.repeat(600)));
   const s = source(records); await scanSessions(); const first = store.startSync(), row = db.prepare("SELECT id FROM agent_entries WHERE entry_id='3'").get();
-  records[3] = event('3', '2', '3: ' + 'y'.repeat(600)); records.push(event('8', '7', 'New tail'));
+  records.push(event('8', '7', 'New tail'));
   fs.writeFileSync(s.file, [s.header, ...records].map(JSON.stringify).join('\n') + '\n');
-  assert.throws(() => read(row.id), /unavailable/);
-  assert.ok(store.getSync(first.id).items[3].unavailable);
-  await scanSessions(); assert.match(read(row.id), /yyy/);
+  assert.match(read(row.id), /xxx/);
+  assert.match(store.getSync(first.id).items[3].text, /xxx/);
+  await scanSessions(); assert.match(read(row.id), /xxx/);
   const bytes = fs.readFileSync(s.file), replacement = s.file + '.new'; fs.writeFileSync(replacement, bytes); fs.renameSync(replacement, s.file);
-  assert.throws(() => read(row.id), /unavailable/, 'matching content in a replacement inode still needs a scan');
-  await scanSessions(); assert.match(read(row.id), /yyy/);
-  fs.truncateSync(s.file, 20); assert.throws(() => read(row.id), /unavailable/);
+  assert.match(read(row.id), /xxx/, 'ingested records do not depend on the current file inode');
+  await scanSessions(); assert.match(read(row.id), /xxx/);
+  fs.truncateSync(s.file, 20); assert.match(read(row.id), /xxx/); assert.match(store.getSync(first.id).items[3].text, /xxx/);
   assert.equal(store.getSync(first.id).items.length, 8); assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
 });
 
-test('source resolution refuses outside-root paths and changed headers, and handles a moved file after scanning', async () => {
+test('unimported legacy pointers check source roots and headers on their first original read', async () => {
   const s = source([event('one', null, 'Original evidence')]); await scanSessions(); const row = db.prepare('SELECT id FROM agent_entries').get();
+  db.exec('DELETE FROM session_records');
   const moved = path.join(root, 'sessions', 'moved.jsonl'); fs.renameSync(s.file, moved);
   assert.throws(() => read(row.id), /unavailable/); await scanSessions(); assert.equal(read(row.id), 'Original evidence');
+  db.exec('DELETE FROM session_records');
   const bytes = fs.readFileSync(moved), outside = path.join(root, 'outside.jsonl'); fs.writeFileSync(outside, bytes);
   const stat = fs.statSync(outside); db.prepare('UPDATE agent_sessions SET path=?,file_identity=?').run(outside, `${stat.dev}:${stat.ino}`);
   assert.throws(() => read(row.id), /unavailable/);
@@ -95,6 +97,28 @@ test('source resolution refuses outside-root paths and changed headers, and hand
   fs.writeFileSync(moved, bytes.toString().replace('"id":"demo"', '"id":"evil"'));
   const reader = new EntryReader(db);
   try { assert.throws(() => reader.effective(row.id), /unavailable/); assert.throws(() => reader.effective(row.id), /unavailable/); } finally { reader.close(); }
+});
+
+test('ingested records survive reopening and support read-only retrieval without any session-file reads', async t => {
+  const s=source([event('one',null,'Stored original result')]);await scanSessions();const frozen=store.startSync();
+  const id=db.prepare('SELECT id FROM agent_entries WHERE entry_id=?').get('one').id;
+  closeDb();db=getDb();const before=db.prepare('SELECT total_changes() n').get().n,open=fs.openSync;
+  t.mock.method(fs,'openSync',function(file,...args){if(String(file).endsWith('.jsonl'))assert.fail('Processed records must not reopen session files');return open.call(this,file,...args);});
+  assert.equal(read(id),'Stored original result');assert.deepEqual(store.getSync(frozen.id).items,frozen.items);
+  assert.ok([...historySources(db)].some(record=>record.text==='Stored original result'));
+  assert.equal(db.prepare('SELECT total_changes() n').get().n,before,'retrieval does not write canonical storage');
+  store.setIncluded(s.header.id,false);
+  assert.throws(()=>require('../dist/sync/evidence-scope').verifySyncEvidence(db,frozen.id),/excluded/);
+});
+
+test('pointer-only databases import content once during scanning without changing saved snapshot identities',async()=>{
+  const s=source([event('one',null,'Legacy stored result')]);await scanSessions();const frozen=store.startSync();
+  const receipt=db.prepare('SELECT evidence_json FROM sync_items').get().evidence_json;
+  db.exec('DELETE FROM session_records');await scanSessions();
+  const records=db.prepare('SELECT * FROM session_records ORDER BY key').all();assert.equal(records.length,2);
+  await scanSessions();assert.deepEqual(db.prepare('SELECT * FROM session_records ORDER BY key').all(),records);
+  assert.equal(db.prepare('SELECT evidence_json FROM sync_items').get().evidence_json,receipt);
+  fs.unlinkSync(s.file);assert.deepEqual(store.getSync(frozen.id).items,frozen.items);
 });
 
 test('canonical migration preserves projections, immutable evidence, notes, coverage, references and sequences; rerun is inert', async () => {
@@ -258,10 +282,10 @@ test('conflicting existing vectors abort atomically rather than silently replaci
   new HistoryIndex(old, db, embedder); assert.equal(old.prepare('SELECT COUNT(*) n FROM passage_vectors').get().n, 1);
 });
 
-test('context-edit pointers verify both the target attribution and replacement record', async () => {
+test('first original reads of legacy context-edit pointers verify target and replacement', async () => {
   const s = source([event('one', null, 'Original attribution'), { type: 'context_edit', id: 'edit', parentId: 'one', targetId: 'one', replacement: 'Corrected statement', timestamp: at }]);
   await scanSessions(); const row = db.prepare("SELECT id FROM agent_entries WHERE entry_id='one'").get(), bytes = fs.readFileSync(s.file, 'utf8');
-  assert.equal(read(row.id), 'Corrected statement');
+  assert.equal(read(row.id), 'Corrected statement'); db.exec('DELETE FROM session_records');
   fs.writeFileSync(s.file, bytes.replace('Original attribution', 'Modified attribution')); assert.throws(() => read(row.id), /unavailable/);
   fs.writeFileSync(s.file, bytes.replace('Corrected statement', 'Different statement')); assert.throws(() => read(row.id), /unavailable/);
   fs.writeFileSync(s.file, bytes); assert.equal(read(row.id), 'Corrected statement');
@@ -320,9 +344,10 @@ test('legacy snapshots with indistinguishable edit candidates refuse migration i
   assert.ok(db.pragma('table_info(agent_entries)').some(column=>column.name==='text'));
 });
 
-test('missing source blocks generation, calls and review, not conversations or explicit notes', async () => {
+test('unimported legacy content requires its source for generation, calls and review', async () => {
   const s=source([event('one',null,'Original result')]);await scanSessions();const first=store.startSync();
   db.prepare('INSERT INTO sync_messages(sync_id,role,content,created_at) VALUES(?,?,?,?)').run(first.id,'user','Retain this discussion',at);
+  db.exec('DELETE FROM session_records');
   fs.unlinkSync(s.file);
   const unavailable=store.getSync(first.id);assert.ok(unavailable.items[0].unavailable);assert.equal(unavailable.messages[0].content,'Retain this discussion');
   const manager=require('../dist/sync/manager');assert.throws(()=>manager.launchReply(first.id),/Original session evidence/);
@@ -343,31 +368,28 @@ test('contentless search preserves embeddings and keywords but stores no source 
   assert.equal(derived.prepare("SELECT COUNT(*) n FROM words WHERE words MATCH 'archival'").get().n,2);
   fs.unlinkSync(s.file);await scanSessions();assert.deepEqual((await index.search({question:'archival'})).results,[]);
   assert.equal(derived.prepare("SELECT COUNT(*) n FROM words WHERE words MATCH 'archival'").get().n,0);
-  assert.ok(store.getSync(first.id).items[0].unavailable);
+  assert.deepEqual(store.getSync(first.id).items, first.items);
   derived.prepare("INSERT INTO words(words) VALUES('integrity-check')").run();
 });
 
-test('normalization reuse always re-verifies source bytes and cannot hide rewrites or unavailable originals', async () => {
+test('ingested history reads require no original files or repeated normalization', async () => {
   const s=source([event('one',null,'Original result')]);await scanSessions();store.startSync();
-  const {NormalizationCache}=require('../dist/sync/jsonl'),cache=new NormalizationCache(),normalize=require('../dist/sync/normalize'),original=normalize.normalizeEntry;
+  const normalize=require('../dist/sync/normalize'),original=normalize.normalizeEntry;
   let calls=0;normalize.normalizeEntry=(...args)=>{calls++;return original(...args);};
   try {
-    const before=[...historySources(db,process.env.DRAKEN_PI_SESSIONS_DIR,cache)];assert.equal(calls,1,'snapshot and live projection share normalization after separate verification');
-    assert.deepEqual([...historySources(db,process.env.DRAKEN_PI_SESSIONS_DIR,cache)],before);assert.equal(calls,1);
-    const stat=fs.statSync(s.file),bytes=fs.readFileSync(s.file);fs.writeFileSync(s.file,bytes.toString().replace('Original result','Modified result'));fs.utimesSync(s.file,stat.atime,stat.mtime);
-    assert.throws(()=>[...historySources(db,process.env.DRAKEN_PI_SESSIONS_DIR,cache)],/unavailable/);
-    fs.writeFileSync(s.file,bytes);assert.deepEqual([...historySources(db,process.env.DRAKEN_PI_SESSIONS_DIR,cache)],before);assert.equal(calls,1);
-    fs.unlinkSync(s.file);assert.throws(()=>[...historySources(db,process.env.DRAKEN_PI_SESSIONS_DIR,cache)],/unavailable/);
+    const before=[...historySources(db)];assert.equal(calls,0);
+    fs.writeFileSync(s.file,'Changed physical file');assert.deepEqual([...historySources(db)],before);
+    fs.unlinkSync(s.file);assert.deepEqual([...historySources(db)],before);assert.equal(calls,0);
   }finally{normalize.normalizeEntry=original;}
 });
 
-test('search never serves stale derived text after a source changes; frozen pages and cached vectors survive the failure', async () => {
+test('search and frozen pages reuse ingested content without checking changed physical files', async () => {
   const s = source([event('one', null, 'Original reported result')]); await scanSessions(); const frozen = store.startSync();
   const derived = cache(), index = new HistoryIndex(derived, db, model()); const result = await index.search({ question: 'result' });
   const vectors = derived.prepare('SELECT hash,hex(embedding) bytes FROM embedding_cache ORDER BY hash').all();
   fs.writeFileSync(s.file, fs.readFileSync(s.file, 'utf8').replace('Original', 'Modified'));
-  assert.throws(() => index.read(result.results[0].ref), /unavailable/);
-  await assert.rejects(index.search({ question: 'result' }), /unavailable/);
+  assert.match(index.read(result.results[0].ref).record.text, /Original reported result/);
+  assert.deepEqual((await index.search({ question: 'result' })).results,result.results);
   assert.deepEqual(derived.prepare('SELECT hash,hex(embedding) bytes FROM embedding_cache ORDER BY hash').all(), vectors);
-  assert.ok(store.getSync(frozen.id).items[0].unavailable); assert.equal(store.getSync(frozen.id).items[0].ref, frozen.items[0].ref);
+  assert.deepEqual(store.getSync(frozen.id).items, frozen.items);
 });

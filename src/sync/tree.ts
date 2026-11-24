@@ -3,7 +3,7 @@ import { preparationOperation, SkippedPreparationOperation, isPreparationLimit }
 import { SUMMARY_PROCESS_PROMPT, preparedProcess } from '../workflow-learning';
 import { workflowLocation } from '../factory/location';
 import { saveSummaryProcess } from '../factory/learning-store';
-import { readWorkflowOriginals } from '../evidence-adapter';
+import { assertWorkflowSources } from '../evidence-adapter';
 import { assertRecentSessions } from '../sources/activity-window';
 import { Evidence, NodeKind, NodeSummary, SyncDetail, TopicGroups } from '../types';
 import { cleanText, digest, sourceKey, sourceRepresentatives } from './normalize';
@@ -459,8 +459,8 @@ export class SummaryTree {
       const processInput = spec.leafInput && derived === undefined ? this.leafStore().encode(spec.leafInput) : undefined;
       if (processInput && (processValue as { fragments?: unknown[] } | null)?.fragments?.length) {
         const frozen = JSON.parse(processInput);
-        try { await readWorkflowOriginals([...frozen.evidence, ...frozen.background], this.signal); }
-        catch (error) { this.signal.throwIfAborted(); processSourceError = error instanceof Error ? error.message : 'Original verification failed'; }
+        try { assertWorkflowSources([...frozen.evidence, ...frozen.background], this.signal); }
+        catch (error) { this.signal.throwIfAborted(); processSourceError = error instanceof Error ? error.message : 'Source access changed'; }
         verify();
       }
       this.db.transaction(() => {

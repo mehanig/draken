@@ -257,7 +257,7 @@ test('unrecoverable known completed historical work fails closed rather than sil
   assert.equal(calls().length, before); assert.equal(getDb().prepare('SELECT count(*) n FROM sync_coverage').get().n, 0);
 });
 
-test('removed or excluded originals cannot be smuggled back as receipt dependencies', async () => {
+test('excluded records cannot be reused, while ingested content does not depend on physical files', async () => {
   const gone = session(6), stable = session(7), first = await start(); await generateReply(first.id);
   store.setIncluded(gone.id, false);
   const refused = background({ items: first.items, context: first.context, models: first.models }), excludedBefore = calls().length;
@@ -265,7 +265,7 @@ test('removed or excluded originals cannot be smuggled back as receipt dependenc
   expire(); const next = await start();
   assert.equal(next.items.length, 7); const before = calls().length; await generateReply(next.id); assert.equal(primaryCallsSince(before).length, 0);
   assert.ok((await plan(next)).every(spec => spec.leafInput.evidence.every(item => item.session_id === stable.id)));
-  fs.unlinkSync(stable.file); await assert.rejects(generateReply(next.id), /unavailable|changed/);
+  fs.unlinkSync(stable.file); await generateReply(next.id);
   assert.equal(primaryCallsSince(before).length, 0);
 });
 

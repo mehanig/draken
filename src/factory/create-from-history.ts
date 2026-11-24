@@ -8,7 +8,7 @@ import { TASK_WORKFLOW_PROMPT, taskWorkflow, CANDIDATE_PROMPT, candidateSelectio
 import { discoveryFromProposal, readDiscovery, readProposal } from './discovery';
 import { prepareEnrichment, savedEnrichment } from './enrichment';
 import { workflowLocation } from './location';
-import { taskDiscoveryId, readTaskProposal } from './task-store';
+import { taskDiscoveryId, taskProposal } from './task-store';
 import type { Discovery } from '../factory-enrichment';
 import type { FactoryPage } from './types';
 
@@ -63,7 +63,7 @@ export async function createWorkflowFromHistory(input: {
     const candidates: { proposal: FactoryPage['proposals'][number]; discovery: Discovery }[] = [];
     const verify = async () => {
       check();
-      if (digest((await readTaskEvidence({ ...input.selection, signal }, evidenceDependencies)).receipt) !== fingerprint) throw Error('Task originals changed during workflow creation');
+      await readTaskEvidence({ ...input.selection, requiredRefs: packet.references, signal }, evidenceDependencies);
       for (const candidate of candidates) if (JSON.stringify(await readDiscovery(candidate.discovery.id, signal)) !== JSON.stringify(candidate.discovery)) throw Error('A workflow used for comparison changed or lost source access');
       check();
     };
@@ -85,7 +85,7 @@ export async function createWorkflowFromHistory(input: {
     const sourceJson = JSON.stringify({ ...input.selection, fingerprint, location });
     const row = { model: input.model, source_json: sourceJson, output_json: raw, request_json: requestJson };
     const id = taskDiscoveryId(row), createdAt = new Date().toISOString();
-    const proposal = await readTaskProposal({ ...row, id, origin: 'requested', created_at: createdAt }, signal);
+    const proposal = taskProposal({ ...row, id, origin: 'requested', created_at: createdAt }, task, packet);
     const existing = db.prepare('SELECT id FROM active_workflow_discoveries ORDER BY cursor DESC').all() as { id: string }[];
     for (const entry of existing) {
       if (candidates.length === 24) break;
@@ -111,8 +111,8 @@ export async function createWorkflowFromHistory(input: {
     db.transaction(() => {
       check();
       if (!savedId) {
-        db.prepare("INSERT INTO workflow_discoveries(id,origin,model,created_at,source_json,output_json,request_json) VALUES (?,'requested',?,?,?,?,?)")
-          .run(id, input.model, createdAt, sourceJson, raw, requestJson);
+        db.prepare("INSERT INTO workflow_discoveries(id,origin,model,created_at,source_json,output_json,request_json,source_refs_json) VALUES (?,'requested',?,?,?,?,?,?)")
+          .run(id, input.model, createdAt, sourceJson, raw, requestJson, JSON.stringify(packet.references));
         savedId = id;
       }
       db.prepare('UPDATE workflow_requests SET workflow_id=? WHERE request_id=?').run(savedId, requestId);

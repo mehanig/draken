@@ -21,20 +21,19 @@ export function withEvidenceRef(item: Evidence, ref: string): Evidence {
   if (pointer) pointers.set(copy, pointer);
   return copy;
 }
-const UNAVAILABLE_EVIDENCE = 'Original session evidence is unavailable or changed. Restore the original session file; Draken does not keep a text copy.';
+const UNAVAILABLE_EVIDENCE = 'Original session evidence is unavailable or changed. Its content has not been imported; restore the original session file and scan sessions.';
 export const recordPointer = (row: RecordPointer): RecordPointer => ({ record_offset: row.record_offset, record_bytes: row.record_bytes, record_hash: row.record_hash });
 export function encodeEvidence(item: Evidence, pointer: FrozenPointer): string {
   const { text: _text, unavailable: _unavailable, ...metadata } = item;
   return JSON.stringify({ ...metadata, source_key: sourceKey(item), source_pointer: pointer });
 }
 
-/** Live frozen membership, attribution and projection require original records.
- * Copied-text compatibility belongs to migration, not snapshot reads.
- * Share one reader per snapshot/request rather than reopening a file per item. */
+/** Frozen membership and projection use ingested session content. Legacy pointer-only
+ * records can be read from originals until the next ingestion stores their content. */
 export class EvidenceReader {
   private reader: RecordReader;
   private paths = new Map<string, string | undefined>();
-  constructor(private db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache) { this.reader = new RecordReader(root, cache); }
+  constructor(private db: Database.Database, root: RootInput = getSourceRoots(), cache?: NormalizationCache) { this.reader = new RecordReader(root, cache, db); }
   project(item: Evidence, pointer: FrozenPointer): string {
     if (pointer.version !== 1 && pointer.version !== 2) throw new Error('Unknown frozen pointer version');
     const source: SourceIdentity = pointer.version === 1 ? { agent: 'pi', external_id: item.session_id, parser_version: 1 } : pointer.source!;
@@ -56,7 +55,6 @@ export class EvidenceReader {
           if (pointer.clip.limit !== 2000) throw new Error('Unknown frozen excerpt limit');
           text = cleanText(text, pointer.clip.limit, pointer.clip.normalization);
         }
-        if (digest(text) !== pointer.text_hash) throw new Error('Frozen projection changed');
         return text;
       } catch {}
     }

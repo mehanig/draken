@@ -64,4 +64,27 @@ This establishes improved generalization and usable run inputs for this real sav
 
 Settings now filters request costs and counts by recorded model and operation. Unknown historical metadata remains explicitly unknown; run-level briefing and attempt counts stay unfiltered and labelled separately. A read-only check of the real 14-day ledger covered 1,294 calls, two models and eleven operations: model-filtered costs and call counts, and operation-filtered call counts, summed to the unfiltered totals. It made no provider calls. Browser tests cover combined filters, empty results, incomplete pricing, late responses, failed refreshes and narrow layouts. The new client was built into a temporary test directory rather than replacing the running server's public assets.
 
-No live definitions were replaced, no server was restarted, and no PR, merge or release was made. Applying replacements still requires explicit preparation with fresh source checks, preserved old IDs/revisions/receipts, and review of the remaining workflows.
+## Local deployment and catalog preparation — 2026-11-24
+
+The owner subsequently authorized local deployment of PR #62 (`c01ab84`) and preparation of replacement definitions. Live run **494** used **9/10 Astra calls, $1.30812**, with complete accounting and no failed calls. Nine active workflows became eight Ready workflows; the duplicate feature-specific definitions now share one reusable implementation/local-deployment procedure. Old IDs remain aliases, historical rows remain unchanged, and both workspace runs and all 32 execution receipts were preserved. A SQLite backup was taken first.
+
+Two different feature requests passed input/session-plan validation with identical saved workflow and enrichment; neither was executed. Automatic learning resumed: run 495 completed with one Luna summary and one Astra reconstruction. Live Factory navigation painted in 64.7 ms desktop / 70.2 ms mobile; the API took 17.43 ms. Live combined usage filters worked with no browser-induced mutating requests or browser errors. These are navigation measurements, not cold startup measurements.
+
+PR #62 is open, not merged or published. Package metadata remains 0.15.2. This deployment preceded the append-only policy correction described below; those later changes have not been deployed.
+
+## Review fixes: reuse ingested content
+
+Ingestion now stores normalized session content in `session_records`, including the older normalization needed by saved snapshots. Older pointer-only databases import this content during their next scan. Readers remain read-only and use the original files only for records not yet imported. Append scans no longer hash unchanged history; readiness no longer stats session files.
+
+Workflow preparation reuses stored process, task and workflow results. Reconstruction and matching check current source permissions around model calls without reloading their inputs. Saved-workflow enrichment reads the saved definition rather than rebuilding earlier task evidence. Chat-created workflows retain the references needed to check permission on uncited neighbors, even when later context pages change. Older requested workflows convert that permission scope once, without changing their original receipts. Repository identity, cancellation, initial model-output validation, failure accounting and retry rules remain enforced.
+
+The usage panel no longer repeats the filter explanation, and approximate-timing text appears only when relevant. The documentation now distinguishes the earlier deployment from these subsequent fixes and makes clear that database backups contain normalized session content.
+
+Validation:
+
+- **895 unit tests and 81 browser tests passed**, including the evidence module's import checks, standalone compile/run proof, first-import checks, permission revocation, text/voice parity and cancellation. Typechecks, Knip and whitespace checks passed. Obsolete tests requiring repeated validation of immutable saved results were removed; initial contract validation remains covered. One native-fixture timing failure in a parallel run passed unchanged in isolation and in the subsequent complete unit run.
+- A private live-database copy contained **10 saved workflows** after further automatic learning. One-time ingestion stored **28,172 versioned normalized records**, about **35.1 MB of JSON**, in **7.76 seconds**. The check left live data unchanged and made no provider calls.
+- Reading all ten saved workflows for preparation preserved their revisions and took **687 ms cold / 620 ms warm**, with **zero session-file opens and zero application-database writes**. This is the preparation permission-check path, not page navigation.
+- The private-copy Factory API took **43.7 ms**. Ordinary navigation painted the saved cards in **95.0 ms desktop / 60.4 ms mobile**, with no browser errors, mutating requests or application-database writes. Cold server startup is not included.
+
+No workflow was executed, no allowance was increased, and no deployment, merge or publication was performed for these review fixes.

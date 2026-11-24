@@ -126,5 +126,5 @@ test('a legacy or interrupted import cannot certify its indexed prefix; later ap
   const file = db.prepare('SELECT path FROM agent_sessions').get().path;
   fs.appendFileSync(file, '{"type":"message","id":"still-writing');
   assert.equal(indexReadiness(cache, db).ready, true, 'captured history is not an unbounded live stream');
-  fs.truncateSync(file, 10); assert.equal(indexReadiness(cache, db).ready, false);
+  fs.truncateSync(file, 10); assert.equal(indexReadiness(cache, db).ready, true, 'readiness uses captured metadata, not physical file checks');
 });

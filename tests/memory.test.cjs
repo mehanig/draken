@@ -47,7 +47,7 @@ function change(id, text) { editEntry(db, process.env.DRAKEN_PI_SESSIONS_DIR, id
 function sync() { return Number(db.prepare("INSERT INTO syncs(created_at,snapshot_at,snapshot_version,status) VALUES(?,?,2,'completed')").run(at, at).lastInsertRowid); }
 function protectedRows() { return JSON.stringify(['agent_sessions', 'agent_entries', 'syncs', 'sync_items', 'sync_messages', 'sync_coverage', 'summary_cache', 'sync_runs'].map(table => db.prepare(`SELECT * FROM ${table}`).all())); }
 
-test('call readiness is metadata-only, survives reopening, and invalidates on new records and original file changes', async () => {
+test('call readiness is metadata-only, survives reopening, and changes with admitted records rather than physical files', async () => {
   const {indexReadiness,storedHistoryReadiness}=require('../dist/memory/readiness');
   assert.equal(storedHistoryReadiness(root,db).ready,false);assert.equal(fs.existsSync(path.join(root,'memory')),false);
   entry('Whisper was retired.');const before=protectedRows();
@@ -59,7 +59,7 @@ test('call readiness is metadata-only, survives reopening, and invalidates on ne
   entry('A small new tail.');assert.equal(indexReadiness(cache,db).ready,false);
   await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);
   const file=db.prepare("SELECT path FROM agent_sessions WHERE id='session-a'").get().path;
-  fs.renameSync(file,file+'.missing');assert.equal(indexReadiness(cache,db).ready,false);
+  fs.renameSync(file,file+'.missing');assert.equal(indexReadiness(cache,db).ready,true);
   fs.renameSync(file+'.missing',file);await index.prepare();assert.equal(indexReadiness(cache,db).ready,true);
   const fileCache=path.join(root,'copied-index.sqlite');await cache.backup(fileCache);const reopened=new Database(fileCache,{readonly:true});
   try{assert.equal(indexReadiness(reopened,db).ready,true);}finally{reopened.close();}

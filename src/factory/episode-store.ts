@@ -3,21 +3,17 @@ import { preparationOperation, preparationRetryRequested, isPreparationLimit, re
 import { digest, cleanText } from '../sync/normalize';
 import { workflowLocation } from './location';
 import { isBatchSummaryModel, LUNA_BATCH, promptTokens } from '../sync/summary-budget';
-import { readProcessParent, readProcessParents, learningInputKey, LEARNING_FORMAT, type ProcessParent } from './process-store';
-import { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence, reviewTaskReconstruction, type TaskFragment } from '../workflow-learning';
+import { readProcessParent, readProcessParents, assertProcessParents, learningInputKey, LEARNING_FORMAT, type ProcessParent } from './process-store';
+import { TASK_RECONSTRUCTION_PROMPT, reconstructTask, assembledTaskInput, reconstructionEvidence, type TaskFragment } from '../workflow-learning';
 
 export interface EpisodeParent { episode: string; revision: number }
 export type LearningParent = ProcessParent | EpisodeParent;
 type Loaded = Awaited<ReturnType<typeof readProcessParent>>;
 interface Group { episode?: string; parents: ProcessParent[] }
-interface Receipt { id: string; input_key: string; recipe_version: string; model: string; status: string; source_dependencies_json: string; output_json: string; assembly_index?: number | null }
+interface Receipt { source_dependencies_json: string; output_json: string; assembly_index?: number | null }
 const FORMAT = 'task-reconstruction-v1';
 const key = (p: ProcessParent) => JSON.stringify([p.extraction, p.fragment]);
-const payload = (loaded: Loaded[], excerpts: false | 1000 | 2000 = 1000) => ({ task: 'reconstruct_task', stage: 'task_reconstruction', current: { fragment: 'F0', goal: loaded[0].fragment.goal, context: loaded[0].fragment.context }, fragments: loaded.map((v, i): TaskFragment => ({ id: `F${i}`, process: v.fragment, ...(excerpts ? reconstructionEvidence(v.fragment, v.records, excerpts) : { records: v.records }) })) });
-
-export function reviewReconstructionPayload(loaded: Loaded[], visible: number, context: unknown) {
-  return { task: 'review_task_reconstruction', stage: 'task_reconstruction_review', fragments: payload(loaded.slice(0, visible)).fragments, context };
-}
+const payload = (loaded: Loaded[]) => ({ task: 'reconstruct_task', stage: 'task_reconstruction', current: { fragment: 'F0', goal: loaded[0].fragment.goal, context: loaded[0].fragment.context }, fragments: loaded.map((v, i): TaskFragment => ({ id: `F${i}`, process: v.fragment, ...reconstructionEvidence(v.fragment, v.records) })) });
 function currentRoots(parents: ProcessParent[]) {
   return [...new Set(parents.flatMap(parent => {
     const row = getDb().prepare('SELECT episode_id FROM episode_memberships WHERE extraction_id=? AND fragment_key=?').get(parent.extraction, parent.fragment) as { episode_id: string } | undefined;
@@ -25,17 +21,23 @@ function currentRoots(parents: ProcessParent[]) {
   }))].sort();
 }
 const load = readProcessParents;
-function verify(loaded: Loaded[], identities: string[], location: string) {
-  if (JSON.stringify(loaded.map(v => v.identity)) !== JSON.stringify(identities) || loaded.some(v => v.location.kind === 'unavailable' || v.location.key !== location)) throw Error('Task reconstruction sources or location changed');
+export function assertLearningParents(parents: LearningParent[], signal: AbortSignal): void {
+  const sources = parents.flatMap(parent => {
+    if ('extraction' in parent) return [parent];
+    const row = getDb().prepare(`SELECT r.source_dependencies_json FROM episode_revisions v JOIN episode_reconstructions r ON r.id=v.reconstruction_id
+      WHERE v.episode_id=? AND v.revision=? AND r.status='completed'`).get(parent.episode, parent.revision) as Receipt | undefined;
+    if (!row) throw Error('Reconstructed task unavailable');
+    return JSON.parse(row.source_dependencies_json).parents as ProcessParent[];
+  });
+  assertProcessParents(sources, signal);
 }
 export async function readLearningParents(parents: LearningParent[], signal: AbortSignal) {
   const frames = parents.map(parent => {
     if ('extraction' in parent) return { parent, row: undefined, deps: { parents: [parent] } };
-    const row = getDb().prepare(`SELECT r.*,v.assembly_index FROM episode_revisions v JOIN episode_reconstructions r ON r.id=v.reconstruction_id
+    const row = getDb().prepare(`SELECT r.source_dependencies_json,r.output_json,v.assembly_index FROM episode_revisions v JOIN episode_reconstructions r ON r.id=v.reconstruction_id
       WHERE v.episode_id=? AND v.revision=? AND r.status='completed'`).get(parent.episode, parent.revision) as Receipt | undefined;
     if (!row) throw Error('Reconstructed task unavailable');
     const deps = JSON.parse(row.source_dependencies_json);
-    if (![FORMAT, 'task-reconstruction-review-v1'].includes(deps.format) || !Array.isArray(deps.parents) || !deps.parents.length || deps.parents.length > 64) throw Error('Invalid task reconstruction receipt');
     return { parent, row, deps };
   });
   const unique = [...new Map(frames.flatMap(frame => frame.deps.parents as ProcessParent[]).map(parent => [key(parent), parent])).values()];
@@ -43,22 +45,9 @@ export async function readLearningParents(parents: LearningParent[], signal: Abo
   return frames.map(({ parent, row, deps }) => {
     if ('extraction' in parent) return byParent.get(key(parent))!;
     if (!row) throw Error('Reconstructed task unavailable');
-    const loaded = (deps.parents as ProcessParent[]).map(p => byParent.get(key(p))!); verify(loaded, deps.identities, deps.location);
-    if (deps.projection !== undefined && !['task-excerpts-v1', 'task-excerpts-v2'].includes(deps.projection)) throw Error('Unknown task evidence projection');
-    const review = deps.format === 'task-reconstruction-review-v1';
-    if (review && (deps.projection !== 'task-excerpts-v2' || !Number.isInteger(deps.visible) || deps.visible < 1 || deps.visible > loaded.length || !Array.isArray(deps.reviewedReceipts))) throw Error('Invalid task review receipt');
-    if (review) for (const prior of deps.reviewedReceipts) {
-      const saved = getDb().prepare('SELECT source_dependencies_json,raw_output,output_json FROM episode_reconstructions WHERE id=?').get(prior.id) as Pick<Receipt, 'source_dependencies_json' | 'output_json'> & { raw_output: string } | undefined;
-      if (!saved || digest(JSON.stringify(saved)) !== prior.fingerprint) throw Error('Reviewed task receipt changed');
-      const priorSources = JSON.parse(saved.source_dependencies_json);
-      for (const [i, source] of (priorSources.parents as ProcessParent[]).entries()) {
-        const index = (deps.parents as ProcessParent[]).findIndex(parent => key(parent) === key(source));
-        if (index < 0 || loaded[index].identity !== priorSources.identities[i]) throw Error('Reviewed task context is unavailable or changed');
-      }
-    }
-    const input = review ? reviewReconstructionPayload(loaded, deps.visible, deps.context) : payload(loaded, deps.projection === undefined ? false : deps.projection === 'task-excerpts-v1' ? 2000 : 1000);
-    if (typeof deps.prompt !== 'string' || row.recipe_version !== digest(deps.prompt) || row.input_key !== learningInputKey(deps, input, row.model)) throw Error('Task reconstruction input changed');
-    const result = review ? reviewTaskReconstruction(row.output_json, input.fragments)[row.assembly_index!] : reconstructTask(row.output_json, input.fragments);
+    const loaded = (deps.parents as ProcessParent[]).map(p => byParent.get(key(p))!);
+    const saved = JSON.parse(row.output_json);
+    const result: ReturnType<typeof reconstructTask> = deps.format === 'task-reconstruction-review-v1' ? saved.tasks[row.assembly_index!] : saved;
     if (!result) throw Error('Reviewed task assembly unavailable');
     const selected = result.members.map(id => loaded[Number(id.slice(1))]);
     const roots = currentRoots(result.members.map(id => deps.parents[Number(id.slice(1))]));
@@ -149,7 +138,7 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
     db.prepare(`INSERT INTO episode_reconstructions(id,input_key,recipe_version,model,current_extraction,current_fragment,run_id,status,source_dependencies_json,created_at)
       VALUES (?,?,?,?,?,?,?,'running',?,?)`).run(id, inputKey, recipe, model, current.extraction, current.fragment, run, JSON.stringify(deps), new Date().toISOString());
     try {
-      verify(await load(parents, signal), identities, first.location.key);
+      assertProcessParents(parents, signal);
       const raw = await ask(input, TASK_RECONSTRUCTION_PROMPT);
       db.prepare('UPDATE episode_reconstructions SET raw_output=? WHERE id=?').run(raw, id);
       signal.throwIfAborted();
@@ -157,7 +146,7 @@ export async function reconstructPendingTasks(run: number, model: string, ask: (
       const members = result.members.map(id => parents[Number(id.slice(1))]), selected = new Set(members.map(key));
       const merged = groups.filter(g => g.episode && g.parents.some(p => selected.has(key(p))));
       if (merged.some(g => g.parents.some(p => !selected.has(key(p))))) throw Error('Task reconstruction split an existing task; review is required');
-      verify(await load(parents, signal), identities, first.location.key); signal.throwIfAborted();
+      assertProcessParents(parents, signal); signal.throwIfAborted();
       db.transaction(() => {
         if (result.status === 'task') {
           const ids = merged.map(g => g.episode!);

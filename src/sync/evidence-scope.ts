@@ -22,7 +22,7 @@ export function evidenceIdentities(metadata: Record<string, any>): [string, stri
   return [identity(metadata.sequence), identity(undefined)];
 }
 
-/** Admission policy only. Callers must ALSO verify physical originals freshly.
+/** Admission policy over stored metadata, separate from session content.
  * Reference labels and file moves are not model input; the selected projection
  * and all model attribution are. No archive scans or cached consent decisions. */
 export class EvidenceScope {
@@ -58,9 +58,8 @@ export class EvidenceScope {
   }
 }
 
-/** Pair with a just-read getSync/requireOpen at admission, or independently read
- * originals once at a native dispatch boundary. Never reuse a successful byte
- * check across an await. The metadata-only option is deliberately explicit. */
+/** Check current permissions and availability of the selected stored projections.
+ * A supplied snapshot avoids loading the same records twice. */
 export function verifySyncEvidence(db: Database.Database, id: number, freshlyRead?: { items: Evidence[]; context: Evidence[] }): void {
   const items = (db.prepare('SELECT evidence_json FROM sync_items WHERE sync_id=? ORDER BY rowid').all(id) as { evidence_json: string }[])
     .map(row => JSON.parse(row.evidence_json));

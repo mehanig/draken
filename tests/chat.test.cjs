@@ -269,7 +269,7 @@ for (const [scope, question, expected] of [
  launchChat(id,question,key); assert.equal(calls().length-before,1);
 });
 
-test('explicit frozen evidence changed during selection never reaches the answer model', async () => {
+test('explicit frozen evidence uses ingested content even if the physical file changes during selection', async () => {
  const {id}=await ready(), item=store.getSync(id).items[0], before=calls().length;
  assert.ok(item.source_path.startsWith(root));
  memory.searchPreparedHistory=async()=>{
@@ -277,8 +277,8 @@ test('explicit frozen evidence changed during selection never reaches the answer
   return {mode:'hybrid',results:[],limitations:'Synthetic search.'};
  };
  launchChat(id,`Explain ${item.ref}`,randomUUID());await idle();
- assert.equal(store.getProgress(id).run.status,'failed');
- assert.deepEqual(calls().slice(before).map(call=>call.task),['plan_evidence','select_evidence']);
- assert.equal(store.getSync(id,false).messages.at(-1).role,'user');
+ assert.equal(store.getProgress(id).run.status,'completed');
+ assert.deepEqual(calls().slice(before).map(call=>call.task),['plan_evidence','select_evidence','final_verdict']);
+ assert.equal(store.getSync(id,false).messages.at(-1).role,'assistant');
  assert.equal(store.homeOverview().covered,0);
 });

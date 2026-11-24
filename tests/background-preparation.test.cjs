@@ -96,11 +96,11 @@ test('consolidation accounting does not replace summary progress or clear an exi
 
 test('equal-count source edits accumulate canonically, while model and recipe changes reprepare without new IDs', async () => {
   background.setAutoSummary(true); await append(128); await warm();
-  rows[1].message.content += ' changed'; writeRows(); await scanSessions();
+  rows.push({type:'context_edit',id:'edit-1',parentId:rows.at(-1).id,targetId:rows[1].id,replacement:rows[1].message.content+' changed',timestamp:stamp(128)}); writeRows(); await scanSessions();
   assert.equal(prep.summaryPreparationSettings().prepared_entries, 128); let before = calls().length; await warm(); assert.ok(calls().length > before);
   let edited = 1;
   for (const count of [32, 63, 64]) {
-    for (let n = edited + 1; n <= count; n++) rows[n].message.content += ' changed';
+    for (let n = edited + 1; n <= count; n++) rows.push({type:'context_edit',id:'edit-'+n,parentId:rows.at(-1).id,targetId:rows[n].id,replacement:rows[n].message.content+' changed',timestamp:stamp(128+n)});
     edited = count; writeRows(); await scanSessions(); await warm();
     assert.ok(calls().length > before); before = calls().length;
   }
@@ -163,15 +163,15 @@ test('context-only changes invalidate and reprepare a full eligible batch', asyn
   await append(70); getDb().prepare("INSERT INTO sync_settings(key,value) VALUES ('history_since',?)").run(stamp(6));
   const input = store.previewSummaryInput(); assert.equal(input.items.length, 64); assert.equal(input.context.length, 6);
   background.setAutoSummary(true); await warm(); const before = calls().length;
-  rows[3].message.content += ' revised context'; writeRows(); await scanSessions();
+  rows.push({type:'context_edit',id:'context-edit',parentId:rows.at(-1).id,targetId:rows[3].id,replacement:rows[3].message.content+' revised context',timestamp:stamp(128)}); writeRows(); await scanSessions();
   await warm(); assert.ok(calls().length > before);
   assert.equal(prep.summaryPreparationSettings().prepared_entries, 64); assert.equal(runs().length, 2); untouched();
 });
 
-test('unavailable or modified originals fail closed without paid requests, reservations or leaked errors', async () => {
+test('completed preparation reuses ingested records without reopening missing session files', async () => {
   background.setAutoSummary(true); await append(64); await warm(); const before = calls().length;
   fs.unlinkSync(file); assert.equal(prep.summaryPreparationSettings().prepared_entries, 64, 'historical progress does not open missing originals'); await warm();
-  assert.equal(calls().length, before); assert.equal(prep.summaryPreparationSettings().status, 'waiting');assert.ok(prep.summaryPreparationSettings().error_count>0);
+  assert.equal(calls().length, before); assert.equal(prep.summaryPreparationSettings().status, 'waiting');assert.equal(prep.summaryPreparationSettings().error_count,0);
   assert.doesNotMatch(prep.summaryPreparationSettings().error, /PRIVATE_SOURCE_SENTINEL|private-workspace|synthetic\.jsonl/);
   writeRows(); await scanSessions(); await warm(); assert.equal(calls().length, before, 'restoring files does not authorize a failed paid retry');
   background.setAutoSummary(true); await warm(); assert.equal(prep.summaryPreparationSettings().prepared_entries, 64); untouched();
@@ -212,7 +212,8 @@ test('preview reads verified existing discovery without scanning, reserving, or 
   fs.appendFileSync(file, JSON.stringify(extra) + '\n');
   const input = store.previewSummaryInput(); assert.equal(input.items.length, 64); assert.equal(input.models.summary, LUNA);
   assert.equal(getDb().prepare('SELECT total_changes() n').get().n, before); untouched();
-  fs.unlinkSync(file); assert.throws(() => store.previewSummaryInput(), /Original session evidence/);
+  fs.unlinkSync(file); assert.deepEqual(store.previewSummaryInput().items, input.items);
+  assert.equal(getDb().prepare('SELECT total_changes() n').get().n, before);
 });
 
 test('cancelled same-input work resumes the same invocation allowance and metrics after restart', async () => {

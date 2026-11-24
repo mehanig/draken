@@ -97,11 +97,11 @@ test('frozen aliases coalesce with originals; edits/removals occupy one slot eac
  assert.equal([...before.keys()].filter(key=>!removed.has(key)).length,63,'one removal per original, not per frozen alias');
 });
 
-test('real source rewrites count each edited record once; failed preparation keeps the durable checkpoint',async()=>{
+test('appended context edits count each edited record once; failed preparation keeps the durable checkpoint',async()=>{
  const s=session('edits');s.append(64);await scanSessions();await history().prepare();
  const before=loadSourceCheckpoint(root+'/state');
  const lines=fs.readFileSync(s.file,'utf8').trim().split('\n').map(JSON.parse);
- for(let i=1;i<=63;i++)lines[i].message.content+=' Corrected; still unverified.';
+ for(let i=1;i<=63;i++)lines.push({type:'context_edit',id:'edit-'+i,parentId:lines.at(-1).id,targetId:lines[i].id,replacement:lines[i].message.content+' Corrected; still unverified.',timestamp:lines[i].timestamp});
  fs.writeFileSync(s.file,lines.map(JSON.stringify).join('\n')+'\n');
  const worker=scheduler(),embed=model.embed;model.embed=async()=>{throw Error('Synthetic model failure');};
  await worker.tick();assert.equal(worker.state.phase,'waiting');assert.deepEqual(loadSourceCheckpoint(root+'/state'),before);

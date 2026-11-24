@@ -52,13 +52,13 @@ test('new agents require explicit opt-in; namespaces separate equal native IDs a
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_coverage').get().n, 0);
 });
 
-test('foreign pointers survive appends and verified moves, but reject rewritten originals and changed agent identity', async () => {
+test('foreign ingested records survive appends, moves and physical changes while rejecting changed agent identity', async () => {
   allEnabled(); const records = codexLog(), file = write('codex', 'rollout', records); await scanSessions(); const sync = store.startSync();
   fs.appendFileSync(file, JSON.stringify({ type: 'response_item', timestamp: at, payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Later claim' }] } }) + '\n');
   await scanSessions(); assert.deepEqual(store.getSync(sync.id).items, sync.items);
   const moved = path.join(root, 'codex', 'moved.jsonl'); fs.renameSync(file, moved); await scanSessions(); assert.deepEqual(store.getSync(sync.id).items, sync.items);
   const original = fs.readFileSync(moved, 'utf8'); fs.writeFileSync(moved, original.replace('Please check the parser.', 'Please alter the parser.'));
-  assert.ok(store.getSync(sync.id).items.some(item => item.unavailable)); assert.throws(() => store.completeSync(sync.id, '', '', true), /Original session evidence/);
+  assert.deepEqual(store.getSync(sync.id).items, sync.items);
   fs.writeFileSync(moved, original); assert.deepEqual(store.getSync(sync.id).items, sync.items);
   const frozen = JSON.parse(db.prepare('SELECT evidence_json FROM sync_items LIMIT 1').get().evidence_json); frozen.source_pointer.source.agent = 'claude';
   const reader = new EvidenceReader(db); try { assert.throws(() => reader.read(frozen), /identity changed/); } finally { reader.close(); }

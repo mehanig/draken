@@ -125,7 +125,7 @@ test('alternating home/overview captured and current polls reuse bounded metadat
   }
   assert.equal(query.counts.walks,0,'no source scans, frozen JSON reads or per-original gets on warm polls');
   assert.equal(query.counts.originals,0);assert.ok(query.counts.prepare<=70*5,'only bounded revision/strict flag SQL');
-  assert.equal(stats,140,'each scope still validates its required original file each time');
+  assert.equal(stats,0,'readiness never stats already ingested session files');
   db.exec("INSERT INTO sync_settings VALUES('readiness-test','revision')");query.reset();
   assert.equal(indexReadiness(cache,db,true).ready,true);assert.equal(indexReadiness(cache,db).ready,true);
   assert.ok(query.counts.originals>=124,'same-connection total_changes invalidates both slots');
@@ -133,7 +133,7 @@ test('alternating home/overview captured and current polls reuse bounded metadat
  }finally{fs.lstatSync=lstat;query.close();}
 });
 
-test('home/overview report checkpoints without walking history; admission still detects damaged or missing evidence',async()=>{
+test('home/overview report checkpoints without walking history; admission checks prepared passages, not physical files',async()=>{
  await prepared();for(let n=0;n<55;n++)snapshot();
  db.prepare('UPDATE syncs SET conversation_last_user_at=?,conversation_before=?').run(new Date().toISOString(),BEFORE);
  await index.prepare({before:BEFORE},undefined,true);
@@ -159,7 +159,7 @@ test('home/overview report checkpoints without walking history; admission still 
   cache.exec('UPDATE passages SET embedded=1');assert.ok(store.overview().syncs.every(card=>card.conversation.available_before===BEFORE));
   fs.unlinkSync(root+'/sessions/captured.jsonl');queries=stats=0;
   assert.ok(store.homeOverview().syncs.every(card=>card.conversation.available_before===BEFORE));assert.equal(queries,0);assert.equal(stats,0);
-  assert.equal(indexReadiness(cache,db,true).ready,false,'actual admission rejects missing originals');
+  assert.equal(indexReadiness(cache,db,true).ready,true,'missing physical files do not invalidate ingested content');
   assert.equal(canonical(),saved);
   assert.equal(cache.prepare('SELECT total_changes() n').get().n,changes+2*cache.prepare('SELECT COUNT(*) n FROM passages').get().n);
  }finally{memory.historyPreparationStatus=ready;cache.prepare=prepare;fs.lstatSync=lstat;}
@@ -211,21 +211,21 @@ test('external DB commits invalidate cached admission even without local total_c
  }finally{other.close();query.close();}
 });
 
-test('file metadata is checked on cache hits and safe append metadata changes rebuild without hashing cursors',async()=>{
+test('physical file metadata does not invalidate readiness or cause metadata reconstruction',async()=>{
  await prepared();snapshot();await index.prepare({before:BEFORE},undefined,true);
  const file=root+'/sessions/captured.jsonl',stamp=historyStamp(db,BEFORE),query=sourceQueries();
  try{
-  append();assert.equal(historyStamp(db,BEFORE),stamp);assert.ok(query.counts.originals>0,'valid size/mtime change rebuilds DB-derived state');
+  append();assert.equal(historyStamp(db,BEFORE),stamp);assert.equal(query.counts.originals,0,'an append needs no old-source checks');
   query.reset();assert.equal(historyStamp(db,BEFORE),stamp);assert.equal(query.counts.walks,0);
   fs.utimesSync(file,new Date(),new Date(Date.now()+10000));
-  assert.equal(historyStamp(db,BEFORE),stamp);assert.ok(query.counts.originals>0,'mtime-only change on an appended file also rebuilds');
+  assert.equal(historyStamp(db,BEFORE),stamp);assert.equal(query.counts.originals,0,'mtime changes need no old-source checks');
   fs.renameSync(file,file+'.original');fs.copyFileSync(file+'.original',file);
-  assert.throws(()=>historyStamp(db,BEFORE),/unavailable/,'replacement inode cannot use warm metadata');
+  assert.equal(historyStamp(db,BEFORE),stamp,'stored content is independent of the physical inode');
   fs.unlinkSync(file);fs.renameSync(file+'.original',file);
   assert.equal(historyStamp(db,BEFORE),stamp);
   await scan();assert.equal(historyStamp(db,BEFORE),stamp,'advancing import cursors does not alter captured identity');
   fs.utimesSync(file,new Date(),new Date(Date.now()+20000));
-  assert.throws(()=>historyStamp(db,BEFORE),/unavailable or changed/,'same-size mtime change fails closed on a warm slot');
+  assert.equal(historyStamp(db,BEFORE),stamp,'mtime changes do not invalidate stored records');
  }finally{query.close();}
 });
 
@@ -298,15 +298,13 @@ test('a failed discovery outside the capture blocks global readiness, not an int
  db.exec("UPDATE agent_sessions SET scanned_bytes=0 WHERE id='captured'");assert.equal(indexReadiness(cache,db,true).ready,false,'the captured import itself must remain complete');
 });
 
-test('missing originals and real old-content rewrites remain unavailable before and after scan',async()=>{
+test('physical file changes do not change readiness; permission revocation still does',async()=>{
  await prepared();const file=root+'/sessions/captured.jsonl';
- fs.renameSync(file,file+'.missing');assert.equal(indexReadiness(cache,db,true).ready,false);fs.renameSync(file+'.missing',file);assert.equal(indexReadiness(cache,db,true).ready,true);
- const original=fs.readFileSync(file,'utf8');fs.writeFileSync(file,original.replace('Synthetic captured topic','Synthetic modified topic'));
- fs.utimesSync(file,new Date(),new Date(Date.now()+10000));assert.equal(indexReadiness(cache,db,true).ready,false);
- await scan();assert.equal(indexReadiness(cache,db,true).ready,false,'a first-user edit changes presentation names as well as true original content');
- await index.prepare({before:BEFORE},undefined,true);assert.equal(indexReadiness(cache,db,true).ready,true,'explicit preparation establishes only verified current projections');
- fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace('Original reported result','Modified reported result'));append();
- await scan();assert.equal(indexReadiness(cache,db,true).ready,false,'old rewrite plus append is not mistaken for a harmless cursor update');
+ fs.renameSync(file,file+'.missing');assert.equal(indexReadiness(cache,db,true).ready,true);
+ fs.renameSync(file+'.missing',file);fs.writeFileSync(file,'Changed outside ingestion');
+ assert.equal(indexReadiness(cache,db,true).ready,true);
+ db.prepare("UPDATE agent_sessions SET included=0 WHERE id='captured'").run();
+ assert.equal(indexReadiness(cache,db,true).ready,false,'stored permission changes still revoke admission');
 });
 
 test('post-cutoff context edits to captured content invalidate readiness without rewriting the frozen E snapshot',async()=>{

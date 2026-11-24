@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {getDb,closeDb}=require('../dist/db/schema');
 const {initProcessSchema}=require('../dist/db/process-schema');
 const {frozenEvidence}=require('./fixtures/source-entry.cjs');
-const {readWorkflowOriginals}=require('../dist/evidence-adapter');
+const {readWorkflowRecords}=require('../dist/evidence-adapter');
 const {saveSummaryProcess,pendingWorkflows}=require('../dist/factory/learning-store');
 const {reconstructPendingTasks,readLearningParent,readLearningParents,independentTasks}=require('../dist/factory/episode-store');
 const {learnSummaryWorkflows}=require('../dist/factory/learning');
@@ -14,7 +14,7 @@ beforeEach(()=>{closeDb();prior={...process.env};root=fs.mkdtempSync(path.join(o
 afterEach(()=>{controller.abort();closeDb();for(const k of Object.keys(process.env))if(!(k in prior))delete process.env[k];Object.assign(process.env,prior);fs.rmSync(root,{recursive:true,force:true});});
 async function fragment(label,{session='one',goal='Release 1.2.3',text='Continue the release of 1.2.3.',cwd=root+'/repo',uncited=false,pointer}={}){
  const primary=pointer||frozenEvidence(db,root+'/sessions',text,{session,cwd,role:'user'}),background=Array.from({length:typeof uncited==='number'?uncited:Number(uncited)},()=>frozenEvidence(db,root+'/sessions','Uncited context.',{session,cwd,role:'assistant'}));
- const records=await readWorkflowOriginals([primary,...background],controller.signal);
+ const records=await readWorkflowRecords([primary,...background],controller.signal);
  const process={summary:goal,fragments:[{key:label,goal,context:'The requested release',state:'partial',refs:['S1'],coverage:{triggerRefs:[],outcomeRefs:[],gaps:['Partial task history']},
   stages:[{key:'work',action:text,normalizedAction:'Perform release work',role:'main',condition:null,claims:[{description:text,basis:'requested',refs:['S1']}],refs:['S1'],tools:[],skills:[]}],dependencies:[],decisions:[],exceptions:[],questions:[],matching:{goal:'Publish a release',context:'A release is requested'}}],limitations:['Historical fragment']};
  assert.equal(saveSummaryProcess(label,'fixture/model',{table:'background_runs',id:1},JSON.stringify({session,workspace:cwd,evidence:[primary],background}),process,records.map(r=>r.ref),records.map(r=>r.role)),true);
@@ -95,20 +95,23 @@ test('malformed output is retained and cannot automatically replay within the sa
  await reconstruct(async()=>{count++;return '{}';},2);assert.equal(count,1,'a different owner is not permission to replay a failure');
  require('../dist/sync/preparation-errors').retryPreparationErrors();await reconstruct(ask,2);assert.equal(tasks().length,1);assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='failed'").get().n,1);
 });
-for(const change of ['uncited','unselected','bytes','location','cancel'])test(`${change} changes during reconstruction prevent admission and retain the paid response`,async()=>{
+for(const change of ['uncited','unselected','location','cancel'])test(`${change} changes during reconstruction prevent admission and retain the paid response`,async()=>{
  const a=await fragment('first',{uncited:true});await fragment('other',{session:'other',goal:'Release 9.9.9'});
  const operation=reconstruct(async input=>{
   const output=JSON.stringify(decision(input,f=>f.id==='F0'));
   if(change==='uncited')db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(a.background[0].entry_id,a.background[0].session_id);
   if(change==='unselected')db.prepare("UPDATE agent_sessions SET included=0 WHERE id='other'").run();
-  if(change==='bytes'){const p=root+'/sessions/one.jsonl';fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace('Continue','Abandon '));}
   if(change==='location')require('node:child_process').execFileSync('git',['init','-q',root+'/repo']);
   if(change==='cancel')controller.abort();
   return output;
  });
  if(change==='cancel')await assert.rejects(operation);else await operation;
  assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_memberships WHERE fragment_key='first'").get().n,0,'the changed task is never admitted');
- assert.equal(tasks().length,['uncited','bytes'].includes(change)?1:0,'only independently valid originals may still produce a task');const row=db.prepare('SELECT * FROM episode_reconstructions').get();assert.equal(row.status,change==='cancel'?'cancelled':'failed');assert.ok(row.raw_output);assert.ok(row.error);
+ assert.equal(tasks().length,change==='uncited'?1:0,'only independently valid originals may still produce a task');const row=db.prepare('SELECT * FROM episode_reconstructions').get();assert.equal(row.status,change==='cancel'?'cancelled':'failed');assert.ok(row.raw_output);assert.ok(row.error);
+});
+test('reconstruction reuses the input already read before inference rather than reopening the source afterwards',async()=>{
+ await fragment('first');await reconstruct(async input=>{fs.unlinkSync(root+'/sessions/one.jsonl');return JSON.stringify(decision(input));});
+ assert.equal(tasks().length,1);assert.equal(db.prepare('SELECT status FROM episode_reconstructions').get().status,'completed');
 });
 test('originals omitted from the model excerpt still require fresh permission checks',async()=>{
  const source=await fragment('first',{uncited:20});
@@ -117,23 +120,24 @@ test('originals omitted from the model excerpt still require fresh permission ch
 });
 test('shared reconstruction dependencies are read once per batch, never cached across reads',async()=>{
  const source=await fragment('first',{uncited:true});await fragment('second',{session:'other'});await reconstruct(async input=>JSON.stringify(decision(input,f=>f.id==='F0')));
- const adapter=require('../dist/evidence-adapter'),original=adapter.readWorkflowOriginals;let batches=0,records=0;
- adapter.readWorkflowOriginals=async(pointers,signal)=>{batches++;records+=pointers.length;return original(pointers,signal);};
+ const adapter=require('../dist/evidence-adapter'),original=adapter.readWorkflowRecords;let batches=0,records=0;
+ adapter.readWorkflowRecords=async(pointers,signal)=>{batches++;records+=pointers.length;return original(pointers,signal);};
  try{
   assert.equal((await readLearningParents(tasks(),controller.signal)).length,2);assert.equal(batches,1);assert.equal(records,3);
   await readLearningParents(tasks(),controller.signal);assert.equal(batches,2);assert.equal(records,6);
   db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(source.background[0].entry_id,source.background[0].session_id);
   await assert.rejects(readLearningParents(tasks(),controller.signal));assert.equal(batches,3);
- }finally{adapter.readWorkflowOriginals=original;}
+ }finally{adapter.readWorkflowRecords=original;}
 });
-test('a task revision binds its saved prompt rather than requiring the newest prompt text',async()=>{
+test('a saved task revision keeps its prior recipe and does not rerun reconstruction validation',async t=>{
  await fragment('first');await reconstruct();const row=db.prepare('SELECT * FROM episode_reconstructions').get(),deps=JSON.parse(row.source_dependencies_json);
  const {digest}=require('../dist/sync/normalize'),{learningInputKey}=require('../dist/factory/process-store');deps.prompt+='\nEarlier compatible prompt wording.';
  db.prepare('UPDATE episode_reconstructions SET source_dependencies_json=?,recipe_version=?,input_key=? WHERE id=?').run(JSON.stringify(deps),digest(deps.prompt),learningInputKey(deps,calls[0],row.model),row.id);
  await readLearningParent(tasks()[0],controller.signal);
- db.prepare("UPDATE episode_reconstructions SET recipe_version='wrong' WHERE id=?").run(row.id);await assert.rejects(readLearningParent(tasks()[0],controller.signal),/input changed/);
+ t.mock.method(require('../dist/workflow-learning/reconstruction'),'reconstructTask',()=>assert.fail('Saved results must not be reconstructed again'));
+ await readLearningParent(tasks()[0],controller.signal);
 });
-test('a completed assembly still checks uncited originals on every read',async()=>{
+test('a completed assembly still checks permissions on uncited records',async()=>{
  const source=await fragment('first',{uncited:true});await reconstruct();const task=tasks()[0];await readLearningParent(task,controller.signal);
  db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(source.background[0].entry_id,source.background[0].session_id);
  await assert.rejects(readLearningParent(task,controller.signal));
@@ -187,11 +191,11 @@ test('consolidation must cover every workflow exactly once and cannot invent sou
 test('an explicit partition review can split a mistaken task while retaining its earlier receipts',async()=>{
  await fragment('cleanup',{goal:'Remove comments'});await fragment('discussion',{goal:'Explain a proposed check'});await reconstruct();const old=tasks()[0],before=await readLearningParent(old,controller.signal);
  await fragment('clarification',{goal:'Explain a proposed check'});
- const {readProcessParents,learningInputKey}=require('../dist/factory/process-store'),{reviewReconstructionPayload}=require('../dist/factory/episode-store'),{TASK_REVIEW_PROMPT,reviewTaskReconstruction}=require('../dist/workflow-learning'),{digest}=require('../dist/sync/normalize');
+ const {readProcessParents,learningInputKey}=require('../dist/factory/process-store'),{TASK_REVIEW_PROMPT,reviewTaskReconstruction,reconstructionEvidence}=require('../dist/workflow-learning'),{digest}=require('../dist/sync/normalize');
  const raw=db.prepare("SELECT l.extraction_id extraction,l.fragment_key fragment FROM episode_extractions l JOIN work_episodes e ON e.id=l.episode_id WHERE e.assembly='fragment' ORDER BY e.rowid").all(),parents=[raw[2],raw[0],raw[1]],loaded=await readProcessParents(parents,controller.signal);
  const prior=db.prepare('SELECT id,source_dependencies_json,raw_output,output_json FROM episode_reconstructions').get(),priorValue={source_dependencies_json:prior.source_dependencies_json,raw_output:prior.raw_output,output_json:prior.output_json};
  const deps={format:'task-reconstruction-review-v1',projection:'task-excerpts-v2',prompt:TASK_REVIEW_PROMPT,parents,identities:loaded.map(v=>v.identity),location:loaded[0].location.key,visible:3,context:{previousGroup:['F1','F2']},reviewedReceipts:[{id:prior.id,fingerprint:digest(JSON.stringify(priorValue))}]};
- const input=reviewReconstructionPayload(loaded,3,deps.context),output={tasks:[{...decision({fragments:input.fragments}),members:['F1'],reason:'Cleanup is one task'},{...decision({fragments:input.fragments}),members:['F2','F0'],reason:'Discussion is a separate task'}]};
+ const input={task:'review_task_reconstruction',stage:'task_reconstruction_review',fragments:loaded.map((v,i)=>({id:`F${i}`,process:v.fragment,...reconstructionEvidence(v.fragment,v.records)})),context:deps.context},output={tasks:[{...decision({fragments:input.fragments}),members:['F1'],reason:'Cleanup is one task'},{...decision({fragments:input.fragments}),members:['F2','F0'],reason:'Discussion is a separate task'}]};
  assert.equal(reviewTaskReconstruction(JSON.stringify(output),input.fragments).length,2);
  for(const change of [v=>v.tasks[1].members.push('F1'),v=>v.tasks[1].members=['F0'],v=>v.tasks[0].coverage.outcomeRefs=[input.fragments[0].records[0].ref]]){const bad=structuredClone(output);change(bad);assert.throws(()=>reviewTaskReconstruction(JSON.stringify(bad),input.fragments));}
  const id=digest('review'),second=digest('discussion');

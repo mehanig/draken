@@ -132,6 +132,14 @@ test('a reused definition changing during inference prevents admission',async()=
  const display=JSON.parse(db.prepare('SELECT display_json FROM workflow_discoveries WHERE id=?').get(proposal.id).display_json);display.decision.assessment.workflow.purpose='Changed endpoint';db.prepare('UPDATE workflow_discoveries SET display_json=? WHERE id=?').run(JSON.stringify(display),proposal.id);
  await done;const failed=db.prepare("SELECT output_json FROM process_extractions WHERE kind='comparison' AND status='failed'").get();assert.match(failed.output_json,/Saved workflow definitions changed/);assert.equal((await factory()).proposals.length,1);
 });
+test('saved workflow preparation reads stored definitions and checks permissions without rebuilding historical evidence',async t=>{
+ history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0],spent=calls().length;
+ const {readProposal}=require('../dist/factory/discovery'),adapter=require('../dist/evidence-adapter');
+ t.mock.method(adapter,'readWorkflowRecords',()=>assert.fail('A saved workflow must not rebuild its processed evidence'));
+ const saved=await readProposal(proposal.id,controller.signal);assert.equal(saved.id,proposal.id);assert.equal(calls().length,spent);
+ db.prepare('UPDATE agent_sessions SET included=0').run();await assert.rejects(readProposal(proposal.id,controller.signal),/excluded/);
+ assert.equal((await factory()).proposals.length,1,'saved display is not a new evidence-use request');
+});
 test('0.15.2 comparison and enrichment recipes remain usable without paid regeneration',async()=>{
  history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0];
  db.prepare('UPDATE process_extractions SET recipe_version=? WHERE id=?').run('a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9',proposal.id);
@@ -396,13 +404,13 @@ test('workflow comparisons cannot exceed the summarization job invocation allowa
  assert.ok(run.invocations<=3);assert.equal(run.status,'interrupted');assert.equal((await factory()).proposals.length,0);
  const count=calls().length;await warm();assert.equal(calls().length,count);
 });
-test('original-byte changes during leaf inference prevent retaining procedural claims',async()=>{
+test('leaf inference uses ingested records without rechecking physical session bytes',async()=>{
  history(1);await scanSessions();controls({taskDelays:{summarize:400}});
  const done=warm();await waitFor(()=>calls().some(c=>c.task==='summarize'));
  const file=root+'/sessions/job-0.jsonl';fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace('Uncited context','Changed context'));
- await done;const db=getDb();assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,0);
+ await done;const db=getDb();assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,1);
  assert.equal((await factory()).proposals.length,0);
- assert.equal(JSON.parse(db.prepare("SELECT output_json FROM process_extractions WHERE status='failed'").get().output_json).failure.stage,'source_verification');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE status='failed'").get().n,0);
 });
 test('failed matching is not automatically retried; explicit preparation retry retains earlier receipts',async()=>{
  history();await scanSessions();controls({failStage:'workflow_match'});await warm();
