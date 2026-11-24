@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const factoryPage = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', failedExtractions: 0 };
+const factoryPage = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', preparationErrors: 0 };
 
 test('desktop navigation includes Factory and marks the current page', async ({ page }) => {
   await page.route('**/api/factory', route => route.fulfill({ json: factoryPage }));

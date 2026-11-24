@@ -11,15 +11,16 @@ export function AutomaticProgress({ settings }: { settings: AutoIndexSettings })
     scanning: 'Checking history for changes…', indexing: 'Indexing searchable history…',
     summarizing: `${settings.summary?.operation || 'Preparing summaries and workflows'}…`,
     paused: 'Paused for your conversation or foreground work.',
-    stopping: 'Stopping automatic preparation…', error: settings.summary?.status === 'error' ? 'Model preparation is paused after a failed attempt.' : `${settings.error_operation || 'Automatic preparation'} stopped after a failed attempt.`,
+    stopping: 'Stopping automatic preparation…', error: 'Preparation errors were recorded. Other work continues.',
   }[settings.phase];
   return <section className="history-progress" aria-label="Automatic preparation">
     <p role="status"><strong>{phase}</strong></p>
-    {settings.enabled && <p className="small muted">Local indexing: {settings.indexing_error ? 'failed; see error below' : 'enabled'} (no model API). Model preparation: {!settings.summary_enabled ? 'off' : settings.summary?.status === 'error' ? 'paused after a failure' : 'enabled'}.</p>}
+    {settings.enabled && <p className="small muted">Local indexing: enabled (no model API). Model preparation: {!settings.summary_enabled ? 'off' : 'enabled'}.</p>}
     {settings.enabled && <InfoDisclosure label="Preparation details">
       <p className="small muted">{settings.pending_records.toLocaleString()} source changes waiting for local indexing. {settings.last_completed_at && `Last completed indexing batch: ${new Date(settings.last_completed_at).toLocaleString()}.`}</p>
       {settings.summary?.last_completed_at && <p className="small muted">Last completed automatic preparation attempt: {settings.summary.prepared_entries.toLocaleString()} entries, {new Date(settings.summary.last_completed_at).toLocaleString()}. Later changes may still need preparation.</p>}
     </InfoDisclosure>}
+    {!!settings.summary?.error_count && <p className="small muted">{settings.summary.error_count.toLocaleString()} preparation error{settings.summary.error_count === 1 ? '' : 's'} recorded.</p>}
     {settings.error && <p role="alert">{settings.error}</p>}
     {settings.indexing_error && settings.indexing_error !== settings.error && <p role="alert">{settings.indexing_error}</p>}
     <HistoryProgress enabled={settings.enabled && settings.phase === 'indexing'} backgroundOnly />

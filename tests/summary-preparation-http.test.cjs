@@ -46,7 +46,7 @@ test('combined consent enables both stages and retries explicitly; old tabs cann
   assert.equal(state.enabled, true); assert.equal(state.summary.enabled, true);
   getDb().prepare("INSERT OR REPLACE INTO sync_settings(key,value) VALUES ('auto_summary_error','Saved paid failure')").run();
   state = await (await patch({ enabled: true })).json();
-  assert.equal(state.phase, 'error'); assert.equal(state.error, 'Saved paid failure');
+  assert.equal(state.phase, 'waiting'); assert.equal(state.error, '');assert.equal(getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'Saved paid failure');
   state = await (await patch({ enabled: true, summaries: true })).json();
   assert.equal(state.summary.error, ''); assert.equal(state.error, '');
   state = await (await patch({ enabled: false, summaries: true })).json();

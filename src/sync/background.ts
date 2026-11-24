@@ -1,4 +1,5 @@
 import { getDb } from '../db/schema';
+import { recordPreparationError } from './preparation-errors';
 import { getDataDir } from '../data-dir';
 import { sourceStamps, loadSourceCheckpoint } from '../memory/stamps';
 import { scanSessions } from './collector';
@@ -23,6 +24,7 @@ interface Operations {
   prepare(before: string, signal: AbortSignal): Promise<void>;
   prepareSummaries?(signal: AbortSignal): Promise<void>;
   completed(at: string): void;
+  reportError?(operation: string, error: unknown): void;
 }
 const initial = (): State => ({ phase: 'off', pending_records: 0, last_completed_at: null, error: '' });
 
@@ -31,6 +33,7 @@ const initial = (): State => ({ phase: 'off', pending_records: 0, last_completed
 class AutoIndexer {
   state = initial();
   private retryAt = 0;
+  private pausedUntil = 0;
   private life?: AbortController;
   private job?: Promise<void>;
   constructor(private ops: Operations) {}
@@ -39,19 +42,20 @@ class AutoIndexer {
     if (this.job) return this.job;
     if (!this.ops.enabled()) { this.state.phase = 'off'; return; }
     if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
-    if (this.ops.now() < this.retryAt) return;
+    if (this.ops.now() < this.pausedUntil) return;
     const life = new AbortController(); this.life = life;
     this.job = this.run(life.signal).finally(() => { this.life = undefined; this.job = undefined; });
     return this.job;
   }
   pause() {
-    this.retryAt = Math.max(this.retryAt, this.ops.now() + CHECK_MS);
+    this.pausedUntil = Math.max(this.pausedUntil, this.ops.now() + CHECK_MS);
     this.life?.abort(); this.state.phase = this.life ? 'stopping' : this.ops.enabled() ? 'paused' : 'off';
   }
   async stop() { this.pause(); await this.job; }
-  retry() { this.retryAt = 0; this.state.error = ''; this.state.error_operation = undefined; if (!this.job) this.state.phase = this.ops.enabled() ? 'waiting' : 'off'; }
+  retry() { this.retryAt = 0; this.pausedUntil = 0; this.state.error = ''; this.state.error_operation = undefined; if (!this.job) this.state.phase = this.ops.enabled() ? 'waiting' : 'off'; }
   private async run(signal: AbortSignal) {
     try {
+      if (this.ops.now() < this.retryAt) return;
       this.state.phase = 'scanning'; this.state.error = ''; this.state.error_operation = undefined;
       const scanned = await this.ops.scan(signal);
       if (signal.aborted || !this.ops.enabled()) return;
@@ -72,23 +76,24 @@ class AutoIndexer {
         this.ops.completed(completed);
         this.state = { phase: 'waiting', pending_records: 0, last_completed_at: completed, error: '' };
       }
-      if (signal.aborted || !this.ops.enabled()) return;
-      if (!this.ops.idle()) { this.state.phase = 'paused'; return; }
-      this.state.phase = 'waiting';
-      await this.ops.prepareSummaries?.(signal);
-      if (!signal.aborted) this.state.phase = 'waiting';
     } catch (error) {
       if (!signal.aborted && error instanceof HttpError && error.status === 409) {
-        this.state.phase = 'paused'; this.retryAt = this.ops.now() + CHECK_MS;
+        this.state.phase = 'paused'; this.pausedUntil = this.ops.now() + CHECK_MS;
       } else if (!signal.aborted) {
         const operation = this.state.phase === 'scanning' ? 'History discovery' : this.state.phase === 'indexing' ? 'Local indexing' : 'Model preparation';
-        this.state.phase = 'error'; this.state.error_operation = operation;
-        const reason = error instanceof Error && error.message === 'Scan incomplete' ? 'One or more session sources could not be scanned completely.' : 'The cause could not be identified.';
-        this.state.error = `${operation} did not finish. ${reason} The scheduler will check again in five minutes. Completed work and any saved model-preparation failure pause are retained.`;
+        this.state.phase = 'waiting'; this.state.error = '';
+        this.ops.reportError?.(operation, error);
         this.retryAt = this.ops.now() + RETRY_MS;
       }
     } finally {
       if (signal.aborted || !this.ops.enabled()) this.state.phase = this.ops.enabled() ? 'paused' : 'off';
+      else if (!this.ops.idle() || this.ops.now() < this.pausedUntil) this.state.phase = 'paused';
+      else {
+        this.state.phase = 'waiting';
+        try { await this.ops.prepareSummaries?.(signal); }
+        catch (error) { if (!signal.aborted) this.ops.reportError?.('Model preparation', error); }
+        finally { this.state.phase = signal.aborted ? (this.ops.enabled() ? 'paused' : 'off') : 'waiting'; }
+      }
     }
   }
 }
@@ -101,6 +106,7 @@ let unregisterStatus: (() => void) | undefined;
 export function startBackgroundIndexing() {
   if (timer) return;
   worker ||= createAutoIndexer({ enabled, idle: () => activity.backgroundIdle && !historyProgress().active && !historyProgress().queued,
+    reportError: (operation, error) => recordPreparationError(undefined, 'local-preparation', operation, error, undefined, {}, 2),
     now: Date.now, expire: expireConversations, needsPreparation: () => !historyReadiness().ready,
     scan: scanSessions, stamp: before => sourceStamps(getDb(), before), baseline: () => loadSourceCheckpoint(getDataDir()), prepare: (before, signal) => prepareHistory(before, signal, true),
     prepareSummaries: signal => warmSummaryCache(signal, () => { if (worker) worker.state.phase = 'summarizing'; }),
@@ -126,13 +132,11 @@ export function refreshBackgroundPreparation() {
 export async function yieldBackgroundIndexing() { await Promise.all([worker?.stop(), cancelSummaryPreparation()]); }
 export function autoIndexSettings(): AutoIndexSettings {
   const on = enabled(), summary = summaryPreparationSettings();
-  const failure = on && summary.enabled && summary.error;
   const last = getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_last_completed'").get() as { value: string } | undefined;
   return { enabled: on, summary_enabled: summary.enabled, summary, check_seconds: CHECK_MS / 1000, batch_records: BATCH, pending_entries: availableCount(),
     ...(worker?.state || initial()), last_completed_at: worker?.state.last_completed_at || last?.value || null, ...(!on && worker?.state.phase !== 'stopping' ? { phase: 'off' as const }
       : on && (!worker || worker.state.phase === 'off') ? { phase: 'waiting' as const } : {}),
-    indexing_error: ['History discovery', 'Local indexing'].includes(worker?.state.error_operation || '') ? worker?.state.error || '' : '',
-    ...(failure ? { phase: 'error' as const, error: failure } : {}) };
+    indexing_error: ['History discovery', 'Local indexing'].includes(worker?.state.error_operation || '') ? worker?.state.error || '' : '' };
 }
 export function setAutoIndex(value: unknown, withSummaries = true): AutoIndexSettings {
   if (typeof value !== 'boolean') throw new HttpError(400, 'enabled must be a boolean');

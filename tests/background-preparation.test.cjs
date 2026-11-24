@@ -91,7 +91,7 @@ test('consolidation accounting does not replace summary progress or clear an exi
   await append(1); await warm(); const prior = prep.summaryPreparationSettings(), spent = calls().length;
   getDb().prepare("INSERT OR REPLACE INTO sync_settings(key,value) VALUES ('auto_summary_error','Existing preparation failure')").run();
   getDb().prepare("INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,status,input_key,completed_at) VALUES ('fixture/summary','fixture/final',120,25,?,'completed','workflow-consolidation:fixture',?)").run(new Date().toISOString(),new Date().toISOString());
-  const current = prep.summaryPreparationSettings();assert.equal(current.prepared_entries,prior.prepared_entries);assert.equal(current.last_completed_at,prior.last_completed_at);assert.equal(current.error,'Existing preparation failure');await warm();assert.equal(calls().length,spent);
+  const current = prep.summaryPreparationSettings();assert.equal(current.prepared_entries,prior.prepared_entries);assert.equal(current.last_completed_at,prior.last_completed_at);assert.equal(current.error,'');assert.equal(current.status,'waiting');assert.equal(getDb().prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'Existing preparation failure','reads do not clear legacy state');await warm();assert.equal(calls().length,spent);
 });
 
 test('equal-count source edits accumulate canonically, while model and recipe changes reprepare without new IDs', async () => {
@@ -171,31 +171,35 @@ test('context-only changes invalidate and reprepare a full eligible batch', asyn
 test('unavailable or modified originals fail closed without paid requests, reservations or leaked errors', async () => {
   background.setAutoSummary(true); await append(64); await warm(); const before = calls().length;
   fs.unlinkSync(file); assert.equal(prep.summaryPreparationSettings().prepared_entries, 64, 'historical progress does not open missing originals'); await warm();
-  assert.equal(calls().length, before); assert.equal(prep.summaryPreparationSettings().status, 'error');
+  assert.equal(calls().length, before); assert.equal(prep.summaryPreparationSettings().status, 'waiting');assert.ok(prep.summaryPreparationSettings().error_count>0);
   assert.doesNotMatch(prep.summaryPreparationSettings().error, /PRIVATE_SOURCE_SENTINEL|private-workspace|synthetic\.jsonl/);
   writeRows(); await scanSessions(); await warm(); assert.equal(calls().length, before, 'restoring files does not authorize a failed paid retry');
   background.setAutoSummary(true); await warm(); assert.equal(prep.summaryPreparationSettings().prepared_entries, 64); untouched();
 });
 
-test('provider failures and malformed-output repairs pause paid work durably until an explicit bounded retry', async () => {
+test('failed summary operations are retained without a global pause or automatic paid retry', async () => {
   background.setAutoSummary(true); await append(64); control({ invalidSources: true }); await warm();
-  assert.equal(calls().length, 2); assert.equal(runs()[0].status, 'failed'); assert.equal(runs()[0].invocations, 2);
-  assert.equal(prep.summaryPreparationSettings().status, 'error');
+  assert.equal(calls().length, 2); assert.equal(runs()[0].status, 'completed');assert.equal(runs()[0].stage,'Completed with errors'); assert.equal(runs()[0].invocations, 2);
+  assert.equal(prep.summaryPreparationSettings().status, 'waiting');assert.equal(prep.summaryPreparationSettings().error_count,1);
   for (let n = 0; n < 5; n++) await warm(); assert.equal(calls().length, 2);
   await background.stopBackgroundIndexing(); closeDb(); store.recoverInterruptedRuns(); await warm(); assert.equal(calls().length, 2);
-  assert.equal(background.autoIndexSettings().phase, 'error');
+  assert.equal(background.autoIndexSettings().phase, 'waiting');
   assert.equal(background.autoIndexSettings().error, prep.summaryPreparationSettings().error);
   background.setAutoIndex(false); await warm(); assert.equal(calls().length, 2);
-  background.setAutoIndex(true); await warm(); assert.equal(calls().length, 4); assert.equal(runs().length, 2); await warm(); assert.equal(calls().length, 4);
+  background.setAutoIndex(true); await warm(); assert.equal(calls().length, 4); assert.equal(runs().length, 1,'explicit retry keeps the remaining allowance'); await warm(); assert.equal(calls().length, 4);
   control({}); background.setAutoSummary(true); await warm(); assert.equal(runs().at(-1).status, 'completed');
   const usage = preparationUsage(getDb(), {}, Date.now() + 1000); assert.equal(usage.totals.requests, calls().length); assert.equal(usage.totals.failed_attempts, 2);
   assert.equal(usage.totals.entries, 0); assert.equal(usage.totals.completed_batches, 0); assert.ok(usage.totals.cost.usd > 0);
   assert.doesNotMatch(JSON.stringify(runs()), /PRIVATE_SOURCE_SENTINEL|private-workspace/); untouched();
 });
 
+test('an explicit retry does not leave retired operation requests queued forever or mark them successful',async()=>{
+ await append(1);await warm();const errors=require('../dist/sync/preparation-errors');errors.recordPreparationError(undefined,'summary-node','retired-node',Error('Retained old failure'));
+ background.setAutoSummary(true);assert.equal(errors.preparationRetryPending(),true);const spent=calls().length;await warm();assert.equal(calls().length,spent);assert.equal(errors.preparationRetryPending(),false);assert.equal(errors.preparationOperationFailed('summary-node','retired-node'),true);assert.equal(errors.preparationErrorCount(),1);await warm();assert.equal(calls().length,spent);
+});
 test('provider process failures retain unpriced request metadata and cannot retry automatically', async () => {
   background.setAutoSummary(true); await append(64); control({ failStage: 'chunk' }); await warm();
-  assert.equal(calls().length, 1); const run = runs()[0]; assert.equal(run.status, 'failed'); assert.equal(run.invocations, 1);
+  assert.equal(calls().length, 1); const run = runs()[0]; assert.equal(run.status, 'completed');assert.equal(run.stage,'Completed with errors'); assert.equal(run.invocations, 1);
   const metrics = JSON.parse(run.metrics_json); assert.equal(metrics.length, 1); assert.equal(metrics[0].status, 'failed');
   const usage = preparationUsage(getDb(), {}, Date.now() + 1000); assert.equal(usage.totals.requests, 1);
   assert.equal(usage.totals.cost.usd, null); assert.equal(usage.totals.cost.complete, false); assert.equal(usage.totals.failed_attempts, 1);
@@ -245,17 +249,18 @@ test('an unrecovered running ledger cannot silently become a fresh allowance', a
   getDb().prepare(`INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key,invocations)
     VALUES (?,?,?,?,?,?,1)`).run(LUNA, FINAL, 2, 64, new Date().toISOString(), tree.summaryPreparationKey(input));
   await warm(); assert.equal(calls().length, 0); assert.equal(runs().length, 1); assert.equal(runs()[0].invocations, 1);
-  assert.equal(runs()[0].status, 'failed'); assert.equal(prep.summaryPreparationSettings().status, 'error');
+  assert.equal(runs()[0].status, 'running','do not steal an unrecovered owner'); assert.equal(prep.summaryPreparationSettings().status, 'waiting');
   await warm(); assert.equal(calls().length, 0); untouched();
 });
 
 test('cancellation at quota cannot trigger a fresh allowance or repeat 409 attempts every tick', async () => {
   process.env.DRAKEN_PI_MAX_INVOCATIONS = '1'; background.setAutoSummary(true); await append(64); control({ delay: 10000 });
   const life = new AbortController(), running = prep.warmSummaryCache(life.signal); await waitFor(() => calls().length === 1);
-  life.abort(); await running; assert.equal(runs()[0].status, 'failed'); assert.equal(prep.summaryPreparationSettings().status, 'error');
+  life.abort(); await running; assert.equal(runs()[0].status, 'cancelled'); assert.equal(prep.summaryPreparationSettings().status, 'waiting');
   control({}); for (let n = 0; n < 4; n++) await warm(); assert.equal(calls().length, 1); assert.equal(runs().length, 1);
   await background.stopBackgroundIndexing(); closeDb(); store.recoverInterruptedRuns(); await warm(); assert.equal(calls().length, 1);
-  background.setAutoSummary(true); await warm(); assert.equal(calls().length, 2); assert.equal(runs().length, 2); assert.equal(runs()[1].status, 'completed'); untouched();
+  background.setAutoSummary(true); await warm(); assert.equal(calls().length, 1); assert.equal(runs().length, 1);assert.equal(runs()[0].stage,'Call limit reached');
+  process.env.DRAKEN_PI_MAX_INVOCATIONS='2';await warm();assert.equal(calls().length,2);assert.equal(runs().length,2);assert.equal(runs()[0].max_invocations,1);assert.equal(runs()[1].max_invocations,2);assert.equal(runs()[1].status,'completed');untouched();
 });
 
 test('disable-enable cannot revive an old signal and foreground yielding drains the provider before snapshot creation', async () => {
@@ -299,8 +304,8 @@ test('cancellation ledger failure remains owned and cannot create an unhandled r
     assert.equal(runs()[0].status, 'running');
   } finally { getDb().exec('DROP TRIGGER reject_summary_terminal'); }
   background.setAutoIndex(true); control({}); await warm();
-  assert.equal(calls().length, 1); assert.equal(runs().length, 1); assert.equal(runs()[0].status, 'failed');
-  assert.equal(prep.summaryPreparationSettings().status, 'error'); untouched();
+  assert.equal(calls().length, 1); assert.equal(runs().length, 1); assert.equal(runs()[0].status, 'running');
+  assert.equal(prep.summaryPreparationSettings().status, 'waiting'); untouched();
 });
 
 test('late foreground activity blocks subsequent provider calls even without a route-level yield', async () => {
@@ -322,9 +327,9 @@ test('later arrivals do not discard a captured batch; explicit source opt-out bl
   running = warm(); await waitFor(() => calls().length === 2);
   store.setIncluded('synthetic-background', false);
   await running;
-  assert.equal(runs().at(-1).status, 'failed');
+  assert.equal(runs().at(-1).status, 'completed');assert.equal(runs().at(-1).stage,'Completed with errors');assert.equal(runs().at(-1).cache_receipt_json,'[]');
   assert.equal(prep.summaryPreparationSettings().prepared_entries, 1);
-  assert.equal(background.autoIndexSettings().phase, 'error'); untouched();
+  assert.equal(background.autoIndexSettings().phase, 'waiting');assert.ok(prep.summaryPreparationSettings().error_count>0); untouched();
 });
 
 test('a model configuration change during a request cannot publish a receipt for the new input', async () => {

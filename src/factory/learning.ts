@@ -1,6 +1,7 @@
 import { saveMissingWorkflowDisplays } from './display-store';
 import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
+import { preparationOperation, preparationRetryRequested, isPreparationLimit, recordPreparationError } from '../sync/preparation-errors';
 import { digest, cleanText } from '../sync/normalize';
 import { CANDIDATE_PROMPT, candidateSelection, CONTRACT_MATCH_PROMPT, validateContractAssessment, decideContractMatch } from '../workflow-learning';
 import { COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload } from './learning-store';
@@ -23,7 +24,23 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
     const key = learningInputKey(deps, payload, model), recipe = digest(prompt);
     const previous = db.prepare('SELECT id,status,output_json,usage_json FROM process_extractions WHERE input_key=? AND recipe_version=? AND model=? ORDER BY rowid DESC LIMIT 1').get(key, recipe, model) as { id: string; status: string; output_json: string; usage_json: string } | undefined;
     if (previous?.status === 'completed') return validate(previous.output_json);
-    if (previous && previous.status !== 'cancelled' && JSON.parse(previous.usage_json).backgroundRun === run) throw Error('Workflow attempt failed or was interrupted; explicit retry is required');
+    if (phase === 'match' && pair) {
+      const [left, right] = pair.map(index => identities[index]);
+      const operationKey = JSON.stringify([recipe, model, [left, right].sort()]);
+      const prior = db.prepare(`SELECT status,output_json FROM process_extractions WHERE kind='comparison' AND recipe_version=? AND model=?
+        AND json_extract(source_dependencies_json,'$.phase')='match'
+        AND json_extract(source_dependencies_json,'$.identities['||json_extract(source_dependencies_json,'$.pair[0]')||']') IN (?,?)
+        AND json_extract(source_dependencies_json,'$.identities['||json_extract(source_dependencies_json,'$.pair[1]')||']') IN (?,?) ORDER BY rowid DESC LIMIT 1`)
+        .get(recipe, model, left, right, left, right) as { status: string; output_json: string } | undefined;
+      if (prior?.status === 'failed' && !preparationRetryRequested('comparison', operationKey)) throw Error(JSON.parse(prior.output_json).failure?.message || 'Previously failed comparison retained without automatic retry');
+    }
+    if (phase === 'select') {
+      const prior = db.prepare(`SELECT status,output_json FROM process_extractions WHERE kind='comparison' AND recipe_version=? AND model=?
+        AND json_extract(source_dependencies_json,'$.phase')='select' AND json_extract(source_dependencies_json,'$.parents[0].episode')=?
+        AND json_extract(source_dependencies_json,'$.parents[0].revision')=? ORDER BY rowid DESC LIMIT 1`).get(recipe, model, parents[0].episode, parents[0].revision) as { status: string; output_json: string } | undefined;
+      if (prior?.status === 'failed' && !preparationRetryRequested('workflow-task', `${model}:${parents[0].episode}:${parents[0].revision}`)) throw Error(JSON.parse(prior.output_json).failure?.message || 'Previously failed selection retained without automatic retry');
+    }
+    if (previous?.status === 'running') throw Error('Workflow comparison still has a running owner');
     const attempt = (db.prepare('SELECT COUNT(*) n FROM process_extractions WHERE input_key=?').get(key) as { n: number }).n;
     const id = digest(JSON.stringify([key, recipe, run, attempt]));
     db.prepare(`INSERT INTO process_extractions(id,kind,input_key,recipe_version,model,status,source_dependencies_json,usage_json,created_at)
@@ -58,17 +75,16 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       if (phase === 'match' && (output as { sameWorkflow?: boolean }).sameWorkflow) saveMissingWorkflowDisplays([id]);
       return output;
     } catch (error) {
-      db.prepare('UPDATE process_extractions SET status=?,output_json=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed',
+      db.prepare('UPDATE process_extractions SET status=?,output_json=?,completed_at=? WHERE id=?').run(signal.aborted || (isPreparationLimit(error) && raw === undefined) ? 'cancelled' : 'failed',
         JSON.stringify({ failure: { stage, message: cleanText(error instanceof Error ? error.message : 'Workflow learning failed', 1500) }, raw_output: raw, validationRepairs: repairs }), new Date().toISOString(), id);
+      if (isPreparationLimit(error) && raw !== undefined) throw Error(`Comparison correction could not run at the call limit. ${repairs.at(-1)?.error || 'The first response failed validation.'}`);
       throw error;
     }
   }
-  for (const current of pending) {
+  const learnTask = async (current: Episode) => {
     signal.throwIfAborted();
-    let first;
-    try { first = await readLearningParent(current, signal); }
-    catch { signal.throwIfAborted(); db.prepare("UPDATE work_episodes SET learning_status='completed' WHERE id=?").run(current.episode); continue; }
-    if (first.location.kind === 'unavailable') continue;
+    const first = await readLearningParent(current, signal);
+    if (first.location.kind === 'unavailable') throw Error('Workflow task location is unavailable');
     const locations = new Map<string, string>();
     const candidates = db.prepare(`SELECT e.id episode,e.revision,json_extract(p.source_dependencies_json,'$.input.workspace') workspace FROM work_episodes e
       JOIN episode_extractions l ON l.episode_id=e.id JOIN process_extractions p ON p.id=l.extraction_id
@@ -77,15 +93,18 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       GROUP BY e.id ORDER BY e.rowid DESC`).iterate(current.episode, current.episode) as Iterable<Episode & { workspace: string }>;
     const parents: EpisodeParent[] = [{ episode: current.episode, revision: current.revision }], inputs = [first.input], identities = [first.identity];
     let scanned = 0;
-    for (const candidate of candidates) {
+    // Error writes must wait until the SQLite read iterator is closed.
+    const contextErrors: { candidate: Episode; error: unknown }[] = [];
+    try { for (const candidate of candidates) {
       if (parents.length === 25) break;
       if (++scanned % 32 === 0) await new Promise<void>(resolve => setImmediate(resolve));
       signal.throwIfAborted();
       if (!locations.has(candidate.workspace)) locations.set(candidate.workspace, workflowLocation(candidate.workspace).key);
       if (locations.get(candidate.workspace) !== first.location.key) continue;
       try { const value = await readLearningParent(candidate, signal); if (value.location.key !== first.location.key || !independentTasks(current, candidate)) continue; parents.push({ episode: candidate.episode, revision: candidate.revision }); inputs.push(value.input); identities.push(value.identity); }
-      catch { signal.throwIfAborted(); }
+      catch (error) { signal.throwIfAborted(); contextErrors.push({ candidate, error }); }
     }
+    } finally { for (const { candidate, error } of contextErrors) recordPreparationError(run, 'workflow-context', `${candidate.episode}:${candidate.revision}`, error, undefined, {}, 2); }
     if (parents.length > 1) {
       const ids = parents.slice(1).map((_, i) => `C${i + 1}`);
       const selected = await invoke(parents, identities, first.location.key, 'select', undefined, { task: 'select_workflow_candidates', stage: 'workflow_selection',
@@ -94,11 +113,14 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
         raw => ({ selected: candidateSelection(raw, ids) }));
       for (const id of selected.selected) {
         const index = ids.indexOf(id) + 1, pair = [inputs[0], inputs[index]];
-        await invoke(parents, identities, first.location.key, 'match', [0, index], workflowComparisonPayload(pair), CONTRACT_MATCH_PROMPT,
-          raw => { const value = JSON.parse(raw); const assessment = validateContractAssessment(JSON.stringify(value.assessment ?? value), pair); return decideContractMatch(assessment, pair); });
+        const operationKey = JSON.stringify([digest(CONTRACT_MATCH_PROMPT), model, [identities[0], identities[index]].sort()]);
+        await preparationOperation(run, 'comparison', operationKey, signal, () =>
+          invoke(parents, identities, first.location.key, 'match', [0, index], workflowComparisonPayload(pair), CONTRACT_MATCH_PROMPT,
+            raw => { const value = JSON.parse(raw); const assessment = validateContractAssessment(JSON.stringify(value.assessment ?? value), pair); return decideContractMatch(assessment, pair); }), current.episode);
       }
     }
     signal.throwIfAborted();
     db.prepare("UPDATE work_episodes SET learning_status='completed' WHERE id=?").run(current.episode);
-  }
+  };
+  for (const current of pending) await preparationOperation(run, 'workflow-task', `${model}:${current.episode}:${current.revision}`, signal, () => learnTask(current), current.episode);
 }

@@ -35,6 +35,46 @@ function history(count=2,locations=[]){
 }
 async function waitFor(predicate){for(let i=0;i<500;i++){if(predicate())return;await new Promise(r=>setTimeout(r,10));}assert.fail('Timed out waiting for background work');}
 function noSync(){for(const table of ['syncs','sync_runs','sync_items','sync_coverage','sync_messages'])assert.equal(getDb().prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table);}
+for(const failure of ['validation','provider'])test(`a reconstruction ${failure} failure stays failed while independent bug-fix tasks reach a saved Ready workflow`,async()=>{
+ history(3);await scanSessions();controls(failure==='provider'?{failTaskCalls:{reconstruct_task:[1]}}:{taskOutputs:{reconstruct_task:{1:'invalid task reconstruction'}}});await warm();
+ const db=getDb(),failed=db.prepare("SELECT * FROM episode_reconstructions WHERE status='failed'").get();assert.equal(failed.raw_output,failure==='provider'?null:'invalid task reconstruction');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='completed'").get().n,2);
+ assert.equal(db.prepare('SELECT learning_status FROM work_episodes WHERE id=(SELECT entity_id FROM preparation_errors WHERE scope=?)').get('reconstruction').learning_status,'pending');
+ let page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.preparationErrors,1);assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].enrichment.status,'ready');assert.match(page.proposals[0].decision.assessment.workflow.purpose,/parser defect/i);
+ const run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'completed');assert.equal(run.invocations,calls().length);assert.equal(pendingWorkflows(),false);
+ const count=calls().length;await warm();assert.equal(calls().length,count);
+ controls({});history(4);await scanSessions();await warm();assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,4,'new history does not replay the failed task');
+ assert.deepEqual(db.prepare('SELECT * FROM episode_reconstructions WHERE id=?').get(failed.id),failed);page=await factory();assert.ok(page.proposals.some(p=>p.enrichment.status==='ready'));assert.equal(page.preparationErrors,1);
+});
+for(const failure of ['validation','provider'])test(`a summary ${failure} failure retains returned responses and does not prevent other sessions reaching Ready`,async()=>{
+ history(3);await scanSessions();controls(failure==='provider'?{failTaskCalls:{summarize:[1]}}:{taskOutputs:{summarize:{1:'invalid first summary',2:'invalid corrected summary'}}});await warm();
+ const db=getDb(),error=db.prepare("SELECT * FROM preparation_errors WHERE scope='summary-node'").get();assert.deepEqual(JSON.parse(error.details_json).responses,failure==='provider'?[]:['invalid first summary','invalid corrected summary']);
+ const failedSession=JSON.parse(error.details_json).session;assert.doesNotMatch(error.details_json,/Instance job/);const before=calls().filter(c=>c.task==='summarize'&&c.input?.session===failedSession).length;assert.equal(before,failure==='provider'?1:2);
+ assert.equal((await factory()).proposals[0].enrichment.status,'ready');const run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'completed');assert.equal(run.stage,'Completed with errors');assert.equal(run.cache_receipt_json,'[]');assert.ok(run.processed_entries<run.total_entries);assert.equal(run.invocations,calls().length);
+ const count=calls().length;await warm();assert.equal(calls().length,count);
+ controls({});history(4);await scanSessions();await warm();assert.equal(calls().filter(c=>c.task==='summarize'&&c.input?.session===failedSession).length,before);assert.equal(db.prepare("SELECT COUNT(*) n FROM preparation_errors WHERE scope='summary-node'").get().n,1);
+});
+for(const failure of ['provider','validation'])test(`a candidate-selection ${failure} failure does not block later tasks or replay after new arrivals`,async()=>{
+ history(3);await scanSessions();controls(failure==='provider'?{failTaskCalls:{select_workflow_candidates:[1]}}:{taskOutputs:{select_workflow_candidates:{1:'invalid selection'}}});await warm();
+ const db=getDb(),failed=db.prepare("SELECT * FROM process_extractions WHERE kind='comparison' AND status='failed'").get();assert.equal(JSON.parse(failed.source_dependencies_json).phase,'select');assert.ok(JSON.parse(failed.output_json).failure.message);
+ assert.equal((await factory()).proposals[0].enrichment.status,'ready');assert.equal((await factory()).learning,'enabled');assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,2);
+ const count=calls().length;await warm();assert.equal(calls().length,count);
+ controls({});history(4);await scanSessions();await warm();assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,3);assert.deepEqual(db.prepare('SELECT * FROM process_extractions WHERE id=?').get(failed.id),failed);
+});
+for(const failure of ['validation','provider'])test(`one enrichment ${failure} failure does not block a later Ready workflow and is never automatically replayed`,async()=>{
+ history(3);await scanSessions();controls(failure==='provider'?{failTaskCalls:{enrich_workflow:[1]}}:{taskOutputs:{enrich_workflow:{1:{steps:[]}}}});await warm();
+ const db=getDb(),failed=db.prepare("SELECT * FROM workflow_enrichments WHERE status='failed'").get();assert.equal(failed.raw_output,failure==='provider'?null:'{"steps":[]}');
+ let page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.preparationErrors,1);assert.equal(page.proposals.filter(p=>p.enrichment.status==='ready').length,1);assert.equal(page.proposals.filter(p=>p.enrichment.status==='failed').length,1);
+ const count=calls().length;await warm();assert.equal(calls().length,count);controls({});history(4);await scanSessions();await warm();assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,3);assert.deepEqual(db.prepare('SELECT * FROM workflow_enrichments WHERE id=?').get(failed.id),failed);
+});
+test('a legacy reconstruction pause resumes independent work in the same remaining allowance without replaying its failed output',async()=>{
+ history(3);await scanSessions();const db=getDb(),input=store.previewSummaryInput();const {SummaryTree,summaryPreparationKey}=require('../dist/sync/tree');
+ const run=Number(db.prepare('INSERT INTO background_runs(summary_model,final_model,max_invocations,total_entries,started_at,input_key) VALUES (?,?,?,?,?,?)').run(input.models.summary,input.models.final,input.models.max_invocations,input.items.length,new Date().toISOString(),summaryPreparationKey(input)).lastInsertRowid);
+ const tree=SummaryTree.forBackground(input,run,controller.signal);await tree.build();const source=db.prepare('SELECT extraction_id,fragment_key FROM episode_extractions ORDER BY rowid LIMIT 1').get();
+ const id='e'.repeat(64);db.prepare("INSERT INTO episode_reconstructions(id,input_key,recipe_version,model,current_extraction,current_fragment,run_id,status,source_dependencies_json,raw_output,error,created_at,completed_at) VALUES (?,?,?,?,?,?,?,'failed',?,?,?,?,?)").run(id,'d'.repeat(64),'c'.repeat(64),input.models.final,source.extraction_id,source.fragment_key,run,'{}','retained invalid reconstruction','Task boundary cites another task or unknown original',new Date().toISOString(),new Date().toISOString());
+ const failed=db.prepare('SELECT * FROM episode_reconstructions WHERE id=?').get(id),before=db.prepare('SELECT * FROM background_runs WHERE id=?').get(run);db.prepare("UPDATE background_runs SET status='failed',stage='Task reconstruction',error='Legacy reconstruction failure' WHERE id=?").run(run);db.prepare("INSERT OR REPLACE INTO sync_settings VALUES('auto_summary_error','Legacy reconstruction failure')").run();
+ await warm();const after=db.prepare('SELECT * FROM background_runs WHERE id=?').get(run);assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,1);assert.equal(after.max_invocations,before.max_invocations);assert.equal(after.invocations,before.invocations+5);assert.equal(after.status,'completed');assert.equal(after.error,'Legacy reconstruction failure');assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,2);assert.equal((await factory()).proposals[0].enrichment.status,'ready');assert.deepEqual(db.prepare('SELECT * FROM episode_reconstructions WHERE id=?').get(id),failed);assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'');
+});
 test('normal background tick saves process records with summaries and detects a Factory proposal without a sync or page visit',async()=>{
  history();await scanSessions();
  const worker=createAutoIndexer({enabled:()=>true,idle:()=>true,now:Date.now,scan:scanSessions,stamp:()=>new Map(),baseline:()=>new Map(),prepare:async()=>assert.fail('No new indexing is needed'),completed:()=>{},prepareSummaries:warmSummaryCache});
@@ -65,8 +105,8 @@ test('explicit enrichment retries retain failed paid output and do not reset the
 });
 test('task reconstruction shares the existing allowance and cannot automatically retry a paid failure',async()=>{
  history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='3';await warm();const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();
- assert.equal(run.status,'failed');assert.equal(run.invocations,3);assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,1);
- assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='completed'").get().n,1);assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='failed'").get().n,1);
+ assert.equal(run.status,'interrupted');assert.equal(run.invocations,3);assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,1);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='completed'").get().n,1);assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='cancelled'").get().n,1);
  const count=calls().length;await warm();assert.equal(calls().length,count);assert.equal((await factory()).proposals.length,0);
 });
 test('cancelling reconstruction retains the owner and remaining allowance on resume',async()=>{
@@ -74,8 +114,13 @@ test('cancelling reconstruction retains the owner and remaining allowance on res
  const db=getDb(),before=db.prepare('SELECT * FROM background_runs').get();assert.equal(before.status,'cancelled');assert.equal(db.prepare('SELECT status FROM episode_reconstructions').get().status,'cancelled');
  controller=new AbortController();controls({});await warm();const after=db.prepare('SELECT * FROM background_runs').get();assert.equal(after.id,before.id);assert.equal(after.max_invocations,before.max_invocations);assert.equal(after.invocations,before.invocations+1);assert.equal(after.status,'completed');
 });
+test('cancelled background enrichment resumes with its remaining allowance and retains the cancelled attempt',async()=>{
+ history();await scanSessions();controls({taskDelays:{enrich_workflow:1000}});const done=warm();await waitFor(()=>calls().some(c=>c.task==='enrich_workflow'));controller.abort();await done;
+ const db=getDb(),before=db.prepare('SELECT * FROM background_runs').get(),cancelled=db.prepare("SELECT * FROM workflow_enrichments WHERE status='cancelled'").get();assert.ok(cancelled);assert.equal((await factory()).proposals[0].enrichment.status,'pending');
+ controller=new AbortController();controls({});await warm();const after=db.prepare('SELECT * FROM background_runs').get();assert.equal(after.id,before.id);assert.equal(after.max_invocations,before.max_invocations);assert.equal(after.invocations,before.invocations+1);assert.equal((await factory()).proposals[0].enrichment.status,'ready');assert.equal((await factory()).preparationErrors,0);assert.deepEqual(db.prepare('SELECT * FROM workflow_enrichments WHERE id=?').get(cancelled.id),cancelled);
+});
 test('enrichment uses the remaining shared preparation allowance, not a new budget',async()=>{
- history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='6';await warm();const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.invocations,6);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,0);assert.equal((await factory()).proposals[0].enrichment.status,'failed');assert.equal(run.status,'failed');
+ history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='6';await warm();const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.invocations,6);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,0);assert.equal((await factory()).proposals[0].enrichment.status,'pending');assert.equal(run.status,'interrupted');
 });
 test('uncited source revocation during enrichment prevents publication and retains the attempt',async()=>{
  history();await scanSessions();controls({taskDelays:{enrich_workflow:500}});const done=warm();await waitFor(()=>calls().some(c=>c.task==='enrich_workflow'));
@@ -159,15 +204,49 @@ test('a comparison without main stages can correct an unsupported match without 
  fs.writeFileSync(controlFile,JSON.stringify({workflowProcess:process,workflowAssessment:{relation:'same_workflow_candidate',workflow:{purpose:'Parser work',method:['Repair parsing'],appliesWhen:'Parser changes'},stagePairs:[],reason:'Unsupported identity',limitations:[]},workflowRepairAssessment:{...nonMatch,relation:'insufficient',reason:'No supplied main stages support identity'}}));
  await warm();assert.equal(getDb().prepare('SELECT status FROM background_runs').get().status,'completed');assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,2);assert.equal((await factory()).proposals.length,0);
 });
-test('two invalid comparison responses retain the exact error and outputs, then stop without a retry loop',async()=>{
+test('two invalid comparison responses remain failed in the log without pausing preparation or retrying',async()=>{
  history();await scanSessions();controls({workflowAssessment:'not JSON'});await warm();
  const db=getDb(),row=db.prepare("SELECT * FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get(),output=JSON.parse(row.output_json);
  assert.equal(row.status,'failed');assert.equal(output.failure.stage,'validation');assert.match(output.failure.message,/JSON|Unexpected/);assert.equal(output.raw_output,'not JSON');assert.equal(output.validationRepairs[0].raw,'not JSON');
+ const run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'completed');assert.equal(run.stage,'Cached');
+ assert.equal(JSON.parse(run.failure_events_json)[0].scope,'comparison');assert.equal(db.prepare('SELECT error FROM preparation_errors WHERE id=?').get(JSON.parse(run.failure_events_json)[0].error_id).error,output.failure.message);assert.equal((await factory()).learning,'enabled');assert.equal((await factory()).preparationErrors,1);
  assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,2);const count=calls().length;await warm();assert.equal(calls().length,count);
+});
+for(const failure of ['validation','provider'])test(`a comparison ${failure} failure does not prevent another task from matching and receiving enrichment`,async()=>{
+ history(3);await scanSessions();controls(failure==='provider'?{failTaskCalls:{compare_workflow_identity:[1]}}:{workflowAssessment:'not JSON',taskDelays:{compare_workflow_identity:400}});
+ const done=warm();await waitFor(()=>calls().filter(c=>c.task==='compare_workflow_identity').length>=(failure==='provider'?1:2));controls({});await done;
+ const db=getDb();assert.equal(db.prepare("SELECT count(*) n FROM process_extractions WHERE kind='comparison' AND status='failed'").get().n,1);
+ assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');
+ const page=await factory();assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].enrichment.status,'ready');assert.equal(page.learning,'enabled');
+ const count=calls().length;await warm();assert.equal(calls().length,count);
+ // Revisit after another candidate completed. Selection can change, but the failed pair must not replay.
+ const failed=db.prepare("SELECT * FROM process_extractions WHERE kind='comparison' AND status='failed'").get();
+ const parent=JSON.parse(failed.source_dependencies_json).parents[0];db.prepare("UPDATE work_episodes SET learning_status='pending' WHERE id=?").run(parent.episode);
+ controls({workflowSelection:['C2']});await warm();assert.equal(calls().length,count+1);assert.equal(calls().at(-1).task,'select_workflow_candidates');
+ assert.equal(db.prepare('SELECT status FROM process_extractions WHERE id=?').get(failed.id).status,'failed');
+ const tree=require('../dist/sync/tree'),key=tree.summaryPreparationKey;
+ try {
+  tree.summaryPreparationKey=input=>'new-owner-'+key(input);
+  db.prepare("UPDATE work_episodes SET learning_status='pending' WHERE id=?").run(parent.episode);
+  await warm();assert.equal(db.prepare('SELECT count(*) n FROM background_runs').get().n,2);assert.equal(calls().length,count+1,'a new owner cannot automatically replay the same failed comparison');
+ } finally {tree.summaryPreparationKey=key;}
+ noSync();
+});
+test('legacy comparison-only pause is released by preparation, retaining the owner allowance and failed response',async()=>{
+ history();await scanSessions();controls({workflowAssessment:'not JSON'});await warm();const db=getDb(),before=db.prepare('SELECT * FROM background_runs').get();
+ const legacy='Background summaries could not finish. Check provider settings, invocation limits and original session files, then explicitly retry automatic preparation in Settings. Cached work is retained.';
+ db.prepare("UPDATE background_runs SET status='failed',error=?,failure_events_json=? WHERE id=?").run(legacy,JSON.stringify([{status:'failed',at:before.completed_at}]),before.id);
+ db.prepare("INSERT OR REPLACE INTO sync_settings VALUES ('auto_summary_error',?)").run(legacy);
+ const failed=db.prepare("SELECT * FROM process_extractions WHERE kind='comparison' AND status='failed'").get(),parent=JSON.parse(failed.source_dependencies_json).parents[0];
+ db.prepare("UPDATE work_episodes SET learning_status='pending' WHERE id=?").run(parent.episode);
+ const count=calls().length;await warm();const after=db.prepare('SELECT * FROM background_runs').get();
+ assert.equal(calls().length,count);assert.equal(after.id,before.id);assert.equal(after.invocations,before.invocations);assert.equal(after.max_invocations,before.max_invocations);
+ assert.equal(after.status,'completed');assert.equal(JSON.parse(after.failure_events_json).length,1);assert.equal((await factory()).learning,'enabled');
+ assert.equal(db.prepare('SELECT output_json FROM process_extractions WHERE id=?').get(failed.id).output_json,failed.output_json);
 });
 test('comparison correction cannot obtain a new invocation allowance',async()=>{
  history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='6';controls({workflowAssessment:'not JSON',workflowRepairAssessment:nonMatch});await warm();
- const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'failed');assert.equal(run.invocations,6);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
+ const db=getDb(),run=db.prepare('SELECT * FROM background_runs').get();assert.equal(run.status,'completed');assert.equal((await factory()).preparationErrors,1);assert.equal(run.invocations,6);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
  const output=JSON.parse(db.prepare("SELECT output_json FROM process_extractions WHERE json_extract(source_dependencies_json,'$.phase')='match'").get().output_json);assert.match(output.failure.message,/Invocation budget/);assert.equal(output.validationRepairs.length,1);
 });
 for(const stop of ['revoke','cancel'])test(`${stop} after an invalid comparison prevents a correction call`,async()=>{
@@ -184,7 +263,7 @@ test('comparison provider failures are retained but are not retried as formattin
 test('failed process extraction does not replace or break the ordinary summary and is visible on Factory',async()=>{
  history(1);await scanSessions();controls({invalidProcess:true});await warm();
  const db=getDb();assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);
- assert.equal((await factory()).failedExtractions,1);assert.equal((await factory()).proposals.length,0);
+ assert.equal((await factory()).preparationErrors,1);assert.equal((await factory()).proposals.length,0);
  const count=calls().length;await warm();assert.equal(calls().length,count);
 });
 test('process validation uses the existing repair attempt without replacing the valid ordinary summary',async()=>{
@@ -196,12 +275,12 @@ test('process validation uses the existing repair attempt without replacing the 
 test('process repair cannot spend the last invocation or discard a valid ordinary summary',async()=>{
  history(1);await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='1';controls({invalidProcess:true});await warm();
  const db=getDb();assert.equal(calls().length,1);assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');
- assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);assert.equal((await factory()).failedExtractions,1);
+ assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);assert.equal((await factory()).preparationErrors,1);
 });
 test('a failed process-repair provider call does not discard a valid ordinary summary',async()=>{
  history(1);await scanSessions();controls({repairableProcess:true,failRepair:true});await warm();
  const db=getDb();assert.equal(calls().length,2);assert.equal(db.prepare('SELECT status FROM background_runs').get().status,'completed');
- assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);assert.equal((await factory()).failedExtractions,1);
+ assert.ok(db.prepare('SELECT COUNT(*) n FROM summary_cache').get().n>0);assert.equal((await factory()).preparationErrors,1);
 });
 test('explicit cached preparation retains the failed validation attempt before correction',async()=>{
  history(1);await scanSessions();controls({invalidProcess:true});await warm();const db=getDb();
@@ -220,7 +299,7 @@ test('explicit preparation of selected cached leaves preserves summaries and fai
  const keys=db.prepare('SELECT key FROM summary_leaf_inputs ORDER BY key').all().map(r=>r.key);
  controls({});await warmSummaryCache(controller.signal,undefined,keys);
  assert.deepEqual(db.prepare('SELECT * FROM summary_cache ORDER BY key').all(),before);
- assert.equal((await factory()).proposals.length,1);assert.equal((await factory()).failedExtractions,2);
+ assert.equal((await factory()).proposals.length,1);assert.equal((await factory()).preparationErrors,2);
  const count=calls().length;await warmSummaryCache(controller.signal,undefined,keys);assert.equal(calls().length,count);
 });
 test('explicit cached preparation respects opt-out and current source permissions',async()=>{
@@ -267,7 +346,7 @@ test('foreground summarization feeds background learning even when the open conv
 test('workflow comparisons cannot exceed the summarization job invocation allowance',async()=>{
  history();await scanSessions();process.env.DRAKEN_PI_MAX_INVOCATIONS='3';await warm();
  const run=getDb().prepare('SELECT * FROM background_runs ORDER BY id DESC LIMIT 1').get();
- assert.ok(run.invocations<=3);assert.equal(run.status,'failed');assert.equal((await factory()).proposals.length,0);
+ assert.ok(run.invocations<=3);assert.equal(run.status,'interrupted');assert.equal((await factory()).proposals.length,0);
  const count=calls().length;await warm();assert.equal(calls().length,count);
 });
 test('original-byte changes during leaf inference prevent retaining procedural claims',async()=>{
@@ -280,11 +359,11 @@ test('original-byte changes during leaf inference prevent retaining procedural c
 });
 test('failed matching is not automatically retried; explicit preparation retry retains earlier receipts',async()=>{
  history();await scanSessions();controls({failStage:'workflow_match'});await warm();
- const db=getDb(),run=db.prepare('SELECT status,error,failure_events_json FROM background_runs').get();assert.equal(run.status,'failed');
- assert.match(run.error,/Workflow comparison stopped/);assert.match(run.error,/model request did not complete/);assert.doesNotMatch(run.error,/summaries could not finish/);
- assert.equal(JSON.parse(run.failure_events_json)[0].operation,'Workflow comparison');assert.equal((await factory()).learningError,run.error);
+ const db=getDb(),run=db.prepare('SELECT status,error,failure_events_json FROM background_runs').get();assert.equal(run.status,'completed');
+ assert.equal(run.error,'');assert.ok(db.prepare("SELECT error FROM preparation_errors WHERE scope='comparison'").get().error);
+ assert.equal(JSON.parse(run.failure_events_json)[0].scope,'comparison');assert.equal((await factory()).learning,'enabled');assert.equal((await factory()).preparationErrors,1);
  const count=calls().length;await warm();assert.equal(calls().length,count);
  controls({});setAutoSummary(true);await warm();assert.equal((await factory()).proposals.length,1);
  assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE status='failed'").get().n,1);
- assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,2);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,1,'retry retains the existing allowance');
 });

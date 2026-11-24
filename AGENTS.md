@@ -18,6 +18,12 @@
 - Measure the affected user-facing path with representative saved data before calling the change finished. Correct output and green tests do not excuse a slow page. Report any material delay and its cause; do not silently accept it.
 - When a check causes complexity or latency, first ask whether it is required at that point. Remove unnecessary work rather than building caches, background jobs or more infrastructure around it. If an existing contract conflicts with the requested behavior, explain the specific conflict and ask instead of silently expanding the scope.
 
+## Check every PR for dead code
+
+- Before opening or updating a PR, check its changes and the code they replace for dead code. Remove obsolete helpers, branches, imports, types and response fields that no longer have a supported caller.
+- Trace application callers, not just references. Tests calling a helper do not prove the application still uses it. Remove tests that only preserve obsolete behavior; keep coverage for current requirements, permissions, accounting and cancellation.
+- Run the unused-code checks and manually review the PR diff. Do not hide unused code with ignore rules or retain a replaced implementation just to keep its tests passing.
+
 ## Keep UI content focused
 
 - Think like a product marketer: make the value clear and the page easy to scan, not crowded with explanations.

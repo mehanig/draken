@@ -1,4 +1,5 @@
 import { getDb } from '../db/schema';
+import { preparationOperation, SkippedPreparationOperation, isPreparationLimit } from './preparation-errors';
 import { SUMMARY_PROCESS_PROMPT, preparedProcess } from '../workflow-learning';
 import { workflowLocation } from '../factory/location';
 import { saveSummaryProcess } from '../factory/learning-store';
@@ -325,7 +326,18 @@ export class SummaryTree {
     return spec;
   }
 
+  incomplete = false;
+  private operationError?: unknown;
   private async node<T extends NodeSummary | TopicGroups>(spec: Spec, validate: (value: unknown, allowed: Set<string>) => T, derived?: T): Promise<T> {
+    if (!this.background) return this.nodeValue(spec, validate, derived);
+    const responses: string[] = [];
+    const result = await preparationOperation(this.runId, 'summary-node', spec.key, this.signal, async () => { try { return await this.nodeValue(spec, validate, derived, responses); } catch (error) { this.operationError ??= error; throw error; } }, undefined,
+      () => ({ kind: spec.kind, model: this.sync.models.summary, session: spec.leafInput?.session, sourceKeys: [...spec.allowed], children: spec.children, responses }));
+    if (result.ok) return result.value;
+    this.incomplete = true;
+    throw new SkippedPreparationOperation(this.operationError instanceof Error ? this.operationError.message : 'Summary operation failed previously; dependent work is skipped');
+  }
+  private async nodeValue<T extends NodeSummary | TopicGroups>(spec: Spec, validate: (value: unknown, allowed: Set<string>) => T, derived?: T, responses: string[] = []): Promise<T> {
     await this.planningYield();
     this.register(spec);
     const limits = spec.batch ? BATCH_OUTPUT : LEGACY_OUTPUT;
@@ -413,6 +425,7 @@ export class SummaryTree {
             if (this.accountAggregation) assertRecentSessions(this.db, this.sync.items.map(item => item.session_id));
             break;
           }
+          responses.push(response);
           verify();
           try {
             const raw = parseJson(response, limits.characters + (spec.leafInput && !citationRepair ? 60000 : 0));
@@ -457,12 +470,13 @@ export class SummaryTree {
         if (processInput) {
           const references = [...spec.allowed];
           const roles = new Map([...dependencies].map(item => [sourceKey(item), item.role]));
-          saveSummaryProcess(spec.key, this.sync.models.summary, { table: this.runTable, id: this.runId }, processInput, processValue, references, references.map(ref => roles.get(ref) || 'unknown'), { sourceError: processSourceError, location: processLocation });
+          saveSummaryProcess(spec.key, this.sync.models.summary, { table: this.runTable, id: this.runId }, processInput, processValue, references, references.map(ref => roles.get(ref) || 'unknown'), { sourceError: processSourceError, location: processLocation, rawOutputs: responses });
         }
       })();
       return output;
     } catch (error) {
       setStatus('failed', cleanText(error instanceof Error ? error.message : 'Summary failed', 1500));
+      if (this.background && isPreparationLimit(error) && responses.length) throw Error('Summary validation failed and no calls remain for correction. Responses are retained.');
       throw error;
     }
   }
@@ -1086,8 +1100,12 @@ export class SummaryTree {
     if (minimum > this.sync.models.max_invocations) throw new HttpError(409,
       `At least ${minimum} invocations are needed for uncached batches${this.background ? '' : ' and the verdict'}, before any uncached reconciliation. Raise the invocation limit; no model calls have been made.`);
     let nodes: SummaryNode[] = [];
-    for (const spec of specs) nodes.push({ key: spec.key, kind: 'chunk', label: spec.label, sources: spec.sources,
-      summary: await this.node(spec, (value, refs) => validateSummary(value, refs, spec.batch ? BATCH_OUTPUT : LEGACY_OUTPUT)) });
+    for (const spec of specs) {
+      try { nodes.push({ key: spec.key, kind: 'chunk', label: spec.label, sources: spec.sources,
+        summary: await this.node(spec, (value, refs) => validateSummary(value, refs, spec.batch ? BATCH_OUTPUT : LEGACY_OUTPUT)) }); }
+      catch (error) { if (!(error instanceof SkippedPreparationOperation)) throw error; }
+    }
+    if (this.incomplete) return nodes;
     const processed = (this.db.prepare(`SELECT processed_entries FROM ${this.runTable} WHERE id=?`).get(this.runId) as { processed_entries: number }).processed_entries;
     if (processed !== this.sync.items.length) throw new Error('Incomplete source coverage: refusing to generate a final verdict');
     nodes = await this.retainedParents(nodes);
@@ -1096,8 +1114,12 @@ export class SummaryTree {
       const groups = await this.tokenBatches(nodes, node => this.mergePayload([node], true));
       if (groups.length >= nodes.length) throw new HttpError(400, 'Summaries cannot be safely reconciled within the input budget. Cached results are intact.');
       const next: SummaryNode[] = [];
-      for (const [index, group] of groups.entries()) next.push(group.length === 1 ? group[0] : await this.reconcileBatch(group,
-        groups.length === 1 ? 'Current project briefing' : `Global reconciliation ${depth + 1} · part ${index + 1}`, groups.length === 1));
+      for (const [index, group] of groups.entries()) {
+        try { next.push(group.length === 1 ? group[0] : await this.reconcileBatch(group,
+          groups.length === 1 ? 'Current project briefing' : `Global reconciliation ${depth + 1} · part ${index + 1}`, groups.length === 1)); }
+        catch (error) { if (!(error instanceof SkippedPreparationOperation)) throw error; }
+      }
+      if (this.incomplete) return next;
       nodes = next;
     }
     if (nodes.length && !this.compactRoots(nodes)) nodes = [await this.reconcileBatch(nodes, 'Current project briefing', true)];
@@ -1109,7 +1131,11 @@ export class SummaryTree {
   }
 
   async build(): Promise<SummaryNode[]> {
-    try { return await this.buildTree(); }
+    try {
+      const nodes = await this.buildTree();
+      if (this.incomplete) throw new SkippedPreparationOperation(this.operationError instanceof Error ? this.operationError.message : 'Summary operation failed previously; dependent work is skipped');
+      return nodes;
+    }
     finally { this.leaves?.close(); this.leaves = undefined; }
   }
 
@@ -1131,9 +1157,15 @@ export class SummaryTree {
     const sessionRoots: SummaryNode[] = [];
     for (const [session, chunks] of specs) {
       const nodes: SummaryNode[] = [];
-      for (const spec of chunks) nodes.push({ key: spec.key, kind: 'chunk', label: spec.label, sources: spec.sources, summary: await this.node(spec, validateSummary) });
-      sessionRoots.push(await this.reduce(nodes, 'session', `Session ${session.slice(0, 8)}`));
+      for (const spec of chunks) {
+        try { nodes.push({ key: spec.key, kind: 'chunk', label: spec.label, sources: spec.sources, summary: await this.node(spec, validateSummary) }); }
+        catch (error) { if (!(error instanceof SkippedPreparationOperation)) throw error; }
+      }
+      if (nodes.length !== chunks.length) continue;
+      try { sessionRoots.push(await this.reduce(nodes, 'session', `Session ${session.slice(0, 8)}`)); }
+      catch (error) { if (!(error instanceof SkippedPreparationOperation)) throw error; }
     }
+    if (this.incomplete) return sessionRoots;
     const processed = (this.db.prepare(`SELECT processed_entries FROM ${this.runTable} WHERE id = ?`).get(this.runId) as { processed_entries: number }).processed_entries;
     if (processed !== this.sync.items.length) throw new Error('Incomplete source coverage: refusing to generate a final verdict');
 
@@ -1147,7 +1179,9 @@ export class SummaryTree {
       const input = { observations: batch.map(item => ({ id: item.id, ...this.dated({ observations: [item.observation], limitations: [] }).observations[0], evidence: undefined })) };
       const spec = this.spec('topics', `Related-work grouping ${index + 1}`, input, new Set(batch.map(item => item.id)),
         [...new Set(batch.flatMap(item => item.node.sources))], [...new Set(batch.map(item => item.node.key))]);
-      const result = await this.node(spec, validateGroups, batch.length === 1 ? { groups: [{ topic: batch[0].observation.topic, members: [batch[0].id] }] } : undefined);
+      let result: TopicGroups;
+      try { result = await this.node(spec, validateGroups, batch.length === 1 ? { groups: [{ topic: batch[0].observation.topic, members: [batch[0].id] }] } : undefined); }
+      catch (error) { if (error instanceof SkippedPreparationOperation) continue; throw error; }
       for (const group of result.groups) {
         const key = group.topic.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
         if (!topicGroups.has(key)) topicGroups.set(key, { topic: group.topic, members: [], routerKeys: [] });
@@ -1155,6 +1189,7 @@ export class SummaryTree {
         topicGroups.get(key)!.routerKeys.push(spec.key);
       }
     }
+    if (this.incomplete) return sessionRoots;
     const topics: SummaryNode[] = [];
     for (const group of topicGroups.values()) {
       const members = group.members.map(id => descriptorMap.get(id)!);
@@ -1168,11 +1203,16 @@ export class SummaryTree {
         const payload = { topic: group.topic, ...this.mergePayload(chunk) };
         const spec = this.spec('topic', `${group.topic}${chunks.length > 1 ? ` · part ${index + 1}` : ''}`,
           payload, allowed, sources, [...new Set(group.routerKeys)]);
-        const summary = await this.node(spec, validateSummary, chunk.length === 1 ? chunk[0].summary : undefined);
-        merged.push({ key: spec.key, kind: 'topic', label: group.topic, summary, sources });
+        try {
+          const summary = await this.node(spec, validateSummary, chunk.length === 1 ? chunk[0].summary : undefined);
+          merged.push({ key: spec.key, kind: 'topic', label: group.topic, summary, sources });
+        } catch (error) { if (!(error instanceof SkippedPreparationOperation)) throw error; }
       }
-      topics.push(await this.reduce(merged, 'topic', group.topic));
+      if (merged.length !== chunks.length) continue;
+      try { topics.push(await this.reduce(merged, 'topic', group.topic)); }
+      catch (error) { if (!(error instanceof SkippedPreparationOperation)) throw error; }
     }
+    if (this.incomplete) return sessionRoots;
     topics.push(...sessionRoots.filter(node => !node.summary.observations.length));
     let roots = topics;
     for (let depth = 0; JSON.stringify(this.mergePayload(roots)).length > MERGE_CHARS; depth++) {

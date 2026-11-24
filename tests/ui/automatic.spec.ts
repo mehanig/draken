@@ -50,7 +50,7 @@ test('Home shows accumulated local history without automatic sync links, summari
   await page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true }).click();
   const dialog = page.getByRole('main', { name: 'Settings', exact: true });
   await expect(dialog.getByRole('switch', { name: /Automatically prepare history/ })).toBeChecked();
-  await expect(dialog.getByRole('button', { name: 'Retry automatic preparation' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Retry failed operations' })).toBeVisible();
   await expect(dialog).toContainText('quota or API billing');
   await dialog.getByLabel('About automatic preparation', { exact: true }).click();
   await expect(dialog.getByText('Local search uses CPU, memory and disk', { exact: false })).toBeVisible();

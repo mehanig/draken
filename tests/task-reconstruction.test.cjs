@@ -89,14 +89,15 @@ test('uncertain continuity is retained, not counted as a task or retried without
  assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE json_extract(output_json,'$.status')='uncertain'").get().n,1);
 });
 test('malformed output is retained and cannot automatically replay within the same owner',async()=>{
- await fragment('first');let count=0;await assert.rejects(reconstruct(async()=>{count++;return '{broken';}));
+ await fragment('first');let count=0;await reconstruct(async()=>{count++;return '{broken';});
  const failed=db.prepare('SELECT * FROM episode_reconstructions').get();assert.equal(failed.status,'failed');assert.equal(failed.raw_output,'{broken');assert.ok(failed.error);assert.equal(tasks().length,0);
- await assert.rejects(reconstruct(async()=>{count++;return '{}';}),/explicit retry/);assert.equal(count,1);
- await reconstruct(ask,2);assert.equal(tasks().length,1);assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='failed'").get().n,1);
+ await reconstruct(async()=>{count++;return '{}';});assert.equal(count,1);
+ await reconstruct(async()=>{count++;return '{}';},2);assert.equal(count,1,'a different owner is not permission to replay a failure');
+ require('../dist/sync/preparation-errors').retryPreparationErrors();await reconstruct(ask,2);assert.equal(tasks().length,1);assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_reconstructions WHERE status='failed'").get().n,1);
 });
 for(const change of ['uncited','unselected','bytes','location','cancel'])test(`${change} changes during reconstruction prevent admission and retain the paid response`,async()=>{
  const a=await fragment('first',{uncited:true});await fragment('other',{session:'other',goal:'Release 9.9.9'});
- await assert.rejects(reconstruct(async input=>{
+ const operation=reconstruct(async input=>{
   const output=JSON.stringify(decision(input,f=>f.id==='F0'));
   if(change==='uncited')db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(a.background[0].entry_id,a.background[0].session_id);
   if(change==='unselected')db.prepare("UPDATE agent_sessions SET included=0 WHERE id='other'").run();
@@ -104,12 +105,14 @@ for(const change of ['uncited','unselected','bytes','location','cancel'])test(`$
   if(change==='location')require('node:child_process').execFileSync('git',['init','-q',root+'/repo']);
   if(change==='cancel')controller.abort();
   return output;
- }));
- assert.equal(tasks().length,0);const row=db.prepare('SELECT * FROM episode_reconstructions').get();assert.equal(row.status,change==='cancel'?'cancelled':'failed');assert.ok(row.raw_output);assert.ok(row.error);
+ });
+ if(change==='cancel')await assert.rejects(operation);else await operation;
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM episode_memberships WHERE fragment_key='first'").get().n,0,'the changed task is never admitted');
+ assert.equal(tasks().length,['uncited','bytes'].includes(change)?1:0,'only independently valid originals may still produce a task');const row=db.prepare('SELECT * FROM episode_reconstructions').get();assert.equal(row.status,change==='cancel'?'cancelled':'failed');assert.ok(row.raw_output);assert.ok(row.error);
 });
 test('originals omitted from the model excerpt still require fresh permission checks',async()=>{
  const source=await fragment('first',{uncited:20});
- await assert.rejects(reconstruct(async input=>{assert.equal(input.fragments[0].records.length,12);assert.equal(input.fragments[0].omittedRecords,9);const hidden=source.background.at(-1);db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(hidden.entry_id,hidden.session_id);return JSON.stringify(decision(input));}));
+ await reconstruct(async input=>{assert.equal(input.fragments[0].records.length,12);assert.equal(input.fragments[0].omittedRecords,9);const hidden=source.background.at(-1);db.prepare('UPDATE agent_entries SET active=0 WHERE entry_id=? AND session_id=?').run(hidden.entry_id,hidden.session_id);return JSON.stringify(decision(input));});
  assert.equal(tasks().length,0);assert.equal(db.prepare('SELECT status FROM episode_reconstructions').get().status,'failed');
 });
 test('shared reconstruction dependencies are read once per batch, never cached across reads',async()=>{
@@ -148,7 +151,7 @@ test('new continuity evidence can join earlier task identities without deleting 
 });
 test('a partial selection cannot silently split an existing reconstructed task',async()=>{
  await fragment('first');await fragment('second');await reconstruct();const before=tasks();await fragment('third');
- await assert.rejects(reconstruct(async input=>JSON.stringify({...decision(input),members:['F0','F1']}),2),/split an existing task/);assert.deepEqual(tasks(),before);
+ await reconstruct(async input=>JSON.stringify({...decision(input),members:['F0','F1']}),2);assert.match(db.prepare("SELECT error FROM episode_reconstructions WHERE status='failed'").get().error,/split an existing task/);assert.deepEqual(tasks(),before);
 });
 test('migration does not replay completed legacy fragments or rewrite old extraction receipts',async()=>{
  await fragment('legacy');db.prepare("UPDATE work_episodes SET learning_status='completed'").run();const before=db.prepare('SELECT * FROM process_extractions').all();initProcessSchema(db);initProcessSchema(db);await reconstruct();

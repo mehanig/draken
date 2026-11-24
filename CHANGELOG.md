@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.2
+
+- Preparation errors no longer pause the whole pipeline. Failed summaries, task reconstruction, candidate selection, comparisons and enrichment keep their diagnostics and returned model output while independent work continues.
+- Failed paid operations are not automatically repeated by later ticks, new candidates or new owners. Explicit retries retain the current batch's spent allowance. Cancellation, source checks and call limits remain in effect.
+- Settings and Factory show recorded error counts. Legacy error pauses are cleared by the preparing owner, not by reads; old failure receipts and accounting remain intact. Local indexing retry delays no longer delay model preparation.
+- If automatic preparation is enabled, upgrading resumes independent work and may make model calls under the configured allowance. Saved opt-outs remain off; upgrading never executes workflows.
+
 ## 0.15.1
 
 - Preparation failures now identify the actual step, known cause and model-call allowance instead of blaming summarization for every failure. Unknown causes are stated as unknown.

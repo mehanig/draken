@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const empty = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', failedExtractions: 0 };
+const empty = { proposals: [], nextCursor: null, unavailable: 0, learning: 'enabled', preparationErrors: 0 };
 const proposal = {
   location: { kind: 'repository', key: 'repo-a', path: '/projects/backup', name: 'backup' },
   id: 'proposal-1', model: 'test/model', createdAt: '2026-01-01T00:00:00.000Z',
@@ -125,15 +125,16 @@ test('a task workflow link loads its older page without fabricating recurrence o
 
 test('Factory explains paused learning and preparation errors without starting work', async ({ page }) => {
   let learning = 'paused'; const mutations: string[] = [];
-  const learningError = 'Workflow comparison stopped. The model compared steps outside the main task steps supplied for comparison. Attempt #427 used 9 of 120 allowed model calls. Saved summaries and workflows are retained.';
+  let preparationErrors = 0;
   page.on('request', r => { if (!['GET', 'HEAD'].includes(r.method())) mutations.push(r.url()); });
-  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, learningError: learning === 'error' ? learningError : '', proposals: [proposal], failedExtractions: learning === 'error' ? 1 : 0 } }));
+  await page.route('**/api/factory', route => route.fulfill({ json: { ...empty, learning, preparationErrors, proposals: [proposal] } }));
   await page.goto('/factory');
   await expect(page.getByText('Automatic workflow preparation is off. Saved workflows remain visible.', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify a database backup' })).toBeVisible();
-  learning = 'error'; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: learningError })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'View preparation settings' })).toHaveAttribute('href', '/settings');
+  learning = 'enabled';preparationErrors = 3; await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: '3 preparation errors recorded.' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Preparation settings' })).toHaveAttribute('href', '/settings');
+  await expect(page.getByText(/preparation stopped|paused after a fail/)).toHaveCount(0);
   await expect(page.getByText('1 failed attempt', { exact: true })).toHaveCount(0);
   expect(mutations).toEqual([]);
 });

@@ -47,7 +47,7 @@ export interface AutoIndexSettings {
 export interface SummaryPreparationSettings {
   enabled: boolean;
   status: 'off' | 'waiting' | 'running' | 'paused' | 'error';
-  prepared_entries: number; last_completed_at: string | null; error: string; operation?: string;
+  prepared_entries: number; last_completed_at: string | null; error: string; error_count?: number; failed_operations?: number; operation?: string;
 }
 export interface SyncCost { usd: number | null; complete: boolean }
 export type UsageRange = '6h' | '1d' | '7d' | '14d';

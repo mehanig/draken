@@ -10,7 +10,7 @@ A local-first engineering sync across your **pi, Codex CLI and Claude Code sessi
 
 **Sync with Draken → call or chat → keep a short recap.**
 
-**Draken 0.15.1** reports the actual failed preparation step, known cause and model-call allowance. Local indexing is shown separately from model-backed summaries and workflow preparation; retries clearly disclose possible model costs. **Factory** still reads saved database results without reopening historical sources. Upgrading does not retry preparation or execute workflows. See [the release notes](CHANGELOG.md#0151).
+**Draken 0.15.2** records preparation errors without pausing unrelated work. Failed operations keep their diagnostics and model responses; Settings and **Factory** show an error count. Saved workflows remain database-only reads. If automatic preparation is enabled, upgrading resumes independent work and may make model calls within the configured allowance. Saved opt-outs remain off, and upgrading never executes workflows. See [the release notes](CHANGELOG.md#0152).
 
 **Automatic preparation:** **Settings → Automatically prepare history** controls one pipeline: scan, index locally, then cache reusable summaries through your configured provider and quota/API billing. Both stages default on; saved opt-outs remain unchanged until you explicitly enable the combined control. Idle minute checks include small tails. Disabling stops both stages and retains completed embeddings and summaries. Paid failures appear in the shared Home/Settings status and require **Retry automatic preparation**; local failures back off five minutes.
 
@@ -28,7 +28,7 @@ Draken remembers which evidence a finished sync covered, what you decided, and w
 
 Requires Node.js **22.19+** and npm. Session-log indexing and evidence review do not require a model or pi executable. Generated briefings and discussion use **pi 1.4+**. Existing configured pi works unchanged; otherwise **`draken setup`** installs a pinned private runtime and **`draken login`** opens pi’s own authentication interface. See [SETUP.md](SETUP.md) for the full first-run flow, private directories and recovery.
 
-> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.15.1](CHANGELOG.md#0151) and [upgrade instructions](SETUP.md#upgrade-to-0151), including idle ending of older inactive sessions.
+> **Upgrading?** Back up your original agent logs and Draken data first. Versions **0.1.6 and earlier** are the old task dashboard, not this application. See [what changed in 0.15.2](CHANGELOG.md#0152) and [upgrade instructions](SETUP.md#upgrade-to-0152), including idle ending of older inactive sessions.
 
 ```sh
 npm install -g draken
@@ -62,7 +62,7 @@ Run setup/login as the server’s user with the same environment. `draken status
 4. Return home for compact cards, or open any `/syncs/:id` independently. Reopening/reloading a URL never starts capture. **Call Draken** continues an active conversation with the same frozen snapshot; newly prepared history can supplement later turns without changing that snapshot.
 5. Use **Chat instead** for a separate text conversation, or expand the detail sections to inspect the briefing/evidence and explicitly save **Decisions** and **Carry into the next sync**. **Mark reviewed** is separate and optional before starting another sync; only that explicit action advances coverage.
 
-**Settings → Automatically prepare history** enables or disables indexing and paid summaries together. Existing saved flags and failure pauses survive upgrades; merely opening Settings does not change consent. An old indexing-only choice remains local-only until you enable the combined control. Old automatically created snapshots remain readable and are never silently resumed. See [background indexing](MEMORY.md#optional-background-indexing) and [paid preparation](MEMORY.md#optional-paid-summary-preparation) for batching, cancellation, saved preferences and upgrade behavior.
+**Settings → Automatically prepare history** enables or disables indexing and paid summaries together. Saved consent flags survive upgrades; merely opening Settings does not change consent. Preparation errors are logged and counted without pausing unrelated work. Failed paid operations are skipped until explicitly retried. An old indexing-only choice remains local-only until you enable the combined control. Old automatically created snapshots remain readable and are never silently resumed. See [background indexing](MEMORY.md#optional-background-indexing) and [paid preparation](MEMORY.md#optional-paid-summary-preparation) for batching, cancellation, saved preferences and upgrade behavior.
 
 **Settings** has its own page at `/settings`, with direct links, reload and browser Back. Opening it does not start a scan or preparation.
 
@@ -219,7 +219,7 @@ This is not a drop-in replacement for the old Docker/Claude task dashboard or it
 
 Source builds, development commands, test/probe instructions and the code map live in [CONTRIBUTING.md](CONTRIBUTING.md). They are not needed for normal npm installation.
 
-See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist and focused high-risk review areas. The public landing page lives in `site/`; changes there on `master`/`main` trigger the existing website deployment workflow. Its `scripts/site-release.cjs` gate validates the version copy and withholds deployment until npm `latest` matches the root package version. Release copy describes 0.15.1 after release, not evidence of a live deployment. Qualify and publish npm separately before allowing the gated website deployment; this documentation change does not merge, publish or deploy anything. Focused lifecycle/readiness regressions are `tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs` and `tests/voice-live-updates.test.cjs`; browser coverage is `tests/ui/live-conversation.spec.ts`. Existing cache/consent regressions remain required.
+See [ACCEPTANCE.md](ACCEPTANCE.md) for automated gates, a short human product checklist and focused high-risk review areas. The public landing page lives in `site/`; changes there on `master`/`main` trigger the existing website deployment workflow. Its `scripts/site-release.cjs` gate validates the version copy and withholds deployment until npm `latest` matches the root package version. Release copy describes 0.15.2 after release, not evidence of a live deployment. Qualify and publish npm separately before allowing the gated website deployment; this documentation change does not merge, publish or deploy anything. Focused lifecycle/readiness regressions are `tests/conversation.test.cjs`, `tests/live-history-readiness.test.cjs` and `tests/voice-live-updates.test.cjs`; browser coverage is `tests/ui/live-conversation.spec.ts`. Existing cache/consent regressions remain required.
 
 ## License
 

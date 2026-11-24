@@ -1,6 +1,7 @@
 import { HttpError } from '../errors';
 import type { SavedEnrichment } from './types';
 import { getDb } from '../db/schema';
+import { preparationOperation, preparationRetryRequested, isPreparationLimit } from '../sync/preparation-errors';
 import { digest } from '../sync/normalize';
 import { readDiscovery, readProposal, discoveryFromProposal } from './discovery';
 import { saveWorkflowDisplay } from './display-store';
@@ -17,7 +18,7 @@ function latest(workflow: Discovery): Row | undefined {
 /** Caller must supply a freshly source-verified discovery. Reading never starts inference. */
 export function savedEnrichment(workflow: Discovery): SavedEnrichment {
   const row = latest(workflow);
-  if (!row) return { status: 'pending' };
+  if (!row || (row.status === 'cancelled' && row.run_table === 'background_runs')) return { status: 'pending' };
   if (row.status === 'completed') {
     try { const value = JSON.parse(row.output_json!); if (JSON.stringify(enrich(workflow, value.guidance)) === JSON.stringify(value)) return { status: 'ready', value }; } catch {}
   }
@@ -49,7 +50,7 @@ export async function prepareEnrichment(id: string, owner: PreparationOwner, mod
     db.prepare("UPDATE workflow_enrichments SET status='completed',output_json=?,completed_at=? WHERE id=?").run(JSON.stringify(value), new Date().toISOString(), attempt);
     return value;
   } catch (error) {
-    db.prepare('UPDATE workflow_enrichments SET status=?,completed_at=? WHERE id=?').run(signal.aborted ? 'cancelled' : 'failed', new Date().toISOString(), attempt);
+    db.prepare('UPDATE workflow_enrichments SET status=?,completed_at=? WHERE id=?').run(signal.aborted || (owner.table === 'background_runs' && isPreparationLimit(error)) ? 'cancelled' : 'failed', new Date().toISOString(), attempt);
     throw error;
   }
 }
@@ -60,8 +61,11 @@ export async function prepareDiscoveredEnrichments(run: number, model: string, a
     AND json_extract(output_json,'$.sameWorkflow')=1 ORDER BY rowid`).all(COMPARISON_FORMAT) as {id: string}[];
   for (const row of rows) {
     signal.throwIfAborted();
-    let state: SavedEnrichment;
-    try { state = savedEnrichment(await readDiscovery(row.id, signal)); } catch { signal.throwIfAborted(); continue; }
-    if (state.status === 'pending') await prepareEnrichment(row.id, { table: 'background_runs', id: run }, model, ask, signal);
+    await preparationOperation(run, 'enrichment-source', row.id, signal, async () => {
+      const workflow = await readDiscovery(row.id, signal), state = savedEnrichment(workflow);
+      const key = `${row.id}:${workflow.revision}:${model}`;
+      if (state.status === 'pending' || (state.status === 'failed' && preparationRetryRequested('enrichment', key))) await preparationOperation(run, 'enrichment', key, signal,
+        () => prepareEnrichment(row.id, { table: 'background_runs', id: run }, model, ask, signal, state.status === 'failed'));
+    });
   }
 }
