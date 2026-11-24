@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {examples,workflow,guidance}=require('./fixtures/reusable-workflows.cjs');
+const {examples,partialExample,workflow,guidance}=require('./fixtures/reusable-workflows.cjs');
 const {contractMatchInput,validateProcess,validateProcessEvidence,validateContractAssessment,decideContractMatch}=require('../dist/workflow-learning');
 const {enrich,workflowRequest,sessionPlan}=require('../dist/factory-enrichment');
 const inputs=()=>[examples()[0].left,examples()[0].right].map(side=>contractMatchInput(side.fragment));
@@ -10,6 +10,21 @@ test('cross-feature fixtures retain historical goals and distinguish implementat
  for(const c of examples())for(const s of [c.left,c.right])validateProcessEvidence(validateProcess(JSON.stringify({summary:'Synthetic reuse case',fragments:[s.fragment],limitations:['Synthetic']}),s.records.map(r=>r.ref)),s.records);
  assert.notEqual(inputs()[0].goal,inputs()[1].goal);
  assert.equal(decideContractMatch(assessment(),inputs(),saved()).assessment.reuse,'saved-workflow');
+});
+test('partial observations can reuse the intended full procedure without claiming missing steps happened',()=>{
+ const side=partialExample();validateProcessEvidence(validateProcess(JSON.stringify({summary:'Partial implementation',fragments:[side.fragment],limitations:[]}),side.records.map(r=>r.ref)),side.records);
+ const pair=[contractMatchInput(side.fragment),inputs()[1]],a=assessment();
+ a.stagePairs=a.stagePairs.slice(0,2);a.limitations=[...pair[0].gaps];
+ const decision=decideContractMatch(a,pair,saved());
+ assert.equal(decision.assessment.reuse,'saved-workflow');assert.deepEqual(decision.assessment.workflow,workflow);
+ assert.equal(decision.coverage[0].complete,false);assert.equal(decision.coverage[1].complete,true);
+ assert.deepEqual(decision.coverage[0].gaps,pair[0].gaps);assert.equal(decision.assessment.stagePairs.length,2);
+ a.stagePairs.push({left:'S4',right:'S4'});assert.throws(()=>decideContractMatch(a,pair,saved()),/supplied main stages/);
+});
+test('uncertain identity can defer discovery without inventing an edits-only workflow',()=>{
+ const pair=[contractMatchInput(partialExample().fragment),inputs()[1]];
+ const a={relation:'insufficient',workflow:null,reuse:null,stagePairs:[],reason:'The intended endpoint cannot be established',limitations:[...pair[0].gaps]};
+ const decision=decideContractMatch(a,pair,saved());assert.equal(decision.sameWorkflow,false);assert.equal(decision.assessment.workflow,null);
 });
 test('reuse names only a supplied unchanged definition, never a widened endpoint or an unsupported stage',()=>{
  for(const mutate of [a=>a.reuse='unknown',a=>a.reuse=42,a=>a.workflow.purpose='Publish a release',a=>a.workflow.appliesWhen+=' and publish',a=>a.workflow.method.push('Merge and publish'),a=>a.relation='shared_subprocedure',a=>a.stagePairs[0].left='missing']){
