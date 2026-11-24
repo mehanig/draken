@@ -92,6 +92,35 @@ test('normal background tick saves process records with summaries and detects a 
  for(const row of db.prepare("SELECT source_dependencies_json FROM process_extractions WHERE kind='summary'").all()){assert.ok(row.source_dependencies_json.includes('source_pointer'));assert.doesNotMatch(row.source_dependencies_json,/"text":/);}
  await warm();assert.equal(calls().length,count,'unchanged ticks do not repeat paid work');
 });
+test('a revised example pair reuses its saved workflow without replacing receipts, enrichment or spending on another enrichment',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),page=await factory(),proposal=page.proposals[0];
+ const original=db.prepare('SELECT * FROM process_extractions WHERE id=?').get(proposal.id),enrichment=db.prepare('SELECT * FROM workflow_enrichments').get();
+ const current=JSON.parse(original.source_dependencies_json).parents[0];
+ db.prepare('INSERT INTO episode_revisions(episode_id,revision,reconstruction_id,assembly_index) SELECT episode_id,revision+1,reconstruction_id,assembly_index FROM episode_revisions WHERE episode_id=? AND revision=?').run(current.episode,current.revision);
+ db.prepare("UPDATE work_episodes SET revision=revision+1,learning_status='pending' WHERE id=?").run(current.episode);
+ controls({workflowAssessment:{...proposal.decision.assessment,reuse:proposal.id}});const before=calls().length;await warm();
+ const match=calls().slice(before).find(c=>c.task==='compare_workflow_identity');assert.ok(match.saved_workflows.some(c=>c.id===proposal.id));
+ const reused=db.prepare("SELECT * FROM process_extractions WHERE json_extract(output_json,'$.assessment.reuse')=?").get(proposal.id);assert.equal(reused.status,'completed');assert.equal(JSON.parse(reused.source_dependencies_json).parents[0].revision,current.revision+1);
+ assert.equal((await factory()).proposals.length,1);assert.equal((await factory()).proposals[0].id,proposal.id);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
+ assert.deepEqual(db.prepare('SELECT * FROM workflow_enrichments').get(),enrichment);assert.deepEqual(db.prepare('SELECT * FROM process_extractions WHERE id=?').get(proposal.id),original);
+ assert.equal(db.prepare('SELECT SUM(invocations) n FROM background_runs').get().n,calls().length);
+ require('../dist/db/process-schema').initProcessSchema(db);assert.equal((await factory()).proposals.length,1,'startup backfill does not promote reuse receipts');
+ const count=calls().length;await warm();assert.equal(calls().length,count);
+});
+test('a reused definition changing during inference prevents admission',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0];
+ controls({workflowAssessment:{...proposal.decision.assessment,reuse:proposal.id},taskDelays:{compare_workflow_identity:500}});history(3);await scanSessions();const done=warm();
+ await waitFor(()=>calls().filter(c=>c.task==='compare_workflow_identity').length===2);
+ const display=JSON.parse(db.prepare('SELECT display_json FROM workflow_discoveries WHERE id=?').get(proposal.id).display_json);display.decision.assessment.workflow.purpose='Changed endpoint';db.prepare('UPDATE workflow_discoveries SET display_json=? WHERE id=?').run(JSON.stringify(display),proposal.id);
+ await done;const failed=db.prepare("SELECT output_json FROM process_extractions WHERE kind='comparison' AND status='failed'").get();assert.match(failed.output_json,/Saved workflow definitions changed/);assert.equal((await factory()).proposals.length,1);
+});
+test('0.15.2 comparison and enrichment recipes remain usable without paid regeneration',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0];
+ db.prepare('UPDATE process_extractions SET recipe_version=? WHERE id=?').run('a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9',proposal.id);
+ db.prepare('UPDATE workflow_enrichments SET recipe_version=?').run('d22b1e41000f840fc718758f6fca803e9acbb1fe821400b64d07b4b5c410e22d');
+ const count=calls().length;const {readDiscovery}=require('../dist/factory/discovery');const discovery=await readDiscovery(proposal.id,controller.signal);
+ assert.equal(discovery.id,proposal.id);await prepareWorkflowEnrichment(proposal.id,{requestId:'42345678-1234-4234-8234-123456789abc',retry:false},controller.signal);assert.equal(calls().length,count);assert.equal((await factory()).proposals[0].enrichment.status,'ready');
+});
 test('explicit enrichment retries retain failed paid output and do not reset the background learning error',async()=>{
  history();await scanSessions();await warm();const db=getDb(),id=(await factory()).proposals[0].id;db.prepare('DELETE FROM workflow_enrichments').run();
  db.prepare("INSERT OR REPLACE INTO sync_settings VALUES ('auto_summary_error','Existing learning failure')").run();controls({invalidEnrichment:true});

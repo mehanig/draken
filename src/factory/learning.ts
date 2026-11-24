@@ -3,8 +3,8 @@ import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
 import { preparationOperation, preparationRetryRequested, isPreparationLimit, recordPreparationError } from '../sync/preparation-errors';
 import { digest, cleanText } from '../sync/normalize';
-import { CANDIDATE_PROMPT, candidateSelection, CONTRACT_MATCH_PROMPT, validateContractAssessment, decideContractMatch } from '../workflow-learning';
-import { COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload } from './learning-store';
+import { CANDIDATE_PROMPT, candidateSelection, CONTRACT_MATCH_PROMPT, validateContractAssessment, decideContractMatch, sameWorkflowDefinition, type WorkflowCandidate } from '../workflow-learning';
+import { COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, savedWorkflowCandidates } from './learning-store';
 import { reconstructPendingTasks, readLearningParent, readLearningParents, independentTasks, type EpisodeParent } from './episode-store';
 
 type Ask = (payload: unknown, system: string) => Promise<string>;
@@ -15,12 +15,12 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
   await reconstructPendingTasks(run, reconstruction.model, reconstruction.ask, signal);
   const pending = db.prepare("SELECT id episode,revision FROM work_episodes WHERE assembly='reconciled' AND superseded_by IS NULL AND learning_status='pending' ORDER BY rowid").all() as Episode[];
   const load = (parents: EpisodeParent[]) => readLearningParents(parents, signal);
-  async function invoke<T>(parents: EpisodeParent[], expectedIdentities: string[], locationKey: string, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T): Promise<T> {
+  async function invoke<T>(parents: EpisodeParent[], expectedIdentities: string[], locationKey: string, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T, saved: readonly WorkflowCandidate[] = []): Promise<T> {
     signal.throwIfAborted();
     const before = await load(parents), identities = before.map(v => v.identity);
     if (JSON.stringify(identities) !== JSON.stringify(expectedIdentities)) throw Error('Workflow inputs changed before inference');
     if (before.some(value => value.location.kind === 'unavailable' || value.location.key !== locationKey)) throw Error('Workflow locations changed before inference');
-    const deps = { format: COMPARISON_FORMAT, phase, parents, identities, location: before[0].location, ...(pair ? { pair } : {}) };
+    const deps = { format: COMPARISON_FORMAT, phase, parents, identities, location: before[0].location, ...(pair ? { pair } : {}), ...(saved.length ? { savedWorkflows: saved } : {}) };
     const key = learningInputKey(deps, payload, model), recipe = digest(prompt);
     const previous = db.prepare('SELECT id,status,output_json,usage_json FROM process_extractions WHERE input_key=? AND recipe_version=? AND model=? ORDER BY rowid DESC LIMIT 1').get(key, recipe, model) as { id: string; status: string; output_json: string; usage_json: string } | undefined;
     if (previous?.status === 'completed') return validate(previous.output_json);
@@ -51,9 +51,14 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       stage = 'sources';
       const after = await load(parents);
       if (JSON.stringify(after.map(v => v.identity)) !== JSON.stringify(identities) || after.some(value => value.location.key !== locationKey)) throw Error('Workflow sources or locations changed during inference');
+      if (saved.some(candidate => {
+        const current = savedWorkflowCandidates(locationKey, candidate.id)[0];
+        return !current || !sameWorkflowDefinition(current.workflow, candidate.workflow);
+      })) throw Error('Saved workflow definitions changed during inference');
       signal.throwIfAborted();
     };
     try {
+      await verify(); stage = 'provider';
       raw = await ask(payload, prompt); signal.throwIfAborted();
       stage = 'validation';
       let output: T;
@@ -72,7 +77,7 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
       await verify();
       db.prepare("UPDATE process_extractions SET status='completed',output_json=?,completed_at=? WHERE id=?")
         .run(JSON.stringify(repairs.length ? { ...output, validationRepairs: repairs } : output), new Date().toISOString(), id);
-      if (phase === 'match' && (output as { sameWorkflow?: boolean }).sameWorkflow) saveMissingWorkflowDisplays([id]);
+      if (phase === 'match' && (output as { sameWorkflow?: boolean }).sameWorkflow && !(output as { assessment: { reuse?: string | null } }).assessment.reuse) saveMissingWorkflowDisplays([id]);
       return output;
     } catch (error) {
       db.prepare('UPDATE process_extractions SET status=?,output_json=?,completed_at=? WHERE id=?').run(signal.aborted || (isPreparationLimit(error) && raw === undefined) ? 'cancelled' : 'failed',
@@ -112,11 +117,11 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
         candidates: ids.map((id, i) => ({ id, goal: inputs[i + 1].goal, context: inputs[i + 1].context })) }, CANDIDATE_PROMPT,
         raw => ({ selected: candidateSelection(raw, ids) }));
       for (const id of selected.selected) {
-        const index = ids.indexOf(id) + 1, pair = [inputs[0], inputs[index]];
+        const index = ids.indexOf(id) + 1, pair = [inputs[0], inputs[index]], saved = savedWorkflowCandidates(first.location.key);
         const operationKey = JSON.stringify([digest(CONTRACT_MATCH_PROMPT), model, [identities[0], identities[index]].sort()]);
         await preparationOperation(run, 'comparison', operationKey, signal, () =>
-          invoke(parents, identities, first.location.key, 'match', [0, index], workflowComparisonPayload(pair), CONTRACT_MATCH_PROMPT,
-            raw => { const value = JSON.parse(raw); const assessment = validateContractAssessment(JSON.stringify(value.assessment ?? value), pair); return decideContractMatch(assessment, pair); }), current.episode);
+          invoke(parents, identities, first.location.key, 'match', [0, index], workflowComparisonPayload(pair, saved), CONTRACT_MATCH_PROMPT,
+            raw => { const value = JSON.parse(raw); const assessment = validateContractAssessment(JSON.stringify(value.assessment ?? value), pair, saved); return decideContractMatch(assessment, pair, saved); }, saved), current.episode);
       }
     }
     signal.throwIfAborted();

@@ -30,7 +30,8 @@ export async function readProposal(id: string, signal: AbortSignal): Promise<Fac
 }
 async function readOriginalProposal(id: string, signal: AbortSignal): Promise<FactoryPage['proposals'][number]> {
   const saved = getDb().prepare('SELECT * FROM workflow_discoveries WHERE id=?').get(id) as DiscoveryRow | undefined;
-  if (saved?.origin === 'requested') return readTaskProposal(saved, signal);
+  if (!saved) throw Error('Workflow proposal unavailable');
+  if (saved.origin === 'requested') return readTaskProposal(saved, signal);
   const row = getDb().prepare("SELECT * FROM process_extractions WHERE id=? AND kind='comparison' AND status='completed'").get(id) as LearningRow | undefined;
   if (!row) throw Error('Workflow proposal unavailable');
   const { decision, evidence, location } = await readWorkflowComparison(row, signal);
