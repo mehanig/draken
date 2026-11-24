@@ -144,12 +144,21 @@ test('a reused definition changing during inference prevents admission',async()=
  const display=JSON.parse(db.prepare('SELECT display_json FROM workflow_discoveries WHERE id=?').get(proposal.id).display_json);display.decision.assessment.workflow.purpose='Changed endpoint';db.prepare('UPDATE workflow_discoveries SET display_json=? WHERE id=?').run(JSON.stringify(display),proposal.id);
  await done;const failed=db.prepare("SELECT output_json FROM process_extractions WHERE kind='comparison' AND status='failed'").get();assert.match(failed.output_json,/Saved workflow definitions changed/);assert.equal((await factory()).proposals.length,1);
 });
-for(const oldRecipe of ['a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9','eb8bb04aa3d16078f02612f95bd00782ce9374f9f5f98d0d5e0bf8183c76b71f'])test(`earlier comparison recipe ${oldRecipe.slice(0,8)} and enrichment remain usable without paid regeneration`,async()=>{
+for(const oldRecipe of ['a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9','eb8bb04aa3d16078f02612f95bd00782ce9374f9f5f98d0d5e0bf8183c76b71f','384b903ee088ca1a941ab2396ed7e5bcc8a17ad43478cbdf0146794c5155a0f9'])test(`earlier comparison recipe ${oldRecipe.slice(0,8)} and enrichment remain usable without paid regeneration`,async()=>{
  history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0];
  db.prepare('UPDATE process_extractions SET recipe_version=? WHERE id=?').run(oldRecipe,proposal.id);
- db.prepare('UPDATE workflow_enrichments SET recipe_version=?').run('d22b1e41000f840fc718758f6fca803e9acbb1fe821400b64d07b4b5c410e22d');
+ db.prepare('UPDATE workflow_enrichments SET recipe_version=?').run(oldRecipe.startsWith('384b')?'a3c97f4b71be8bf0f153873a65a652ca9cbf72ea6e28e62056591a99fecba823':'d22b1e41000f840fc718758f6fca803e9acbb1fe821400b64d07b4b5c410e22d');
  const count=calls().length;const {readDiscovery}=require('../dist/factory/discovery');const discovery=await readDiscovery(proposal.id,controller.signal);
  assert.equal(discovery.id,proposal.id);await prepareWorkflowEnrichment(proposal.id,{requestId:'42345678-1234-4234-8234-123456789abc',retry:false},controller.signal);assert.equal(calls().length,count);assert.equal((await factory()).proposals[0].enrichment.status,'ready');
+});
+test('an earlier enrichment failure remains failed after the conditional-step prompt change',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),id=(await factory()).proposals[0].id;
+ db.prepare("UPDATE workflow_enrichments SET status='failed',output_json=NULL,recipe_version=?").run('a3c97f4b71be8bf0f153873a65a652ca9cbf72ea6e28e62056591a99fecba823');
+ const before=calls().length,receipt=db.prepare('SELECT * FROM workflow_enrichments').get();
+ const discovery=await require('../dist/factory/discovery').readDiscovery(id,controller.signal);
+ assert.equal(require('../dist/factory/enrichment').savedEnrichment(discovery).status,'failed');
+ await warm();assert.equal(calls().length,before);assert.equal((await factory()).proposals[0].enrichment.status,'failed');
+ assert.deepEqual(db.prepare('SELECT * FROM workflow_enrichments').get(),receipt);
 });
 test('refreshing saved presentation preserves aliases without changing the workflow or enrichment',async()=>{
  history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0],before=calls().length;
