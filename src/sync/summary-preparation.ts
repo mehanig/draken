@@ -166,11 +166,10 @@ export async function warmSummaryCache(signal: AbortSignal, onWork?: () => void,
       if (processLeaves) await prepareCachedProcesses(processLeaves, run.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal);
       check();
       step('select_workflow_candidates');
-      await preparationOperation(run.id, 'workflow-learning-batch', key, controller.signal, () => learnSummaryWorkflows(run!.id, input.models.summary, (payload, system) => tree.call(payload, system), controller.signal,
-        { model: input.models.final, ask: (payload, system) => {
-          check(); step((payload as { task?: string }).task || 'reconstruct_task');
-          return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
-        } }));
+      await preparationOperation(run.id, 'workflow-learning-batch', key, controller.signal, () => learnSummaryWorkflows(run!.id, input.models.final, (payload, system) => {
+        check(); step((payload as { task?: string }).task || 'reconstruct_task');
+        return modelCall(payload, system, { models: input.models, runId: run!.id, table: 'background_runs', final: true, signal: controller.signal });
+      }, controller.signal));
       check();
       step('enrich_workflow');
       await preparationOperation(run.id, 'enrichment-batch', key, controller.signal, () => prepareDiscoveredEnrichments(run!.id, input.models.final, (payload, system) => {

@@ -18,6 +18,15 @@
 - Measure the affected user-facing path with representative saved data before calling the change finished. Correct output and green tests do not excuse a slow page. Report any material delay and its cause; do not silently accept it.
 - When a check causes complexity or latency, first ask whether it is required at that point. Remove unnecessary work rather than building caches, background jobs or more infrastructure around it. If an existing contract conflicts with the requested behavior, explain the specific conflict and ask instead of silently expanding the scope.
 
+## Session sources are append-only
+
+- Session history is append-only. Original session content stays in the session files. Persist pointers and metadata, not copies of raw or normalized session content, in the database. Do not add a transcript archive, content table or content-import migration.
+- Reuse already prepared results and records already loaded in memory. Do not reopen session files, compare original bytes or hashes, or walk provenance chains merely to revalidate completed work. This applies to evidence retrieval, workflow matching, consolidation, enrichment and saved-result reads—not just page loads.
+- When an operation actually needs session text that is not already loaded, read it through its stored pointer. Reading needed content is different from repeatedly verifying unchanged content.
+- Process newly appended records without revalidating unchanged history. An append does not invalidate existing pointers or prepared results.
+- Keep source permissions and revocation checks separate from content verification. Check current access using stored metadata; do not use permission checks as a reason to reread original session files.
+- This rule supersedes older requirements for fresh original-source verification on every use. Do not preserve repeated verification merely because existing code, tests or documentation require it.
+
 ## Check every PR for dead code
 
 - Before opening or updating a PR, check its changes and the code they replace for dead code. Remove obsolete helpers, branches, imports, types and response fields that no longer have a supported caller.
@@ -48,8 +57,8 @@
 - The module owns prepared candidate search, request relevance, source selection and checked-original packets. Callers own conversation state, invocation accounting, answering models, saving messages and review.
 - `src/evidence/` must have no imports from other Draken code, external packages or Node builtins, including type-only imports. It owns its contract types and uses standard language/platform APIs. Do not add dependency exceptions.
 - Keep question interpretation (project, follow-up, recall and recency) inside the evidence module's model planning step. Do not add caller-side intent regexes, word lists or guessed project restrictions. Citation syntax validation and local search tokenization are mechanical checks, not intent detection.
-- Inject permitted session metadata, search, fresh verified-original reads and text cleaning through `EvidenceDependencies`; pass the accounted model callback, cancellation and fixed cutoff in the request. Wire Draken services only in `src/evidence-adapter.ts`, outside the module. Do not add default adapters, provider clients, database writes, automatic retries or conversation ownership inside the module.
+- Inject permitted session metadata, search, pointer-based access to original session records or reuse of records already loaded in memory, and text cleaning through `EvidenceDependencies`; pass the accounted model callback, cancellation and fixed cutoff in the request. Wire Draken services only in `src/evidence-adapter.ts`, outside the module. Do not add default adapters, provider clients, database writes, automatic retries or conversation ownership inside the module.
 - Empty matches, unrelated requests, clarification and failures are different outcomes. Never infer irrelevance from an empty search.
 - Keep the import checks, standalone compile/run proof and pure public-contract tests in normal CI. The evidence folder must work when copied away from the repository with only injected host functions. Do not weaken these tests to make a refactor pass.
-- Preserve source permissions, original-byte verification, text/voice parity and cancellation tests when changing this boundary.
+- Preserve source permissions, first-time original-byte verification, text/voice parity and cancellation tests when changing this boundary. Tests must not require repeated original-source verification of records already processed into the database or memory.
 - Keep responses concise. Use technical terms only when they help, and explain unfamiliar ones.

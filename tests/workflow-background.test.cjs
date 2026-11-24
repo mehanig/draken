@@ -75,22 +75,81 @@ test('a legacy reconstruction pause resumes independent work in the same remaini
  const failed=db.prepare('SELECT * FROM episode_reconstructions WHERE id=?').get(id),before=db.prepare('SELECT * FROM background_runs WHERE id=?').get(run);db.prepare("UPDATE background_runs SET status='failed',stage='Task reconstruction',error='Legacy reconstruction failure' WHERE id=?").run(run);db.prepare("INSERT OR REPLACE INTO sync_settings VALUES('auto_summary_error','Legacy reconstruction failure')").run();
  await warm();const after=db.prepare('SELECT * FROM background_runs WHERE id=?').get(run);assert.equal(db.prepare('SELECT COUNT(*) n FROM background_runs').get().n,1);assert.equal(after.max_invocations,before.max_invocations);assert.equal(after.invocations,before.invocations+5);assert.equal(after.status,'completed');assert.equal(after.error,'Legacy reconstruction failure');assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,2);assert.equal((await factory()).proposals[0].enrichment.status,'ready');assert.deepEqual(db.prepare('SELECT * FROM episode_reconstructions WHERE id=?').get(id),failed);assert.equal(db.prepare("SELECT value FROM sync_settings WHERE key='auto_summary_error'").get().value,'');
 });
+test('selection and matching do not reload their just-read inputs before inference',async t=>{
+ history();await scanSessions();const db=getDb(),episodes=require('../dist/factory/episode-store'),read=episodes.readLearningParents,checks=[];
+ t.mock.method(episodes,'readLearningParents',async(...args)=>{
+  const running=db.prepare("SELECT json_extract(source_dependencies_json,'$.phase') phase FROM process_extractions WHERE kind='comparison' AND status='running'").get();
+  const task=running?.phase==='select'?'select_workflow_candidates':'compare_workflow_identity';
+  if(running&&!calls().some(call=>call.task===task))checks.push(running.phase);
+  return read(...args);
+ });
+ await warm();assert.deepEqual(checks,[],'inputs must not be reloaded between the initial read and starting inference');
+ assert.equal((await factory()).proposals[0].enrichment.status,'ready');
+ assert.equal(db.prepare('SELECT invocations FROM background_runs').get().invocations,calls().length);
+});
 test('normal background tick saves process records with summaries and detects a Factory proposal without a sync or page visit',async()=>{
  history();await scanSessions();
  const worker=createAutoIndexer({enabled:()=>true,idle:()=>true,now:Date.now,scan:scanSessions,stamp:()=>new Map(),baseline:()=>new Map(),prepare:async()=>assert.fail('No new indexing is needed'),completed:()=>{},prepareSummaries:warmSummaryCache});
  await worker.tick();await worker.stop();
  const db=getDb(),run=db.prepare('SELECT * FROM background_runs ORDER BY id DESC LIMIT 1').get();assert.equal(run.status,'completed');
- assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model===(['enrich_workflow','reconstruct_task'].includes(c.task)?'openai/gpt-6-astra':'openai/gpt-6-luna')));assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
+ assert.equal(run.invocations,calls().length);assert.ok(calls().every(c=>c.model===(['enrich_workflow','reconstruct_task','select_workflow_candidates','compare_workflow_identity'].includes(c.task)?'openai/gpt-6-astra':'openai/gpt-6-luna')));assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
  const chunks=calls().filter(c=>c.task==='summarize'&&c.stage==='chunk');assert.equal(chunks.length,2);
  assert.ok(chunks.every(c=>c.system.includes('process property alongside observations')));
  assert.equal(db.prepare("SELECT COUNT(*) n FROM process_extractions WHERE kind='summary' AND status='completed'").get().n,2);
  assert.equal(calls().filter(c=>c.task==='reconstruct_task').length,2);
  assert.ok(JSON.parse(run.metrics_json).filter(m=>m.task==='reconstruct_task').every(m=>m.accounting.complete&&m.model===run.final_model));
  assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').length,1);assert.equal(calls().filter(c=>c.task==='compare_workflow_identity').length,1);
+ const {preparationUsage}=require('../dist/sync/usage');
+ for(const operation of ['reconstruct_task','select_workflow_candidates','compare_workflow_identity','enrich_workflow']){const usage=preparationUsage(db,{model:run.final_model,operation},Date.now()+1000);assert.equal(usage.totals.requests,calls().filter(c=>c.task===operation).length);assert.ok(usage.totals.cost.usd>0);assert.equal(usage.totals.cost.complete,true);}
+ assert.equal(preparationUsage(db,{model:run.summary_model,operation:'compare_workflow_identity'},Date.now()+1000).totals.requests,0);
  assert.equal(pendingWorkflows(),false);noSync();
  const count=calls().length;const page=await factory();assert.equal(page.learning,'enabled');assert.equal(page.proposals.length,1);assert.equal(page.proposals[0].decision.sameWorkflow,true);assert.equal(page.proposals[0].enrichment.status,'ready');assert.equal(calls().length,count);
  for(const row of db.prepare("SELECT source_dependencies_json FROM process_extractions WHERE kind='summary'").all()){assert.ok(row.source_dependencies_json.includes('source_pointer'));assert.doesNotMatch(row.source_dependencies_json,/"text":/);}
  await warm();assert.equal(calls().length,count,'unchanged ticks do not repeat paid work');
+});
+test('changing the workflow model does not automatically replay a paid task failure; explicit retries retain both attempts',async()=>{
+ process.env.DRAKEN_PI_FINAL_MODEL='openai/gpt-6-luna';history(3);await scanSessions();controls({failTaskCalls:{select_workflow_candidates:[1]}});await warm();
+ const db=getDb(),failure=db.prepare("SELECT * FROM preparation_errors WHERE scope='workflow-task'").get(),receipt=db.prepare("SELECT * FROM process_extractions WHERE kind='comparison' AND status='failed'").get(),before=calls().length;
+ process.env.DRAKEN_PI_FINAL_MODEL='openai/gpt-6-astra';assert.equal(pendingWorkflows(),false);await warm();assert.equal(calls().length,before);assert.deepEqual(db.prepare('SELECT * FROM preparation_errors WHERE id=?').get(failure.id),failure);
+ require('../dist/sync/preparation-errors').retryPreparationErrors();assert.equal(pendingWorkflows(),true);
+ const next=calls().filter(c=>c.task==='select_workflow_candidates').length+1;controls({failTaskCalls:{select_workflow_candidates:[next]}});await warm();
+ assert.equal(calls().filter(c=>c.task==='select_workflow_candidates').at(-1).model,'openai/gpt-6-astra');assert.equal(db.prepare('SELECT retry_state FROM preparation_errors WHERE id=?').get(failure.id).retry_state,2);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM preparation_errors WHERE scope='workflow-task' AND retry_state=0").get().n,1);assert.deepEqual(db.prepare('SELECT * FROM process_extractions WHERE id=?').get(receipt.id),receipt);
+ assert.equal(db.prepare('SELECT SUM(invocations) n FROM background_runs').get().n,calls().length);
+});
+test('workflow preparation follows the configured final model rather than a hardcoded provider',async()=>{
+ process.env.DRAKEN_PI_FINAL_MODEL='test/another-final';history();await scanSessions();await warm();
+ for(const call of calls())assert.equal(call.model,call.task==='summarize'?'openai/gpt-6-luna':'test/another-final');
+ assert.equal(getDb().prepare('SELECT invocations FROM background_runs').get().invocations,calls().length);assert.equal(pendingWorkflows(),false);
+});
+test('a revised example pair reuses its saved workflow without replacing receipts, enrichment or spending on another enrichment',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),page=await factory(),proposal=page.proposals[0];
+ const original=db.prepare('SELECT * FROM process_extractions WHERE id=?').get(proposal.id),enrichment=db.prepare('SELECT * FROM workflow_enrichments').get();
+ const current=JSON.parse(original.source_dependencies_json).parents[0];
+ db.prepare('INSERT INTO episode_revisions(episode_id,revision,reconstruction_id,assembly_index) SELECT episode_id,revision+1,reconstruction_id,assembly_index FROM episode_revisions WHERE episode_id=? AND revision=?').run(current.episode,current.revision);
+ db.prepare("UPDATE work_episodes SET revision=revision+1,learning_status='pending' WHERE id=?").run(current.episode);
+ controls({workflowAssessment:{...proposal.decision.assessment,reuse:proposal.id}});const before=calls().length;await warm();
+ const match=calls().slice(before).find(c=>c.task==='compare_workflow_identity');assert.ok(match.saved_workflows.some(c=>c.id===proposal.id));
+ const reused=db.prepare("SELECT * FROM process_extractions WHERE json_extract(output_json,'$.assessment.reuse')=?").get(proposal.id);assert.equal(reused.status,'completed');assert.equal(JSON.parse(reused.source_dependencies_json).parents[0].revision,current.revision+1);
+ assert.equal((await factory()).proposals.length,1);assert.equal((await factory()).proposals[0].id,proposal.id);assert.equal(calls().filter(c=>c.task==='enrich_workflow').length,1);
+ assert.deepEqual(db.prepare('SELECT * FROM workflow_enrichments').get(),enrichment);assert.deepEqual(db.prepare('SELECT * FROM process_extractions WHERE id=?').get(proposal.id),original);
+ assert.equal(db.prepare('SELECT SUM(invocations) n FROM background_runs').get().n,calls().length);
+ require('../dist/db/process-schema').initProcessSchema(db);assert.equal((await factory()).proposals.length,1,'startup backfill does not promote reuse receipts');
+ const count=calls().length;await warm();assert.equal(calls().length,count);
+});
+test('a reused definition changing during inference prevents admission',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0];
+ controls({workflowAssessment:{...proposal.decision.assessment,reuse:proposal.id},taskDelays:{compare_workflow_identity:500}});history(3);await scanSessions();const done=warm();
+ await waitFor(()=>calls().filter(c=>c.task==='compare_workflow_identity').length===2);
+ const display=JSON.parse(db.prepare('SELECT display_json FROM workflow_discoveries WHERE id=?').get(proposal.id).display_json);display.decision.assessment.workflow.purpose='Changed endpoint';db.prepare('UPDATE workflow_discoveries SET display_json=? WHERE id=?').run(JSON.stringify(display),proposal.id);
+ await done;const failed=db.prepare("SELECT output_json FROM process_extractions WHERE kind='comparison' AND status='failed'").get();assert.match(failed.output_json,/Saved workflow definitions changed/);assert.equal((await factory()).proposals.length,1);
+});
+test('0.15.2 comparison and enrichment recipes remain usable without paid regeneration',async()=>{
+ history();await scanSessions();await warm();const db=getDb(),proposal=(await factory()).proposals[0];
+ db.prepare('UPDATE process_extractions SET recipe_version=? WHERE id=?').run('a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9',proposal.id);
+ db.prepare('UPDATE workflow_enrichments SET recipe_version=?').run('d22b1e41000f840fc718758f6fca803e9acbb1fe821400b64d07b4b5c410e22d');
+ const count=calls().length;const {readDiscovery}=require('../dist/factory/discovery');const discovery=await readDiscovery(proposal.id,controller.signal);
+ assert.equal(discovery.id,proposal.id);await prepareWorkflowEnrichment(proposal.id,{requestId:'42345678-1234-4234-8234-123456789abc',retry:false},controller.signal);assert.equal(calls().length,count);assert.equal((await factory()).proposals[0].enrichment.status,'ready');
 });
 test('explicit enrichment retries retain failed paid output and do not reset the background learning error',async()=>{
  history();await scanSessions();await warm();const db=getDb(),id=(await factory()).proposals[0].id;db.prepare('DELETE FROM workflow_enrichments').run();

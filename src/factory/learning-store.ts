@@ -2,12 +2,22 @@ import { getDb } from '../db/schema';
 import { defaultModels } from '../sync/models';
 import { preparationOperationFailed } from '../sync/preparation-errors';
 import { digest } from '../sync/normalize';
-import { CONTRACT_MATCH_PROMPT, decideContractMatch } from '../workflow-learning';
+import { CONTRACT_MATCH_PROMPT, decideContractMatch, validateWorkflow, type WorkflowCandidate } from '../workflow-learning';
 import { LEARNING_FORMAT, COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, type LearningRow } from './process-store';
 import { readLearningParents, independentTasks, type LearningParent } from './episode-store';
 
 export { LEARNING_FORMAT, COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, readProcessParent, saveSummaryProcess } from './process-store';
 export type { LearningRow } from './process-store';
+
+export function savedWorkflowCandidates(location: string, id: string | null = null): WorkflowCandidate[] {
+  const rows = getDb().prepare(`SELECT id,display_json FROM active_workflow_discoveries
+    WHERE json_extract(display_json,'$.location.key')=? AND (? IS NULL OR id=?) ORDER BY cursor DESC LIMIT 24`)
+    .all(location, id, id) as { id: string; display_json: string }[];
+  return rows.map(row => {
+    const display = JSON.parse(row.display_json);
+    return { id: row.id, workflow: validateWorkflow(display.task?.workflow || display.decision?.assessment.workflow) };
+  });
+}
 
 export async function readWorkflowComparison(row: LearningRow, signal: AbortSignal) {
   const deps = JSON.parse(row.source_dependencies_json);
@@ -19,10 +29,19 @@ export async function readWorkflowComparison(row: LearningRow, signal: AbortSign
   if (location.kind === 'unavailable' || loaded[deps.pair[1]].location.key !== location.key) throw Error('Workflow records belong to different or unavailable locations');
   if (deps.location && (JSON.stringify(deps.location) !== JSON.stringify(location) || loaded.some(parent => parent.location.key !== location.key))) throw Error('Workflow candidate locations changed');
   const evidence = deps.pair.map((i: number) => loaded[i].input);
-  const payload = workflowComparisonPayload(evidence);
-  if (learningInputKey(deps, payload, row.model) !== row.input_key || row.recipe_version !== digest(CONTRACT_MATCH_PROMPT)) throw Error('Workflow comparison input changed');
-  const decision = decideContractMatch(JSON.parse(row.output_json).assessment, evidence);
+  const saved: WorkflowCandidate[] = deps.savedWorkflows || [];
+  const payload = workflowComparisonPayload(evidence, saved);
+  // 0.15.2 comparison receipts remain verifiable after the prompt changes.
+  const supportedRecipes = [digest(CONTRACT_MATCH_PROMPT), 'a578429d87caaf03055f9e248f1f07212e44e355c1c0237031f8e868cb0f59d9'];
+  if (learningInputKey(deps, payload, row.model) !== row.input_key || !supportedRecipes.includes(row.recipe_version)) throw Error('Workflow comparison input changed');
+  const decision = decideContractMatch(JSON.parse(row.output_json).assessment, evidence, saved);
   return { decision, evidence, location };
+}
+export function workflowTaskFailures(episode: string, revision: number) {
+  return (getDb().prepare(`SELECT operation_key,retry_state FROM preparation_errors WHERE scope='workflow-task' AND entity_id=?
+    AND id IN (SELECT MAX(id) FROM preparation_errors WHERE scope='workflow-task' GROUP BY operation_key)`)
+    .all(episode) as { operation_key: string; retry_state: number }[])
+    .filter(row => row.retry_state !== 2 && row.operation_key.endsWith(`:${episode}:${revision}`));
 }
 export function pendingWorkflows(): boolean {
   const models = defaultModels();
@@ -32,5 +51,5 @@ export function pendingWorkflows(): boolean {
     AND json_extract(p.source_dependencies_json,'$.format')=? GROUP BY e.id`).all(LEARNING_FORMAT) as { id: string; revision: number; assembly: string; extraction_id: string; fragment_key: string }[];
   return rows.some(row => row.assembly === 'fragment'
     ? !preparationOperationFailed('reconstruction', `${models.final}:${row.extraction_id}:${row.fragment_key}`)
-    : !preparationOperationFailed('workflow-task', `${models.summary}:${row.id}:${row.revision}`));
+    : !workflowTaskFailures(row.id, row.revision).some(failure => failure.retry_state === 0));
 }

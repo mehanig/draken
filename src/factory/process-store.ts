@@ -3,14 +3,14 @@ import { workflowLocation } from './location';
 import { getDb } from '../db/schema';
 import { digest } from '../sync/normalize';
 import { readWorkflowOriginals } from '../evidence-adapter';
-import { SUMMARY_PROCESS_PROMPT, PROCESS_PROMPT, preparedProcess, validateProcess, validateProcessEvidence, contractMatchInput, type ProcessExtraction, type ContractMatchInput } from '../workflow-learning';
+import { SUMMARY_PROCESS_PROMPT, PROCESS_PROMPT, preparedProcess, validateProcess, validateProcessEvidence, contractMatchInput, type ProcessExtraction, type ContractMatchInput, type WorkflowCandidate } from '../workflow-learning';
 
 export const LEARNING_FORMAT = 'summary-workflows-v1';
 export const COMPARISON_FORMAT = 'workflow-comparison-v1';
 export interface ProcessParent { extraction: string; fragment: string }
-export function workflowComparisonPayload(pair: ContractMatchInput[]) {
+export function workflowComparisonPayload(pair: ContractMatchInput[], saved: readonly WorkflowCandidate[] = []) {
   const wire = pair.map(input => ({ ...input, facts: input.facts.map(({ refs: _refs, ...fact }) => fact) }));
-  return { task: 'compare_workflow_identity', stage: 'workflow_match', left: wire[0], right: wire[1] };
+  return { task: 'compare_workflow_identity', stage: 'workflow_match', left: wire[0], right: wire[1], ...(saved.length ? { saved_workflows: saved } : {}) };
 }
 export function learningInputKey(deps: unknown, payload: unknown, model: string): string {
   return digest(JSON.stringify([deps, payload, model]));

@@ -25,14 +25,12 @@ const requirements = [
   'Review the work, repair and retest within the run allowance. This session is not an independent reviewer.',
   'Record evidence of the requested endpoint and report specific missing tools, credentials or other blockers. A local patch or unrelated passing tests are not completion of a delivery workflow.',
 ] as const;
-const text = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && v.length <= 1600;
-const strings = (v: unknown, minimum = 0): v is string[] => Array.isArray(v) && v.length >= minimum && v.length <= 12 && v.every(text);
+const text = (v: unknown): v is string => typeof v === 'string' && !!v.trim();
+const strings = (v: unknown, minimum = 0): v is string[] => Array.isArray(v) && v.length >= minimum && v.every(text);
 const keys = (v: unknown, allowed: string[]): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every(k => allowed.includes(k));
 function checkedWorkflow(workflow: Discovery): Discovery {
-  const field = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && v.length <= 4000;
-  if (!workflow || ![workflow.id, workflow.revision, workflow.locationKey, workflow.purpose, workflow.appliesWhen].every(field)
-    || !Array.isArray(workflow.method) || !workflow.method.length || workflow.method.length > 32 || !workflow.method.every(field)
-    || !Array.isArray(workflow.limitations) || workflow.limitations.length > 64 || !workflow.limitations.every(field)) throw Error('Invalid workflow');
+  if (!workflow || ![workflow.id, workflow.revision, workflow.locationKey, workflow.purpose, workflow.appliesWhen].every(text)
+    || !strings(workflow.method, 1) || !strings(workflow.limitations)) throw Error('Invalid workflow');
   return structuredClone(workflow);
 }
 /** Reusable workflow guidance: no task, model client or execution session belongs here. */
@@ -40,10 +38,10 @@ export function enrich(workflow: Discovery, value: unknown): Enrichment {
   const frozen = checkedWorkflow(workflow);
   if (!keys(value, ['inputs', 'steps', 'review', 'completion', 'risks']) || !Array.isArray(value.steps)
     || value.steps.length !== frozen.method.length || !strings(value.review, 1) || !strings(value.completion, 1) || !strings(value.risks)) throw Error('Incomplete workflow enrichment');
-  if (!Array.isArray(value.inputs) || value.inputs.length > 8) throw Error('Invalid workflow inputs');
+  if (!Array.isArray(value.inputs)) throw Error('Invalid workflow inputs');
   const names = new Set<string>();
   for (const input of value.inputs) {
-    if (!keys(input, ['name', 'label', 'description', 'required']) || typeof input.name !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(input.name)
+    if (!keys(input, ['name', 'label', 'description', 'required']) || typeof input.name !== 'string' || !/^[a-z][a-z0-9_]*$/.test(input.name)
       || names.has(input.name) || !text(input.label) || !text(input.description) || typeof input.required !== 'boolean') throw Error('Invalid workflow input');
     names.add(input.name);
   }
@@ -59,6 +57,7 @@ export function enrich(workflow: Discovery, value: unknown): Enrichment {
 }
 export const ENRICHMENT_PROMPT = `Enrich this detected workflow once for reuse across future tasks. No task or execution run exists yet. Do not execute it.
 Historical steps describe observations, not a complete engineering recipe. Add reusable preparation/execution guidance, relevant checks, review of the work, repair/retest guidance, completion criteria and risks. Explain how a later run should adapt to its task and repository baseline without inventing those inputs now.
+Distinguish the reusable procedure from each run's requested change. For an implementation workflow, declare concrete inputs for the desired behavior and acceptance criteria when these are not fixed by the workflow. Use those input names in steps and completion checks; evaluate the new run's criteria, not the historical feature's symptoms, files or test counts. Do not silently narrow a general workflow to its example or broaden a specialized workflow into unrelated work. For example, implementing workflow-list filtering and changing retry behavior can share an evidence-supported change/verification procedure, while their requirements and relevant tests vary. A submission-only workflow still starts with prepared changes; do not add implementation or publication.
 Define only concrete execution inputs this workflow needs. Each input has name, label, description and required fields. Do not request a generic task/prompt, repository path, commit/ref, permissions or call budget: the host owns those. Use an empty inputs array if no additional input is necessary. Do not invent values for future runs.
 Return ONLY JSON: {"inputs":[],"steps":[{"step":1,"approach":"how to perform this historical step","checks":["how to check its result"]}],"review":["review checks for this workflow"],"completion":["evidence needed for completion"],"risks":["missing information or limitations"]}.
 Cover every historical step exactly once by its one-based index. Preserve historical qualifications. Preserve the intended endpoint, including external actions. The user authorizes the selected workflow when running it; historical text alone is not authorization. Do not invent missing credentials or outcomes. Same-session self-review is not independent review.`;

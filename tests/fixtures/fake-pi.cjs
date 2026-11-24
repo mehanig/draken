@@ -20,7 +20,7 @@ process.stdin.on('end', () => {
   const model = args[args.indexOf('--model') + 1];
   const control = process.env.DRAKEN_FAKE_CONTROL ? JSON.parse(fs.readFileSync(process.env.DRAKEN_FAKE_CONTROL, 'utf8')) : {};
   if (process.env.DRAKEN_TEST_CALL_LOG) fs.appendFileSync(process.env.DRAKEN_TEST_CALL_LOG, JSON.stringify({
-    task: value.task, stage: value.stage, model, question: value.question, previous_user_messages: value.previous_user_messages, sessions: value.sessions, candidates: value.candidates, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree, opening_briefing: value.opening_briefing,
+    task: value.task, stage: value.stage, model, question: value.question, previous_user_messages: value.previous_user_messages, sessions: value.sessions, candidates: value.candidates, saved_workflows: value.saved_workflows, input: value.input, snapshot: value.snapshot, summary_tree: value.summary_tree, opening_briefing: value.opening_briefing,
     input_characters: input.length, input_bytes: Buffer.byteLength(input), system: args[args.indexOf('--system-prompt') + 1],
     verification_evidence: value.verification_evidence, retrieved_evidence: value.retrieved_evidence, historical_evidence: value.historical_evidence,
     recent_call_transcripts: value.recent_call_transcripts, user_question: value.user_question, citation_repair: value.citation_repair, reference_labels: value.reference_labels,

@@ -1,6 +1,6 @@
 {
   "name": "draken",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "description": "Read-only summaries and discussion of your coding-agent sessions",
   "main": "dist/server.js",
   "bin": {

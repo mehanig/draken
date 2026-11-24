@@ -12,8 +12,9 @@ const recipe = digest(ENRICHMENT_PROMPT);
 type PreparationOwner = { table: 'sync_runs' | 'background_runs'; id: number };
 interface Row { id: number; status: string; output_json: string | null; run_id: number; run_table: PreparationOwner['table'] }
 function latest(workflow: Discovery): Row | undefined {
-  return getDb().prepare('SELECT id,status,output_json,run_id,run_table FROM workflow_enrichments WHERE workflow_id=? AND revision=? AND policy_version=? AND recipe_version=? ORDER BY id DESC LIMIT 1')
-    .get(workflow.id, workflow.revision, ENRICHMENT_POLICY_VERSION, recipe) as Row | undefined;
+  // Keep 0.15.2 guidance usable; a prompt change alone must not spend calls regenerating saved workflows.
+  return getDb().prepare('SELECT id,status,output_json,run_id,run_table FROM workflow_enrichments WHERE workflow_id=? AND revision=? AND policy_version=? AND recipe_version IN (?,?) ORDER BY id DESC LIMIT 1')
+    .get(workflow.id, workflow.revision, ENRICHMENT_POLICY_VERSION, recipe, 'd22b1e41000f840fc718758f6fca803e9acbb1fe821400b64d07b4b5c410e22d') as Row | undefined;
 }
 /** Caller must supply a freshly source-verified discovery. Reading never starts inference. */
 export function savedEnrichment(workflow: Discovery): SavedEnrichment {

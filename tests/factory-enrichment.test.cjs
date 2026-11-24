@@ -25,7 +25,32 @@ test('missing, changed-source or changed-policy enrichment cannot start a sessio
  for(const key of ['policy','workflow','requirements','tools','publication'])assert.throws(()=>enrich(workflow,{...guidance(),[key]:true}),/enrichment/);
 });
 test('enrichment order is stable and invalid prose is not silently repaired',()=>{
- const g=guidance();g.steps.reverse();assert.deepEqual(enrich(workflow,g).guidance.steps.map(s=>s.step),[1,2]);g.review=['x'.repeat(1601)];assert.throws(()=>enrich(workflow,g));
+ const g=guidance();g.steps.reverse();assert.deepEqual(enrich(workflow,g).guidance.steps.map(s=>s.step),[1,2]);
+ for(const invalid of ['', '   ', 123, null]){g.review=[invalid];assert.throws(()=>enrich(workflow,g));}
+});
+test('long input names survive preparation, saved JSON, request and session planning',async()=>{
+ const name='architecture_and_data_constraints',g=guidance();
+ g.inputs=[{name,label:'Architecture and data constraints',description:'Preserve pointer-only storage',required:true}];
+ let calls=0;
+ const prepared=await proposeEnrichment(workflow,{assertCurrent:async()=>{},ask:async()=>{calls++;return JSON.stringify(g);}},new AbortController().signal);
+ const saved=JSON.parse(JSON.stringify(prepared)),request=workflowRequest(saved,{[name]:'Keep session content in original files'});
+ assert.equal(calls,1);assert.deepEqual(saved.guidance,g);
+ assert.equal(request.inputs[name],'Keep session content in original files');
+ assert.deepEqual(sessionPlan(workflow,request.task,'repo',saved).enrichment,saved);
+});
+for(const [name,change] of [
+ ['input name',(w,g)=>{g.inputs=[{name:'input_'+ 'x'.repeat(5000),label:'Input',description:'Description',required:true}];}],
+ ['input count',(w,g)=>{g.inputs=Array.from({length:9},(_,i)=>({name:`input_${i}`,label:'Input',description:'Description',required:false}));}],
+ ['guidance prose',(w,g)=>{const text='x'.repeat(5000);g.inputs=[{name:'input',label:text,description:text,required:false}];g.steps[0].approach=text;g.steps[0].checks=[text];g.review=[text];g.completion=[text];g.risks=[text];}],
+ ['guidance lists',(w,g)=>{const list=Array.from({length:13},(_,i)=>`Check ${i}`);g.steps[0].checks=list;g.review=list;g.completion=list;g.risks=list;}],
+ ['workflow prose',(w)=>{w.purpose='x'.repeat(4001);w.appliesWhen=w.purpose;w.method[0]=w.purpose;w.limitations=[w.purpose];}],
+ ['method steps',(w,g)=>{w.method=Array.from({length:33},(_,i)=>`Step ${i}`);g.steps=w.method.map((approach,i)=>({step:i+1,approach,checks:['Check result']}));}],
+ ['limitations',(w)=>{w.limitations=Array.from({length:65},(_,i)=>`Limitation ${i}`);}],
+])test(`enrichment does not impose an arbitrary size limit on ${name}`,()=>{
+ const w=structuredClone(workflow),g=guidance();change(w,g);
+ const saved=JSON.parse(JSON.stringify(enrich(w,g)));
+ assert.deepEqual(saved.workflow,w);assert.deepEqual(saved.guidance,g);
+ assert.deepEqual(sessionPlan(w,'Execute','repo',saved).enrichment,saved);
 });
 test('one accounted preparation callback with no task and source checks before/after; failed output is not retried',async()=>{
  let calls=0,checks=0;const host={assertCurrent:async()=>{checks++;},ask:async(payload,prompt)=>{calls++;assert.equal(prompt,ENRICHMENT_PROMPT);assert.deepEqual(payload.workflow,workflow);assert.equal(payload.task,undefined);payload.workflow.purpose='tampered';return JSON.stringify(guidance());}};

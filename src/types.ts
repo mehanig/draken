@@ -58,6 +58,9 @@ export interface PreparationUsageTotals {
 }
 export interface PreparationUsage {
   from: string; to: string; range: UsageRange; bucket: UsageBucket;
+  filters: { model: string | null; operation: string | null };
+  models: string[]; operations: string[];
+  /** Run-level counts remain unfiltered; filters apply to recorded requests and costs. */
   active_attempts: number; totals: PreparationUsageTotals;
   buckets: (PreparationUsageTotals & { from: string; to: string })[];
 }
