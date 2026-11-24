@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
-function usage(range = '7d', bucket = '1h', usd: number | null = 1.25) {
+function usage(range = '7d', bucket = '1h', usd: number | null = 1.25, model: string | null = null, operation: string | null = null) {
   const totals = { cost: { usd, complete: false }, completed_batches: 3, entries: 192, requests: 5, incomplete_pricing: 1, approximate_timing: 2, failed_attempts: 1 };
-  return { range, bucket, from: '2026-01-14T12:30:00.000Z', to: '2026-01-15T12:30:00.000Z', active_attempts: 1, totals,
+  return { range, bucket, filters: { model, operation }, models: ['openai/gpt-6-astra', 'openai/gpt-6-luna', 'unknown'], operations: ['summarize', 'compare_workflow_identity', 'enrich_workflow', 'unknown'], from: '2026-01-14T12:30:00.000Z', to: '2026-01-15T12:30:00.000Z', active_attempts: 1, totals,
     buckets: [{ ...totals, to: '2026-01-15T12:00:00.000Z', from: '2026-01-14T12:30:00.000Z', requests: 4, incomplete_pricing: 0, cost: { usd, complete: true } },
       { ...totals, from: '2026-01-15T12:00:00.000Z', to: '2026-01-15T12:30:00.000Z', cost: { usd: null, complete: false }, completed_batches: 0, entries: 0, requests: 1 }] };
 }
@@ -69,6 +69,49 @@ for (const usd of [0, 0.0000002, 0.000001, 1000000, 1e12, null]) test(`Y-axis st
   expect(await panel.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
 });
 
+test('model and operation filters combine, preserve unknown costs, handle empty results and remain read-only on mobile', async ({ page }) => {
+  let mutations = 0; const queries: URLSearchParams[] = [];
+  page.on('request', r => { if (r.url().includes('/api/') && !['GET','HEAD'].includes(r.method())) mutations++; });
+  await page.route('**/api/settings/preparation-usage?*', route => {
+    const q = new URL(route.request().url()).searchParams; queries.push(q);
+    const model = q.get('model'), operation = q.get('operation');
+    const data = usage(q.get('range')!, q.get('bucket')!, model === 'unknown' ? null : operation ? .25 : model ? .8 : 1.25, model, operation);
+    if (model === 'openai/gpt-6-luna' && operation === 'compare_workflow_identity') { data.totals.requests = 0; data.totals.cost = { usd: 0, complete: true }; data.totals.incomplete_pricing = 0; }
+    return route.fulfill({ json: data });
+  });
+  await page.goto('/settings'); const panel = page.getByRole('region', { name: 'Preparation usage', exact: true });
+  await expect(panel.locator('.usage-totals')).toContainText('$1.25');
+  const chart = panel.getByRole('combobox', { name: 'Chart', exact: true }), model = panel.getByRole('combobox', { name: 'Model', exact: true }), operation = panel.getByRole('combobox', { name: 'Operation', exact: true });
+  await chart.selectOption('batches');
+  await model.selectOption('openai/gpt-6-astra'); await expect(panel.locator('.usage-totals')).toContainText('$0.80');
+  await expect(chart).toHaveValue('cost');
+  await expect(chart.locator('option[value="batches"]')).toHaveAttribute('disabled', '');
+  await operation.selectOption('compare_workflow_identity'); await expect(panel.locator('.usage-totals')).toContainText('$0.25');
+  expect(queries.at(-1)?.get('model')).toBe('openai/gpt-6-astra'); expect(queries.at(-1)?.get('operation')).toBe('compare_workflow_identity');
+  await expect(panel).toContainText('Briefings prepared (all preparation)'); await expect(panel).toContainText('Costs and requests match the selected model and operation');
+  await panel.getByText('Bucket details', { exact: true }).click(); await expect(panel.getByRole('columnheader', { name: 'Briefings', exact: true })).toHaveCount(0);
+  for (const width of [320, 1440]) { await page.setViewportSize({ width, height: 1000 }); expect(await panel.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true); }
+  await model.selectOption('openai/gpt-6-luna'); await expect(panel).toContainText('No model requests match these filters'); await expect(panel.getByRole('img')).toHaveCount(0);
+  await model.selectOption('unknown'); await operation.selectOption('unknown'); await expect(panel).toContainText('No priced amounts are available');
+  await model.selectOption(''); await operation.selectOption(''); await expect(panel.locator('.usage-totals')).toContainText('$1.25');
+  expect(queries.at(-1)?.has('model')).toBe(false); expect(queries.at(-1)?.has('operation')).toBe(false); expect(mutations).toBe(0);
+  await expect(chart.locator('option[value="batches"]')).not.toHaveAttribute('disabled', '');
+});
+test('changing a model filter ignores a late response and keeps filter choices on a failed refresh', async ({ page }) => {
+  let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; }); let waiting = false, fail = false;
+  await page.route('**/api/settings/preparation-usage?*', async route => {
+    const q = new URL(route.request().url()).searchParams, model = q.get('model'), operation = q.get('operation');
+    if (model === 'openai/gpt-6-astra') { waiting = true; await held; await route.fulfill({ json: usage('7d','1h',999,model,operation) }).catch(() => {}); return; }
+    if (fail) { await route.fulfill({ status:503, json:{error:'Synthetic filter read failure'} }); return; }
+    await route.fulfill({ json: usage(q.get('range')!,q.get('bucket')!,2.5,model,operation) });
+  });
+  await page.goto('/settings'); const panel = page.getByRole('region', { name:'Preparation usage', exact:true }); await expect(panel.locator('.usage-totals')).toContainText('$2.50');
+  const model = panel.getByRole('combobox', { name:'Model', exact:true }), operation = panel.getByRole('combobox', { name:'Operation', exact:true });
+  await model.selectOption('openai/gpt-6-astra'); await expect.poll(() => waiting).toBe(true);
+  await model.selectOption('openai/gpt-6-luna'); await expect(panel.locator('.usage-totals')).toContainText('$2.50'); release(); await page.waitForTimeout(100); await expect(panel).not.toContainText('$999');
+  fail = true; await operation.selectOption('enrich_workflow'); await expect(panel.getByRole('alert')).toContainText('Usage unavailable'); await expect(panel.locator('.usage-totals')).toHaveCount(0); await expect(model).toHaveValue('openai/gpt-6-luna');
+  fail = false; await operation.selectOption('summarize'); await expect(panel.locator('.usage-totals')).toContainText('$2.50');
+});
 test('changed range ignores an old response and a failed refresh never presents stale costs as current', async ({ page }) => {
   let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; }); let first = true, fail = false;
   await page.route('**/api/settings/preparation-usage?*', async route => {

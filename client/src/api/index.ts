@@ -31,7 +31,12 @@ export const saveFactoryExecutionSettings = (maxCalls: number) => request<void>(
 export const runWorkspace = (ref: string, requestId: string, workflow: { workflowId: string; inputs: Record<string, string> }) => request<WorkspaceRun>('/factory/workspaces', 'POST', { ref, requestId, ...workflow });
 export const cancelWorkspace = (id: string) => request<void>(`/factory/workspaces/${encodeURIComponent(id)}/cancel`, 'POST');
 export const setup = (refresh = false) => request<{ pi: PiSetupStatus; data_dir: string }>(`/setup${refresh ? '?refresh=1' : ''}`);
-export const preparationUsage = (range: UsageRange, bucket: UsageBucket, signal?: AbortSignal) => request<PreparationUsage>(`/settings/preparation-usage?range=${range}&bucket=${bucket}`, 'GET', undefined, signal);
+export const preparationUsage = (range: UsageRange, bucket: UsageBucket, model: string, operation: string, signal?: AbortSignal) => {
+  const query = new URLSearchParams({ range, bucket });
+  if (model) query.set('model', model);
+  if (operation) query.set('operation', operation);
+  return request<PreparationUsage>(`/settings/preparation-usage?${query}`, 'GET', undefined, signal);
+};
 export const activityWindow = (days?: number | null) => request<ActivityWindowSettings>(`/settings/activity-window${days === undefined ? '' : `?days=${days ?? 'all'}`}`);
 export const setActivityWindow = (days: number | null, confirmation?: string) => request<ActivityWindowSettings>('/settings/activity-window', 'PATCH', { days, confirmation });
 export const autoIndexSettings = () => request<AutoIndexSettings>('/settings/auto-index');

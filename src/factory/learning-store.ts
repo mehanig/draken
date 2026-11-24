@@ -37,6 +37,12 @@ export async function readWorkflowComparison(row: LearningRow, signal: AbortSign
   const decision = decideContractMatch(JSON.parse(row.output_json).assessment, evidence, saved);
   return { decision, evidence, location };
 }
+export function workflowTaskFailures(episode: string, revision: number) {
+  return (getDb().prepare(`SELECT operation_key,retry_state FROM preparation_errors WHERE scope='workflow-task' AND entity_id=?
+    AND id IN (SELECT MAX(id) FROM preparation_errors WHERE scope='workflow-task' GROUP BY operation_key)`)
+    .all(episode) as { operation_key: string; retry_state: number }[])
+    .filter(row => row.retry_state !== 2 && row.operation_key.endsWith(`:${episode}:${revision}`));
+}
 export function pendingWorkflows(): boolean {
   const models = defaultModels();
   const rows = getDb().prepare(`SELECT e.id,e.revision,e.assembly,l.extraction_id,l.fragment_key FROM work_episodes e
@@ -45,5 +51,5 @@ export function pendingWorkflows(): boolean {
     AND json_extract(p.source_dependencies_json,'$.format')=? GROUP BY e.id`).all(LEARNING_FORMAT) as { id: string; revision: number; assembly: string; extraction_id: string; fragment_key: string }[];
   return rows.some(row => row.assembly === 'fragment'
     ? !preparationOperationFailed('reconstruction', `${models.final}:${row.extraction_id}:${row.fragment_key}`)
-    : !preparationOperationFailed('workflow-task', `${models.summary}:${row.id}:${row.revision}`));
+    : !workflowTaskFailures(row.id, row.revision).some(failure => failure.retry_state === 0));
 }

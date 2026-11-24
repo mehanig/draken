@@ -106,6 +106,8 @@ test('usage GETs are metadata-only, strictly bounded and do not scan, infer or c
  session(2);const db=getDb(),before=db.prepare('SELECT total_changes() n').get().n;
  server=createApp().listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const origin=`http://127.0.0.1:${server.address().port}`;
  for(const range of ['6h','1d','7d','14d'])for(const bucket of ['1h','6h','24h']){const response=await fetch(origin+`/api/settings/preparation-usage?range=${range}&bucket=${bucket}`);assert.equal(response.status,200);const data=await response.json();assert.equal(data.totals.requests,0);assert.equal(data.totals.completed_batches,0);}
+ const filtered=await fetch(origin+'/api/settings/preparation-usage?model=openai%2Fgpt-6-astra&operation=compare_workflow_identity');assert.equal(filtered.status,200);const filteredUsage=await filtered.json();assert.deepEqual(filteredUsage.filters,{model:'openai/gpt-6-astra',operation:'compare_workflow_identity'});assert.equal(filteredUsage.totals.requests,0);
+ for(const query of ['model=a&model=b','operation=a&operation=b','model=','operation='])assert.equal((await fetch(origin+'/api/settings/preparation-usage?'+query)).status,400);
  assert.equal((await fetch(origin+'/api/settings/preparation-usage?range=7d&range=1d')).status,400);
  assert.equal((await fetch(origin+'/api/settings/preparation-usage',{headers:{Origin:'https://other.invalid'}})).status,403);
  assert.equal(db.prepare('SELECT total_changes() n').get().n,before);assert.equal(db.prepare('SELECT COUNT(*) n FROM agent_sessions').get().n,0);assert.equal(calls().length,0);assert.equal(store.homeOverview().covered,0);

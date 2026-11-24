@@ -18,9 +18,16 @@ function finish({ priced, ...value }: Counters): PreparationUsageTotals {
  * entries and completed_batches retain successful explicit-sync semantics. */
 export function preparationUsage(db: Database.Database, query: Record<string, unknown>, now = Date.now()): PreparationUsage {
   const range = query.range ?? '7d', bucket = query.bucket ?? '1h';
-  if (Object.keys(query).some(key => !['range', 'bucket'].includes(key)) || typeof range !== 'string' || !Object.hasOwn(ranges, range) || typeof bucket !== 'string' || !Object.hasOwn(widths, bucket)) {
+  if (Object.keys(query).some(key => !['range', 'bucket', 'model', 'operation'].includes(key)) || typeof range !== 'string' || !Object.hasOwn(ranges, range) || typeof bucket !== 'string' || !Object.hasOwn(widths, bucket)) {
     throw new HttpError(400, 'Choose a range of 6h, 1d, 7d or 14d and a bucket of 1h, 6h or 24h');
   }
+  for (const key of ['model', 'operation']) {
+    const value = query[key];
+    if (value !== undefined && (typeof value !== 'string' || !value.trim() || value !== value.trim() || value.length > 200)) throw new HttpError(400, 'Model and operation filters must be single nonempty identifiers of at most 200 characters');
+  }
+  const filters = { model: query.model as string | undefined ?? null, operation: query.operation as string | undefined ?? null };
+  const models = new Set<string>(), operations = new Set<string>();
+  const dimension = (value: unknown) => typeof value === 'string' && value.trim() ? value : 'unknown';
   const selectedRange = range as UsageRange, selectedBucket = bucket as UsageBucket;
   const from = now - ranges[selectedRange] * 3600000, width = widths[selectedBucket] * 3600000;
   const aligned = Math.floor(from / width) * width, totals = empty();
@@ -42,7 +49,10 @@ export function preparationUsage(db: Database.Database, query: Record<string, un
     try { metrics = JSON.parse(run.metrics_json); if (!Array.isArray(metrics) || metrics.some(m => !m || typeof m !== 'object')) throw Error(); }
     catch { throw new HttpError(503, 'Preparation usage metadata could not be read. No totals were estimated from missing records.'); }
     const add = (date: string, count: number, metric?: ModelCallMetric, approximate = false) => {
-      const bin = at(date); if (!bin) return;
+      const bin = at(date); if (!bin || !count) return;
+      const model = dimension(metric?.model), operation = dimension(metric?.task);
+      models.add(model); operations.add(operation);
+      if ((filters.model !== null && filters.model !== model) || (filters.operation !== null && filters.operation !== operation)) return;
       const cost = metric ? recordedCost(metric) : { usd: null, complete: false };
       for (const target of [bin, totals]) {
         target.requests += count;
@@ -73,5 +83,6 @@ export function preparationUsage(db: Database.Database, query: Record<string, un
     const bin = at(run.completed_at); if (bin) for (const target of [bin, totals]) { target.completed_batches++; target.entries += run.total_entries; }
   }
   return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), range: selectedRange, bucket: selectedBucket,
+    filters, models: [...models].sort(), operations: [...operations].sort(),
     active_attempts: active, totals: finish(totals), buckets: bins.map(bin => ({ ...finish(bin), from: bin.from, to: bin.to })) };
 }

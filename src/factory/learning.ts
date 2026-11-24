@@ -4,15 +4,15 @@ import { getDb } from '../db/schema';
 import { preparationOperation, preparationRetryRequested, isPreparationLimit, recordPreparationError } from '../sync/preparation-errors';
 import { digest, cleanText } from '../sync/normalize';
 import { CANDIDATE_PROMPT, candidateSelection, CONTRACT_MATCH_PROMPT, validateContractAssessment, decideContractMatch, sameWorkflowDefinition, type WorkflowCandidate } from '../workflow-learning';
-import { COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, savedWorkflowCandidates } from './learning-store';
+import { COMPARISON_FORMAT, learningInputKey, workflowComparisonPayload, savedWorkflowCandidates, workflowTaskFailures } from './learning-store';
 import { reconstructPendingTasks, readLearningParent, readLearningParents, independentTasks, type EpisodeParent } from './episode-store';
 
 type Ask = (payload: unknown, system: string) => Promise<string>;
 type Episode = EpisodeParent;
 /** Owned by the summarization job: no scheduler, provider client or allowance of its own. */
-export async function learnSummaryWorkflows(run: number, model: string, ask: Ask, signal: AbortSignal, reconstruction = { model, ask }): Promise<void> {
+export async function learnSummaryWorkflows(run: number, model: string, ask: Ask, signal: AbortSignal): Promise<void> {
   const db = getDb();
-  await reconstructPendingTasks(run, reconstruction.model, reconstruction.ask, signal);
+  await reconstructPendingTasks(run, model, ask, signal);
   const pending = db.prepare("SELECT id episode,revision FROM work_episodes WHERE assembly='reconciled' AND superseded_by IS NULL AND learning_status='pending' ORDER BY rowid").all() as Episode[];
   const load = (parents: EpisodeParent[]) => readLearningParents(parents, signal);
   async function invoke<T>(parents: EpisodeParent[], expectedIdentities: string[], locationKey: string, phase: string, pair: number[] | undefined, payload: unknown, prompt: string, validate: (raw: string) => T, saved: readonly WorkflowCandidate[] = []): Promise<T> {
@@ -127,5 +127,12 @@ export async function learnSummaryWorkflows(run: number, model: string, ask: Ask
     signal.throwIfAborted();
     db.prepare("UPDATE work_episodes SET learning_status='completed' WHERE id=?").run(current.episode);
   };
-  for (const current of pending) await preparationOperation(run, 'workflow-task', `${model}:${current.episode}:${current.revision}`, signal, () => learnTask(current), current.episode);
+  for (const current of pending) {
+    signal.throwIfAborted();
+    const failures = workflowTaskFailures(current.episode, current.revision);
+    if (failures.some(failure => failure.retry_state === 0)) continue;
+    await preparationOperation(run, 'workflow-task', `${model}:${current.episode}:${current.revision}`, signal, () => learnTask(current), current.episode);
+    // An explicitly requested retry may use a different model; retain its old failure receipt as handled.
+    for (const failure of failures) db.prepare("UPDATE preparation_errors SET retry_state=2 WHERE scope='workflow-task' AND operation_key=? AND retry_state=1").run(failure.operation_key);
+  }
 }
