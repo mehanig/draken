@@ -38,8 +38,28 @@ A separate real-model evaluation used an isolated database copy and the normal a
 | Reuse of a supplied definition | Correctly returned the supplied ID unchanged; this tested identity mechanics, not whether that definition was general enough |
 | Enrichment of the first result | Produced run inputs, but they still required reconstruction/comparison failure handling; not sufficient feature reuse |
 
-After inspecting these results, the prompt was tightened to distinguish *the product behavior being built* from *the engineering method used to build it*, and to derive the reusable procedure before considering old definitions for reuse. That refinement has **not** received another real-model evaluation. The five-call allowance was not increased or reset. Do not present this change as qualified for rewriting the live workflow list.
+After inspecting these results, the prompt was tightened to distinguish *the product behavior being built* from *the engineering method used to build it*, and to derive the reusable procedure before considering old definitions for reuse.
 
-## Next qualification
+## Authorized two-call follow-up
 
-With an explicitly authorized additional evaluation allowance, rerun the real-history generalization and enrichment cases using the refined prompt. Require a procedure usable for a different requested behavior, with acceptance criteria supplied per run—not simply the old feature rewritten as an input description. Preserve historical facts, meaningful applicability and delivery scope. If that fails, investigate the supplied task representation before adding more prompt wording or another model stage.
+The owner approved two additional accounted calls. The same isolated run 467 was continued with its allowance raised from five to seven, preserving all five previous metrics and responses. No automatic retry or new spending ledger was used.
+
+- Additional calls: **2**, **$0.20606**; complete accounting.
+- Total: **7/7 calls**, **$0.52619**.
+- Receipts: `06-refined-historical-generalization.json`, `07-refined-enrichment.json`, and `followup-result.json` in the same directory.
+
+The real-history generalization now produced:
+
+> Implement and validate a requested Draken change, preserve existing application data, and verify its local deployment.
+
+Its procedure covers inspection, implementation against supplied acceptance criteria, validation, data preservation, local restart/runtime verification and reporting. It explicitly keeps local deployment separate from PR creation or package publication. It returned `reuse:null`, explaining that the two existing definitions incorrectly fixed the historical product behavior. Missing initiating requests, reported results and uncertainty about task continuity remain limitations; this evaluation does not establish historical recurrence or successful execution of a new feature.
+
+Enrichment declared four required inputs: `desired_behavior`, `affected_scope`, `acceptance_criteria`, and `data_preservation_expectations`. Unlike the first attempt, these do not require reconstruction/comparison failure handling.
+
+A subsequent check used the actual generated enrichment to construct two run plans: workflow-list filtering and remembering the selected history view. Both accepted different inputs with identical workflow and enrichment objects. This made **zero model calls** and executed neither task. The receipt is `followup-run-input-check.json`.
+
+## Remaining scope
+
+This establishes improved generalization and usable run inputs for this real saved example on **Astra**, not all nine workflows or actual feature execution. The current background caller still uses the configured summary model for candidate selection and matching (Luna in the local configuration), while reconstruction and enrichment use the final model. The evaluation used the final model. Before deploying, resolve this model-routing difference against the Factory plan, or separately qualify the actual matching model; do not claim this evaluation tested the current automatic matching path.
+
+No live definitions were replaced, no server was restarted, and no PR, merge or release was made. Applying replacements still requires explicit preparation with fresh source checks, preserved old IDs/revisions/receipts, and review of the remaining workflows.
